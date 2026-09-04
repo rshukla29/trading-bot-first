@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    strategy = MovingAverageCrossoverStrategy(fast=settings.fast_ma, slow=settings.slow_ma)
+    strategy = MovingAverageCrossoverStrategy(fast=settings.fast_ma, slow=settings.slow_ma, trend_ma=settings.trend_ma)
     journal = Journal(settings.db_path)
 
     with IBKRClient(settings) as client:

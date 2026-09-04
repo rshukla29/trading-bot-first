@@ -19,11 +19,12 @@ logging.basicConfig(level=logging.WARNING)
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--duration", default="2 Y", help="IBKR historical duration string")
+    parser.add_argument("--duration", default="3 Y", help="IBKR historical duration string")
     parser.add_argument("--equity", type=float, default=100_000.0)
     args = parser.parse_args()
 
-    strategy = MovingAverageCrossoverStrategy(fast=settings.fast_ma, slow=settings.slow_ma)
+    strategy = MovingAverageCrossoverStrategy(fast=settings.fast_ma, slow=settings.slow_ma, trend_ma=settings.trend_ma)
+    warmup = max(settings.slow_ma, settings.trend_ma) + 1
 
     print(f"{'Symbol':<8}{'Trades':>8}{'Win Rate':>10}{'Return':>10}{'MaxDD':>10}")
     with IBKRClient(settings) as client:
@@ -36,7 +37,7 @@ def main() -> None:
                 starting_equity=args.equity,
                 risk_pct=settings.risk_pct_per_trade,
                 stop_loss_pct=settings.stop_loss_pct,
-                warmup=settings.slow_ma + 1,
+                warmup=warmup,
             )
             closed = result.closed_trades
             print(

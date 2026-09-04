@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Strategy
     fast_ma: int = 20
     slow_ma: int = 50
+    trend_ma: int = 200  # long-term regime filter; entries only allowed above this SMA
 
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.
