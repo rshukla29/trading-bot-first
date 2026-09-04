@@ -14,9 +14,14 @@ class Trade:
     entry_date: pd.Timestamp
     entry_price: float
     quantity: int
+    entry_reason: str = ""
     exit_date: pd.Timestamp | None = None
     exit_price: float | None = None
     exit_reason: str | None = None
+
+    @property
+    def entry_source(self) -> str:
+        return "consolidation retest" if "consolidation" in self.entry_reason else "MA crossover"
 
     @property
     def pnl(self) -> float | None:
@@ -109,7 +114,7 @@ def run_backtest(
             if signal.action == "BUY":
                 qty = position_size(equity, signal.price, risk_pct, stop_loss_pct)
                 if qty > 0:
-                    open_trade = Trade(symbol, today, signal.price, qty)
+                    open_trade = Trade(symbol, today, signal.price, qty, entry_reason=signal.reason)
 
         mark_price = float(row["close"])
         unrealized = (mark_price - open_trade.entry_price) * open_trade.quantity if open_trade else 0.0

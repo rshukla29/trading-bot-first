@@ -20,6 +20,24 @@ class Settings(BaseSettings):
     slow_ma: int = 50
     trend_ma: int = 200  # long-term regime filter; entries only allowed above this SMA
 
+    # Entry confirmation filters (set the window/period to 0 to disable one)
+    volume_ma: int = 20
+    volume_fast_ma: int = 5
+    volume_multiplier: float = 1.0
+    breakout_volume_multiplier: float = 1.2  # single-bar spike, used on breakouts only
+    rsi_period: int = 14
+    rsi_overbought: float = 70.0
+    rsi_exit_overbought: float = 80.0
+    vwap_window: int = 20
+    vwap_retest_tolerance: float = 0.015
+
+    # Consolidation-breakout-retest entry pattern (second entry path)
+    consolidation_retest_enabled: bool = True
+    consolidation_window: int = 15
+    consolidation_max_range_pct: float = 0.06
+    consolidation_max_bars_since_breakout: int = 5
+    consolidation_retest_tolerance: float = 0.02
+
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.
     live_trading: bool = False

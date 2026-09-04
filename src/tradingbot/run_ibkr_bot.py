@@ -18,14 +18,14 @@ from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import place_bracket_buy, place_market_sell
 from tradingbot.journal import Journal
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
-from tradingbot.strategy.ma_crossover import MovingAverageCrossoverStrategy
+from tradingbot.strategy.factory import build_strategy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    strategy = MovingAverageCrossoverStrategy(fast=settings.fast_ma, slow=settings.slow_ma, trend_ma=settings.trend_ma)
+    strategy = build_strategy(settings)
     journal = Journal(settings.db_path)
 
     with IBKRClient(settings) as client:
@@ -37,9 +37,16 @@ def main() -> None:
 
         for symbol in settings.symbols:
             try:
-                bars = fetch_daily_bars(client.ib, symbol, duration="1 Y")
+                bars = fetch_daily_bars(client.ib, symbol, duration="2 Y")
             except Exception:
                 logger.exception("Failed to fetch bars for %s, skipping", symbol)
+                continue
+
+            if len(bars) < strategy.min_history:
+                logger.warning(
+                    "%s: only %d bars, strategy needs %d — skipping",
+                    symbol, len(bars), strategy.min_history,
+                )
                 continue
 
             signal = strategy.generate_signal(symbol, bars)

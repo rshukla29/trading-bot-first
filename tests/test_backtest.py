@@ -4,6 +4,10 @@ import pandas as pd
 from tradingbot.backtest import run_backtest
 from tradingbot.strategy.ma_crossover import MovingAverageCrossoverStrategy
 
+# These tests exercise backtest mechanics, not the confirmation filters
+# (those have their own tests in test_strategy.py).
+NO_FILTERS = dict(trend_ma=None, volume_ma=None, rsi_period=None, vwap_window=None)
+
 
 def make_trending_bars(n: int, drift: float, seed: int = 0) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
@@ -26,7 +30,7 @@ def make_trending_bars(n: int, drift: float, seed: int = 0) -> pd.DataFrame:
 def test_backtest_runs_without_lookahead_and_produces_stats():
     # trend_ma=None: these tests exercise backtest mechanics in isolation
     # from the trend filter, which has its own tests in test_strategy.py.
-    strategy = MovingAverageCrossoverStrategy(fast=10, slow=30, trend_ma=None)
+    strategy = MovingAverageCrossoverStrategy(fast=10, slow=30, **NO_FILTERS)
     bars = make_trending_bars(300, drift=0.15)
     result = run_backtest(
         "TEST", bars, strategy,
@@ -39,7 +43,7 @@ def test_backtest_runs_without_lookahead_and_produces_stats():
 
 
 def test_backtest_flat_market_survives_without_crashing():
-    strategy = MovingAverageCrossoverStrategy(fast=5, slow=15, trend_ma=None)
+    strategy = MovingAverageCrossoverStrategy(fast=5, slow=15, **NO_FILTERS)
     bars = make_trending_bars(200, drift=0.0, seed=1)
     result = run_backtest(
         "TEST", bars, strategy,
@@ -69,7 +73,7 @@ def test_stop_loss_caps_loss_per_trade():
     # entry_price=150 and stop_price=150*0.8=120, then the next bar's low
     # (110*0.99=108.9) breaches the stop, forcing a stop-loss exit at 120 —
     # exactly a 20% loss on that trade.
-    strategy = MovingAverageCrossoverStrategy(fast=5, slow=10, trend_ma=None)
+    strategy = MovingAverageCrossoverStrategy(fast=5, slow=10, **NO_FILTERS)
     closes = [100.0] * 10 + [150.0, 110.0, 110.0, 110.0]
     bars = make_bars(closes)
     result = run_backtest(
@@ -87,7 +91,7 @@ def test_backtest_with_trend_filter_integrates_without_crashing():
     # Default trend_ma=200 needs a long enough series to ever leave warmup;
     # this checks the filter integrates cleanly through the full backtest
     # loop (not just the single-signal unit tests in test_strategy.py).
-    strategy = MovingAverageCrossoverStrategy(fast=10, slow=30, trend_ma=200)
+    strategy = MovingAverageCrossoverStrategy(fast=10, slow=30, **{**NO_FILTERS, 'trend_ma': 200})
     bars = make_trending_bars(400, drift=0.15, seed=3)
     result = run_backtest(
         "TEST", bars, strategy,

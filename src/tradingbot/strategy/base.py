@@ -22,6 +22,14 @@ class Signal:
 class Strategy(ABC):
     """Interface every strategy implements: turn a bar history into today's signal."""
 
+    @property
+    @abstractmethod
+    def min_history(self) -> int:
+        """Minimum number of bars needed before this strategy can emit a
+        non-HOLD signal. Callers use it to size backtest warmup and to
+        request enough history from the broker."""
+        raise NotImplementedError
+
     @abstractmethod
     def generate_signal(self, symbol: str, bars: pd.DataFrame) -> Signal:
         """bars must be a DataFrame indexed by date with an ascending-sorted
