@@ -57,6 +57,38 @@ class Settings(BaseSettings):
     options_exit_on_range_reentry: bool = True
     options_rate: float = 0.04
 
+    # RSI(2) mean-reversion swing strategy (stocks, daily bars) — the
+    # second, independent stock strategy: mean-reversion rather than
+    # trend-following. Same backtest-only status.
+    rsi2_trend_ma: int = 200
+    rsi2_period: int = 2
+    rsi2_buy_threshold: float = 5.0
+    rsi2_sell_threshold: float = 65.0
+    rsi2_fib_lookback: int = 0  # 0 disables the fib retracement confirmation
+    rsi2_fib_zone_low: float = 0.382
+    rsi2_fib_zone_high: float = 0.618
+
+    # Iron condor / credit-spread strategy on SPY, QQQ, IWM (daily bars,
+    # 30-45 DTE) — the second, independent options strategy: selling
+    # defined-risk premium rather than buying long options. Parameters
+    # grounded in published options-selling research (16-delta shorts, 45
+    # DTE, 50% profit target, 100%-of-credit stop, 21-DTE forced close).
+    # Same Black-Scholes-simulation caveat as the ORB strategy.
+    credit_spread_target_delta: float = 0.16
+    credit_spread_wing_width: float = 5.0
+    credit_spread_dte_days: int = 45
+    credit_spread_profit_target_pct: float = 0.50
+    credit_spread_stop_loss_multiple: float = 2.0
+    credit_spread_dte_forced_close: int = 21
+    credit_spread_entry_interval_days: int = 7
+    credit_spread_max_concurrent: int = 3
+    credit_spread_risk_pct_per_trade: float = 0.02
+    credit_spread_vol_window: int = 20
+    credit_spread_iv_premium_multiplier: float = 1.2
+    credit_spread_rate: float = 0.04
+    credit_spread_min_vol_percentile: float = 0.0  # 0 disables the vol-timing filter
+    credit_spread_vol_percentile_lookback: int = 252
+
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.
     live_trading: bool = False

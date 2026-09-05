@@ -1,6 +1,6 @@
 import pandas as pd
 
-from tradingbot.indicators import avg_volume, rolling_vwap, rsi
+from tradingbot.indicators import avg_volume, fib_retracement_fraction, rolling_vwap, rsi
 
 
 def make_bars(closes: list[float], volumes: list[float] | None = None) -> pd.DataFrame:
@@ -57,6 +57,75 @@ def test_rolling_vwap_is_pulled_toward_high_volume_bars():
 def test_avg_volume_rolling_mean():
     volume = pd.Series([100.0, 200, 300, 400])
     assert avg_volume(volume, window=2).iloc[-1] == 350.0
+
+
+def test_rsi_is_100_when_window_has_no_losses():
+    # A window with only gains (or flat bars) must resolve to RSI=100, not
+    # NaN — regression guard for a bug where an explicit avg_loss.replace(0,
+    # NaN) forced this legitimate case to NaN instead of the mathematically
+    # correct value.
+    closes = pd.Series([100.0] * 9 + [101.0, 108.0])
+    values = rsi(closes, period=2)
+    assert values.iloc[-1] == 100.0
+
+
+def test_rsi_is_0_when_window_has_no_gains():
+    closes = pd.Series([116.0] * 9 + [114.0, 108.0])
+    values = rsi(closes, period=2)
+    assert values.iloc[-1] == 0.0
+
+
+def test_rsi_is_neutral_when_perfectly_flat():
+    closes = pd.Series([100.0] * 10)
+    values = rsi(closes, period=2)
+    assert values.iloc[-1] == 50.0
+
+
+def _fixed_range_bars(closes: list[float], fixed_high: float, fixed_low: float) -> pd.DataFrame:
+    """Bars with an explicit, constant high/low ceiling and floor (rather
+    than make_bars' close-relative +-1% offset) so the swing high/low used
+    by fib_retracement_fraction land exactly where a test expects."""
+    dates = pd.date_range("2024-01-01", periods=len(closes), freq="B")
+    return pd.DataFrame(
+        {
+            "open": closes,
+            "high": [fixed_high] * len(closes),
+            "low": [fixed_low] * len(closes),
+            "close": closes,
+            "volume": [1_000_000.0] * len(closes),
+        },
+        index=dates,
+    )
+
+
+def test_fib_retracement_at_the_swing_low_is_fraction_one():
+    bars = _fixed_range_bars([100.0, 95, 90, 85, 80], fixed_high=100.0, fixed_low=80.0)
+    frac = fib_retracement_fraction(bars, lookback=5).iloc[-1]
+    assert frac == pytest_approx(1.0)
+
+
+def test_fib_retracement_at_the_swing_high_is_fraction_zero():
+    bars = _fixed_range_bars([80.0, 85, 90, 95, 100], fixed_high=100.0, fixed_low=80.0)
+    frac = fib_retracement_fraction(bars, lookback=5).iloc[-1]
+    assert frac == pytest_approx(0.0)
+
+
+def test_fib_retracement_halfway_is_fraction_half():
+    # high column is fixed at 100 (via a flat top bar) and low fixed at 80,
+    # with the final close sitting exactly at the midpoint.
+    dates = pd.date_range("2024-01-01", periods=5, freq="B")
+    bars = pd.DataFrame(
+        {
+            "open": [100.0, 100, 100, 100, 90.0],
+            "high": [100.0, 100, 100, 100, 100.0],
+            "low": [80.0, 80, 80, 80, 80.0],
+            "close": [100.0, 95, 90, 85, 90.0],
+            "volume": [1_000_000.0] * 5,
+        },
+        index=dates,
+    )
+    frac = fib_retracement_fraction(bars, lookback=5).iloc[-1]
+    assert frac == pytest_approx(0.5)
 
 
 def pytest_approx(value: float, tol: float = 1e-9):

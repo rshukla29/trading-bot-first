@@ -37,6 +37,37 @@ def bs_delta(spot: float, strike: float, t_years: float, rate: float, vol: float
     return _norm_cdf(d1) if right == "C" else _norm_cdf(d1) - 1
 
 
+def find_strike_for_delta(
+    spot: float,
+    t_years: float,
+    rate: float,
+    vol: float,
+    right: str,
+    target_delta_abs: float,
+    strike_increment: float = 1.0,
+    max_iter: int = 100,
+) -> float:
+    """Strike whose Black-Scholes delta magnitude is closest to
+    target_delta_abs (e.g. 0.16 for a "16-delta" short strike). bs_delta is
+    monotonically decreasing in strike for both calls (1 -> 0) and puts
+    (0 -> -1), so comparing against a signed target lets one bisection
+    search handle both.
+    """
+    target_signed = target_delta_abs if right == "C" else -target_delta_abs
+    lo, hi = spot * 0.3, spot * 3.0
+    mid = spot
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2
+        delta = bs_delta(spot, mid, t_years, rate, vol, right)
+        if abs(delta - target_signed) < 1e-4:
+            break
+        if delta > target_signed:
+            lo = mid
+        else:
+            hi = mid
+    return round(mid / strike_increment) * strike_increment
+
+
 def realized_volatility(closes: pd.Series, window: int, bars_per_year: float) -> pd.Series:
     """Annualized realized volatility from a bar series' log returns,
     used as the implied-vol proxy for bs_price/bs_delta since this backtest
@@ -47,3 +78,12 @@ def realized_volatility(closes: pd.Series, window: int, bars_per_year: float) ->
     """
     log_returns = np.log(closes / closes.shift(1))
     return log_returns.rolling(window).std() * math.sqrt(bars_per_year)
+
+
+def vol_percentile(vol_series: pd.Series, lookback: int) -> pd.Series:
+    """Each value's percentile rank (0-1) within its own trailing `lookback`
+    window — a realized-vol-based stand-in for IV rank, used to time premium
+    sales for when vol is relatively rich versus its own recent history
+    (vol is well known to be mean-reverting, so this is the standard
+    volatility-selling timing heuristic even without real IV data)."""
+    return vol_series.rolling(lookback).apply(lambda w: (w[-1] > w).mean(), raw=True)
