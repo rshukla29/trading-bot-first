@@ -79,7 +79,7 @@ def run_backtest(
 ) -> BacktestResult:
     """Single-symbol backtest: walks the bar history day by day, entering on
     BUY signals (sized by risk-per-trade) and exiting on the strategy's EXIT
-    signal or the 20% stop-loss, whichever comes first. No lookahead: each
+    signal or the configured stop-loss, whichever comes first. No lookahead: each
     day's decision only sees bars up to and including that day.
     """
     result = BacktestResult(starting_equity=starting_equity)

@@ -1,7 +1,7 @@
 # trading-bot
 
 Automated swing-trading bot for stocks: moving-average crossover entries,
-20%-stop-loss risk management, one shared strategy driving two brokers —
+10%-stop-loss risk management, one shared strategy driving two brokers —
 Interactive Brokers (via `ib_async`, direct Python bot) and Robinhood (via
 its official Agentic Trading MCP, driven by a scheduled Claude Code
 routine). **Paper/sandbox trading only until you explicitly opt into live

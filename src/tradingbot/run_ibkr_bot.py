@@ -1,6 +1,6 @@
 """Daily entrypoint: connect to IBKR, evaluate the watchlist, manage
 existing positions against the strategy's EXIT signal, open new positions
-sized by risk-per-trade with an attached 20% stop-loss, and log everything.
+sized by risk-per-trade with an attached stop-loss, and log everything.
 
 Intended to be run once per day (after market data for the day is final)
 via a scheduled task. Refuses to trade on a non-paper account unless

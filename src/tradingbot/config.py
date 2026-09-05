@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # Risk management
     risk_pct_per_trade: float = 0.01
-    stop_loss_pct: float = 0.20
+    stop_loss_pct: float = 0.10
     max_positions: int = 5
     max_daily_loss_pct: float = 0.03
 
@@ -37,6 +37,25 @@ class Settings(BaseSettings):
     consolidation_max_range_pct: float = 0.06
     consolidation_max_bars_since_breakout: int = 5
     consolidation_retest_tolerance: float = 0.02
+
+    # Options ORB strategy (intraday, backtest-only — no live execution path
+    # yet, since neither IBKR options market data nor a live options order
+    # flow has been built here). Option prices are simulated via
+    # Black-Scholes (see options/pricing.py) rather than read from real
+    # historical options data, which this account can't access.
+    options_symbol: str = "SPY"
+    options_bar_minutes: int = 5
+    options_opening_range_minutes: int = 15
+    options_risk_pct_per_trade: float = 0.01
+    options_stop_loss_pct_of_premium: float = 0.30
+    options_profit_target_pct: float = 0.50  # set to 0 to disable
+    options_dte_days: int = 0
+    options_otm_pct: float = 0.0
+    options_strike_increment: float = 1.0
+    options_vol_window: int = 20
+    options_iv_premium_multiplier: float = 1.2
+    options_exit_on_range_reentry: bool = True
+    options_rate: float = 0.04
 
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.

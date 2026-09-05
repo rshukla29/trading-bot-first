@@ -31,7 +31,7 @@ for a scheduled Claude Code agent to follow.
    - Look up current Agentic account equity via the Robinhood MCP tools.
    - Compute share quantity with the same formula as `tradingbot.risk.position_size`:
      `shares = floor(equity * RISK_PCT_PER_TRADE / (price * STOP_LOSS_PCT))`
-     (defaults: 1% risk per trade, 20% stop-loss — read the actual values
+     (defaults: 1% risk per trade, 10% stop-loss — read the actual values
      from `trading-bot/.env` so both brokers stay in sync).
    - Place the buy via the Robinhood MCP trading tool. Robinhood's MCP does
      not (as of the May 2026 beta) support attaching a broker-side stop
@@ -61,7 +61,7 @@ for a scheduled Claude Code agent to follow.
   project's stocks-only v1 scope.
 - Because Robinhood doesn't attach a broker-side stop order via MCP yet,
   the stop-loss is only as reliable as this routine's run frequency — a
-  gap-down between runs can blow through the 20% stop before the routine
+  gap-down between runs can blow through the 10% stop before the routine
   next checks. Consider running this routine at least once during market
   hours in addition to end-of-day, once you're comfortable with it.
 - Start in per-trade-approval mode and watch a few cycles before switching
