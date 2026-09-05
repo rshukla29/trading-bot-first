@@ -6,3 +6,4 @@ data/*.db
 data/*.sqlite
 .pytest_cache/
 *.egg-info/
+logs/

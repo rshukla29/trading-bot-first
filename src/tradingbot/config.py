@@ -95,11 +95,22 @@ class Settings(BaseSettings):
 
     watchlist: str = "AAPL,MSFT,AMZN,GOOGL,META,NVDA,JPM,V,UNH,HD"
 
+    # Deliberately non-overlapping with `watchlist`: running two independent
+    # stock strategies live against the same symbols risks one strategy's
+    # EXIT signal closing a position the other strategy actually opened,
+    # since IBKR positions carry no metadata about which strategy owns
+    # them. Separate symbol universes sidestep the problem entirely.
+    rsi2_watchlist: str = "XOM,JNJ,PG,KO,DIS,WMT,BAC,PFE,CSCO,INTC"
+
     db_path: str = "data/journal.db"
 
     @property
     def symbols(self) -> list[str]:
         return [s.strip().upper() for s in self.watchlist.split(",") if s.strip()]
+
+    @property
+    def rsi2_symbols(self) -> list[str]:
+        return [s.strip().upper() for s in self.rsi2_watchlist.split(",") if s.strip()]
 
 
 settings = Settings()
