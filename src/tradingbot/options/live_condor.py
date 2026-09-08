@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from ib_async import IB, ComboLeg, Contract, LimitOrder, Option, Trade
+
+from tradingbot.options.live_chain import get_quote, nearest_expiry, qualify_nearest_available
+from tradingbot.options.pricing import find_strike_for_delta
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CondorLegs:
+    call_short: Option
+    call_long: Option
+    put_short: Option
+    put_long: Option
+    expiry: str
+
+
+def select_condor_legs(
+    ib: IB, symbol: str, chain, spot: float, vol: float, rate: float,
+    target_delta: float, wing_width: float, dte_days: int,
+) -> CondorLegs:
+    """Pick real, listed strikes closest to the target delta. Delta itself
+    is estimated from Black-Scholes with a realized-vol proxy (same method
+    already validated in backtesting) rather than IBKR's live modelGreeks,
+    which weren't reliably populating as of this build — strike selection
+    only needs to be approximately right, since actual order pricing below
+    uses real live bid/ask, not this estimate.
+    """
+    expiry = nearest_expiry(chain, dte_days)
+    t_years = dte_days / 365.25
+
+    raw_call_short = find_strike_for_delta(spot, t_years, rate, vol, "C", target_delta)
+    raw_put_short = find_strike_for_delta(spot, t_years, rate, vol, "P", target_delta)
+
+    # Each leg falls back independently to the nearest strike that actually
+    # exists for this expiry (see qualify_nearest_available) — chain.strikes
+    # is a union across all expirations, not a per-expiry list.
+    call_short = qualify_nearest_available(ib, symbol, expiry, raw_call_short, "C", chain)
+    put_short = qualify_nearest_available(ib, symbol, expiry, raw_put_short, "P", chain)
+    call_long = qualify_nearest_available(ib, symbol, expiry, call_short.strike + wing_width, "C", chain)
+    put_long = qualify_nearest_available(ib, symbol, expiry, put_short.strike - wing_width, "P", chain)
+
+    # On a sparse strike ladder, the fallback above could in principle land
+    # the "long" leg no farther out than the "short" leg — refuse rather
+    # than silently build an inverted or zero-width spread.
+    if not (call_long.strike > call_short.strike):
+        raise ValueError(f"{symbol}: call spread not properly ordered ({call_short.strike} / {call_long.strike})")
+    if not (put_long.strike < put_short.strike):
+        raise ValueError(f"{symbol}: put spread not properly ordered ({put_short.strike} / {put_long.strike})")
+
+    return CondorLegs(call_short=call_short, call_long=call_long, put_short=put_short, put_long=put_long, expiry=expiry)
+
+
+def _combo_contract(symbol: str, legs: list[tuple[Option, str]]) -> Contract:
+    """legs: list of (option_contract, action) — action is this leg's own
+    BUY/SELL, independent of the parent order's action (always 'BUY' by
+    IBKR combo convention — see module docstring in run_iron_condor_bot)."""
+    combo = Contract(symbol=symbol, secType="BAG", currency="USD", exchange="SMART")
+    combo.comboLegs = [
+        ComboLeg(conId=opt.conId, ratio=1, action=action, exchange="SMART") for opt, action in legs
+    ]
+    return combo
+
+
+def net_credit_estimate(ib: IB, legs: CondorLegs) -> float:
+    """Sum of real mid-prices across all 4 legs — summing individual legs'
+    live quotes rather than requesting a quote on the BAG contract itself,
+    since 4-leg combo market data is often unreliable/non-streaming on
+    IBKR even when the underlying legs quote fine individually."""
+    _, _, call_short_mid = get_quote(ib, legs.call_short)
+    _, _, call_long_mid = get_quote(ib, legs.call_long)
+    _, _, put_short_mid = get_quote(ib, legs.put_short)
+    _, _, put_long_mid = get_quote(ib, legs.put_long)
+    return (call_short_mid - call_long_mid) + (put_short_mid - put_long_mid)
+
+
+def wait_for_fill(ib: IB, trade: Trade, timeout: float = 90.0, poll_interval: float = 5.0) -> bool:
+    """Block until `trade` fills or `timeout` elapses. Paper-account combo
+    (BAG) fills observed taking up to ~60s even at a fully marketable
+    price — much slower than single-leg orders — so a short poll window
+    will misreport a soon-to-fill order as stuck. Returns True if filled
+    by the deadline, False otherwise (caller decides whether to leave it
+    working or cancel)."""
+    elapsed = 0.0
+    while elapsed < timeout:
+        if trade.orderStatus.status == "Filled":
+            return True
+        if trade.orderStatus.status in ("Cancelled", "ApiCancelled", "Inactive"):
+            return False
+        ib.sleep(poll_interval)
+        elapsed += poll_interval
+    return trade.orderStatus.status == "Filled"
+
+
+def open_condor(ib: IB, symbol: str, legs: CondorLegs, contracts: int) -> tuple[Trade, float]:
+    """Sells the condor for a net credit. Returns (Trade, credit_used_as_limit)."""
+    credit = net_credit_estimate(ib, legs)
+    if credit <= 0.01:
+        raise ValueError(f"{symbol}: computed credit {credit:.3f} too small/negative, refusing to open")
+
+    combo = _combo_contract(symbol, [
+        (legs.call_short, "SELL"), (legs.call_long, "BUY"),
+        (legs.put_short, "SELL"), (legs.put_long, "BUY"),
+    ])
+    # tif must be set explicitly — LimitOrder defaults tif='' (unset), which
+    # IBKR flags with "Order TIF was set to DAY based on order preset" and
+    # then auto-corrects, but that correction/resubmit cycle was observed
+    # to be unreliable (sometimes recovers to a working order, sometimes
+    # the order just stays Cancelled) — this was very likely the real cause
+    # of orders appearing to "not fill," not fundamental combo-order slowness.
+    order = LimitOrder("BUY", contracts, round(-credit, 2), tif="DAY")  # negative lmtPrice = net credit
+    trade = ib.placeOrder(combo, order)
+    logger.info("%s: opened condor combo order, %d contracts, credit ~%.2f", symbol, contracts, credit)
+    return trade, credit
+
+
+def close_condor(ib: IB, symbol: str, legs: CondorLegs, contracts: int) -> tuple[Trade, float]:
+    """Buys back the condor (a debit). Returns (Trade, cost_used_as_limit)."""
+    cost = net_credit_estimate(ib, legs)  # same math; "cost to buy back" = current mid value
+    combo = _combo_contract(symbol, [
+        (legs.call_short, "BUY"), (legs.call_long, "SELL"),
+        (legs.put_short, "BUY"), (legs.put_long, "SELL"),
+    ])
+    order = LimitOrder("BUY", contracts, round(cost, 2), tif="DAY")  # positive lmtPrice = net debit to close
+    trade = ib.placeOrder(combo, order)
+    logger.info("%s: closed condor combo order, %d contracts, cost ~%.2f", symbol, contracts, cost)
+    return trade, cost

@@ -41,6 +41,31 @@ CREATE TABLE IF NOT EXISTS fills (
     broker_order_id TEXT,
     realized_pnl REAL
 );
+
+-- IBKR's position list is just symbol+quantity per option leg — it carries
+-- no notion of "these 4 legs are one iron condor". This table is our own
+-- bookkeeping so the live bot can find its own open positions again.
+CREATE TABLE IF NOT EXISTS condor_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    entry_date TEXT NOT NULL,
+    expiry TEXT NOT NULL,
+    call_short_strike REAL NOT NULL,
+    call_long_strike REAL NOT NULL,
+    put_short_strike REAL NOT NULL,
+    put_long_strike REAL NOT NULL,
+    call_short_conid INTEGER NOT NULL,
+    call_long_conid INTEGER NOT NULL,
+    put_short_conid INTEGER NOT NULL,
+    put_long_conid INTEGER NOT NULL,
+    credit_received REAL NOT NULL,
+    contracts INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    exit_date TEXT,
+    exit_cost REAL,
+    exit_reason TEXT,
+    realized_pnl REAL
+);
 """
 
 
@@ -94,6 +119,67 @@ class Journal:
                     broker_order_id,
                     status,
                 ),
+            )
+
+    def open_condor_position(
+        self,
+        symbol: str,
+        entry_date: str,
+        expiry: str,
+        call_short_strike: float,
+        call_long_strike: float,
+        put_short_strike: float,
+        put_long_strike: float,
+        call_short_conid: int,
+        call_long_conid: int,
+        put_short_conid: int,
+        put_long_conid: int,
+        credit_received: float,
+        contracts: int,
+    ) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO condor_positions
+                   (symbol, entry_date, expiry, call_short_strike, call_long_strike,
+                    put_short_strike, put_long_strike, call_short_conid, call_long_conid,
+                    put_short_conid, put_long_conid, credit_received, contracts, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')""",
+                (
+                    symbol, entry_date, expiry, call_short_strike, call_long_strike,
+                    put_short_strike, put_long_strike, call_short_conid, call_long_conid,
+                    put_short_conid, put_long_conid, credit_received, contracts,
+                ),
+            )
+            return cur.lastrowid
+
+    def open_condor_positions(self, symbol: str | None = None) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            if symbol is not None:
+                rows = conn.execute(
+                    "SELECT * FROM condor_positions WHERE status='open' AND symbol=?", (symbol,)
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM condor_positions WHERE status='open'").fetchall()
+            return rows
+
+    def last_condor_entry_date(self, symbol: str) -> str | None:
+        """Most recent entry_date for `symbol`, open or closed — used to
+        enforce entry cadence even across closed positions."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT entry_date FROM condor_positions WHERE symbol=? ORDER BY entry_date DESC LIMIT 1",
+                (symbol,),
+            ).fetchone()
+            return row[0] if row else None
+
+    def close_condor_position(self, position_id: int, exit_date: str, exit_cost: float, exit_reason: str, realized_pnl: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE condor_positions
+                   SET status='closed', exit_date=?, exit_cost=?, exit_reason=?, realized_pnl=?
+                   WHERE id=?""",
+                (exit_date, exit_cost, exit_reason, realized_pnl, position_id),
             )
 
     def log_fill(

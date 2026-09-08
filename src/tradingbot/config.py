@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     credit_spread_entry_interval_days: int = 7
     credit_spread_max_concurrent: int = 3
     credit_spread_risk_pct_per_trade: float = 0.02
+    # Hard ceiling regardless of what risk_pct_per_trade computes — a
+    # narrow wing_width on a large account can otherwise size a 4-leg
+    # combo at 50+ contracts, which is both a much bigger real-liquidity
+    # ask than 1-5 contracts and a materially different risk exposure than
+    # what gets tested informally before trusting a strategy live.
+    credit_spread_max_contracts_per_trade: int = 10
     credit_spread_vol_window: int = 20
     credit_spread_iv_premium_multiplier: float = 1.2
     credit_spread_rate: float = 0.04
@@ -102,6 +108,14 @@ class Settings(BaseSettings):
     # them. Separate symbol universes sidestep the problem entirely.
     rsi2_watchlist: str = "XOM,JNJ,PG,KO,DIS,WMT,BAC,PFE,CSCO,INTC"
 
+    # Live iron condor symbols. SPY-only for now: QQQ and IWM options both
+    # failed to fill across every live test (10091 "additional subscription
+    # required" errors on QQQ; IWM fails silently) while SPY filled cleanly
+    # — looks like an account-level options market data entitlement gap for
+    # QQQ/IWM specifically, not something fixable in code. Add them back
+    # here once that's resolved; the backtest already covers all three.
+    credit_spread_symbols: str = "SPY"
+
     db_path: str = "data/journal.db"
 
     @property
@@ -111,6 +125,10 @@ class Settings(BaseSettings):
     @property
     def rsi2_symbols(self) -> list[str]:
         return [s.strip().upper() for s in self.rsi2_watchlist.split(",") if s.strip()]
+
+    @property
+    def credit_spread_symbol_list(self) -> list[str]:
+        return [s.strip().upper() for s in self.credit_spread_symbols.split(",") if s.strip()]
 
 
 settings = Settings()
