@@ -4,9 +4,12 @@ import math
 from dataclasses import dataclass, field
 
 
-def position_size(equity: float, price: float, risk_pct: float, stop_loss_pct: float) -> int:
+def position_size(
+    equity: float, price: float, risk_pct: float, stop_loss_pct: float, max_position_value: float | None = None,
+) -> int:
     """Number of shares to buy so that a hit on the stop-loss costs exactly
-    `risk_pct` of account equity.
+    `risk_pct` of account equity, further capped so the position's notional
+    (shares * price) never exceeds `max_position_value`.
 
     shares = (equity * risk_pct) / (price * stop_loss_pct)
     """
@@ -14,7 +17,10 @@ def position_size(equity: float, price: float, risk_pct: float, stop_loss_pct: f
         return 0
     dollar_risk = equity * risk_pct
     risk_per_share = price * stop_loss_pct
-    return max(0, math.floor(dollar_risk / risk_per_share))
+    qty = max(0, math.floor(dollar_risk / risk_per_share))
+    if max_position_value is not None:
+        qty = min(qty, math.floor(max_position_value / price))
+    return qty
 
 
 @dataclass

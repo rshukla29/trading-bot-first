@@ -75,7 +75,10 @@ def main() -> None:
                 logger.info("Max positions (%d) reached, skipping %s", settings.max_positions, symbol)
                 continue
 
-            qty = position_size(equity, signal.price, settings.risk_pct_per_trade, settings.stop_loss_pct)
+            qty = position_size(
+                equity, signal.price, settings.risk_pct_per_trade, settings.stop_loss_pct,
+                settings.max_position_value,
+            )
             if qty <= 0:
                 logger.info("Computed position size 0 for %s, skipping", symbol)
                 continue

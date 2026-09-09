@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     stop_loss_pct: float = 0.10
     max_positions: int = 5
     max_daily_loss_pct: float = 0.03
+    # Hard ceiling on a single stock position's notional (shares * price),
+    # independent of risk_pct_per_trade — keeps the RSI2 bot's expanded
+    # top-movers universe from sizing a large position in a volatile
+    # small/mid-cap the way it would size one in a stable blue-chip.
+    max_position_value: float = 2000.0
 
     # Strategy
     fast_ma: int = 20
@@ -67,6 +72,17 @@ class Settings(BaseSettings):
     rsi2_fib_lookback: int = 0  # 0 disables the fib retracement confirmation
     rsi2_fib_zone_low: float = 0.382
     rsi2_fib_zone_high: float = 0.618
+
+    # Expand RSI2's entry universe daily with IBKR's top-movers scanner
+    # (gainers/losers/most-active), on top of the fixed rsi2_watchlist —
+    # the fixed list alone can miss a real setup that just isn't one of
+    # those 10 names on a given day. Movers overlapping the MA-crossover
+    # watchlist are excluded (see ibkr/scanner.py). Price/volume filters
+    # keep the scan to liquid, real candidates instead of penny stocks.
+    rsi2_scan_top_movers: bool = True
+    rsi2_scan_rows: int = 15
+    rsi2_scan_min_price: float = 10.0
+    rsi2_scan_min_volume: int = 500_000
 
     # Iron condor / credit-spread strategy on SPY, QQQ, IWM (daily bars,
     # 30-45 DTE) — the second, independent options strategy: selling

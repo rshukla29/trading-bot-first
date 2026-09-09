@@ -12,6 +12,20 @@ def test_position_size_zero_on_bad_inputs():
     assert position_size(equity=100_000, price=100, risk_pct=0.01, stop_loss_pct=0) == 0
 
 
+def test_position_size_capped_by_max_position_value():
+    # Risk formula alone would give 1,000,000 * 0.01 / (24.86 * 0.10) ~= 4023 shares
+    # (the real BRZE case) — a $2,000 notional cap should bring that down to 80 shares.
+    qty = position_size(
+        equity=1_000_000, price=24.86, risk_pct=0.01, stop_loss_pct=0.10, max_position_value=2000,
+    )
+    assert qty == 80
+    assert qty * 24.86 <= 2000
+
+
+def test_position_size_uncapped_when_max_position_value_none():
+    assert position_size(equity=100_000, price=100, risk_pct=0.01, stop_loss_pct=0.20) == 50
+
+
 def test_kill_switch_trips_on_threshold():
     ks = DailyLossKillSwitch(max_daily_loss_pct=0.03, starting_equity=100_000)
     assert not ks.is_tripped()
