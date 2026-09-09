@@ -1,12 +1,17 @@
 """Daily entrypoint for the RSI(2) mean-reversion strategy: connect to
-IBKR, evaluate rsi2_symbols, manage existing positions against the RSI(2)
-overbought exit, open new positions sized by risk-per-trade with an
+IBKR, evaluate the entry universe, manage existing positions against the
+RSI(2) overbought exit, open new positions sized by risk-per-trade with an
 attached stop-loss, and log everything.
 
-Runs against `settings.rsi2_symbols` — a watchlist deliberately kept
-separate from `settings.symbols` (the MA-crossover bot's watchlist) so the
-two independent stock strategies never end up fighting over the same
-position (see config.py).
+The entry universe is `settings.rsi2_symbols` (the fixed watchlist) plus,
+when `rsi2_scan_top_movers` is enabled, today's top US gainers/losers/
+most-active from IBKR's scanner (see ibkr/scanner.py) — the fixed list
+alone can miss a real setup on a symbol that just isn't one of those 10
+names today. Movers overlapping `settings.symbols` (the MA-crossover
+bot's watchlist) are excluded so the two independent stock strategies
+never end up fighting over the same position (see config.py). Any
+currently-held qualifying stock position is always evaluated for its EXIT
+signal even if its symbol drops off a later day's scan.
 
 Intended to be run once per day (after market data for the day is final)
 via a scheduled task. Refuses to trade on a non-paper account unless
@@ -22,6 +27,7 @@ from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import place_bracket_buy, place_market_sell
+from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe
 from tradingbot.journal import Journal
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
@@ -45,11 +51,32 @@ def main() -> None:
         equity = client.net_liquidation()
         kill_switch = DailyLossKillSwitch(settings.max_daily_loss_pct, equity)
 
-        open_positions = {p.contract.symbol: p for p in client.positions() if p.position != 0}
-        rsi2_positions = {s: p for s, p in open_positions.items() if s in settings.rsi2_symbols}
+        # Any held stock (non-option) position outside the MA-crossover
+        # watchlist is unambiguously ours: MA-crossover only ever trades
+        # settings.symbols, and RSI2 is the only other strategy that
+        # trades equities. This lets a position opened via a dynamic
+        # mover still get evaluated for its EXIT signal on a later day
+        # even if that symbol has since dropped off the scanner.
+        rsi2_positions = {
+            p.contract.symbol: p for p in client.positions()
+            if p.position != 0 and p.contract.secType == "STK" and p.contract.symbol not in settings.symbols
+        }
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
 
-        for symbol in settings.rsi2_symbols:
+        movers: list[str] = []
+        if settings.rsi2_scan_top_movers:
+            try:
+                movers = fetch_top_movers(
+                    client.ib, settings.rsi2_scan_rows, settings.rsi2_scan_min_price, settings.rsi2_scan_min_volume,
+                )
+                logger.info("Top movers scan found %d candidates: %s", len(movers), movers)
+            except Exception:
+                logger.exception("Top-movers scan failed, continuing with fixed watchlist only")
+
+        entry_universe = merge_scan_universe(settings.rsi2_symbols, movers, settings.symbols)
+        symbols_to_check = sorted(set(entry_universe) | set(rsi2_positions))
+
+        for symbol in symbols_to_check:
             try:
                 bars = fetch_daily_bars(client.ib, symbol, duration="2 Y")
             except Exception:
@@ -89,7 +116,10 @@ def main() -> None:
                 logger.info("Max positions (%d) reached, skipping %s", settings.max_positions, symbol)
                 continue
 
-            qty = position_size(equity, signal.price, settings.risk_pct_per_trade, settings.stop_loss_pct)
+            qty = position_size(
+                equity, signal.price, settings.risk_pct_per_trade, settings.stop_loss_pct,
+                settings.max_position_value,
+            )
             if qty <= 0:
                 logger.info("Computed position size 0 for %s, skipping", symbol)
                 continue
