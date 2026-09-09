@@ -134,6 +134,12 @@ class Settings(BaseSettings):
 
     db_path: str = "data/journal.db"
 
+    # Daily pre/post-market snapshot (run_snapshot.py): open orders,
+    # per-position unrealized P&L, account realized/unrealized/daily P&L.
+    # Written as HTML under reports_dir and committed to git (no push) so
+    # the account history accumulates in version control.
+    reports_dir: str = "reports"
+
     @property
     def symbols(self) -> list[str]:
         return [s.strip().upper() for s in self.watchlist.split(",") if s.strip()]
