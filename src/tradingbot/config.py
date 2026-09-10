@@ -135,10 +135,19 @@ class Settings(BaseSettings):
     db_path: str = "data/journal.db"
 
     # Daily pre/post-market snapshot (run_snapshot.py): open orders,
-    # per-position unrealized P&L, account realized/unrealized/daily P&L.
-    # Written as HTML under reports_dir and committed to git (no push) so
-    # the account history accumulates in version control.
+    # per-position unrealized P&L, account realized/unrealized/daily P&L,
+    # total balance, and YTD P&L. Written as HTML under reports_dir and
+    # committed to git (no push) so the account history accumulates in
+    # version control.
     reports_dir: str = "reports"
+
+    # IBKR's own realizedPnL/RealizedPnL fields reset to 0 every day and
+    # there's no calendar-YTD tag in the API without separately configuring
+    # Flex Query reports — so YTD P&L here is computed as
+    # (current NetLiquidation - account_starting_balance). $1M is the
+    # standard IBKR paper-account default; set this to the account's
+    # actual balance at the start of the year for an accurate figure.
+    account_starting_balance: float = 1_000_000.0
 
     @property
     def symbols(self) -> list[str]:

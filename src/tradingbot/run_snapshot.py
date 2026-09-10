@@ -109,12 +109,25 @@ def build_report(client: IBKRClient, label: str) -> str:
         )
         parts.append("</table>")
 
+    net_liq = client.net_liquidation()
+    ytd_pnl = net_liq - settings.account_starting_balance
+    ytd_pct = (ytd_pnl / settings.account_starting_balance * 100) if settings.account_starting_balance else 0.0
+
     parts.append("<h2>Account P&amp;L (today)</h2>")
     parts.append(
         "<table>"
         f"<tr><td>Realized P&amp;L</td><td class='{_pnl_class(pnl.realizedPnL)}'>{pnl.realizedPnL:.2f}</td></tr>"
         f"<tr><td>Unrealized P&amp;L</td><td class='{_pnl_class(pnl.unrealizedPnL)}'>{pnl.unrealizedPnL:.2f}</td></tr>"
         f"<tr><td>Daily P&amp;L</td><td class='{_pnl_class(pnl.dailyPnL)}'>{pnl.dailyPnL:.2f}</td></tr>"
+        "</table>"
+    )
+
+    parts.append("<h2>Overall</h2>")
+    parts.append(
+        "<table>"
+        f"<tr><td>Total Balance (Net Liquidation)</td><td>{net_liq:,.2f}</td></tr>"
+        f"<tr><td>YTD P&amp;L (vs {settings.account_starting_balance:,.0f} baseline)</td>"
+        f"<td class='{_pnl_class(ytd_pnl)}'>{ytd_pnl:,.2f} ({ytd_pct:+.2f}%)</td></tr>"
         "</table>"
     )
 
