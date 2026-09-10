@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     # Trading on any other account requires this to be explicitly true.
     live_trading: bool = False
 
-    watchlist: str = "AAPL,MSFT,AMZN,GOOGL,META,NVDA,JPM,V,UNH,HD,SPCX,TSLA,PLTR,AVGO,ASTX,SOXL,SOXS"
+    watchlist: str = "AAPL,MSFT,AMZN,GOOGL,META,NVDA,JPM,V,UNH,HD,SPCX,TSLA,PLTR,AVGO,ASTX,SOXL,SOXS,LLY,HOOD"
 
     # Deliberately non-overlapping with `watchlist`: running two independent
     # stock strategies live against the same symbols risks one strategy's
