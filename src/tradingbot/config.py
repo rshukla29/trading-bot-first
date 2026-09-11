@@ -105,6 +105,20 @@ class Settings(BaseSettings):
     rsi2_scan_min_price: float = 10.0
     rsi2_scan_min_volume: int = 500_000
 
+    # Blocks a BUY when today's volume is an extreme multiple of normal —
+    # the signature of a news/event-driven move (earnings, FDA, etc.)
+    # rather than routine technical price action, which the RSI(2)
+    # mean-reversion edge doesn't reliably transfer to. Checked live
+    # against 2026-09-11's three scanner entries: PMTS spiked 21.5x
+    # normal volume and CADL 3.36x (both would be blocked at 3.0x) — but
+    # OMDA was only 1.75x, not a volume-spike signature at all. This
+    # filter catches the clearest news-driven cases, not every risky
+    # entry; it's a partial mitigation, not a complete fix. Applies to
+    # every entry, not only scanner-discovered ones, though the calm
+    # fixed watchlist rarely triggers it.
+    rsi2_volume_spike_window: int = 20
+    rsi2_volume_spike_multiplier: float = 3.0
+
     # Iron condor / credit-spread strategy on SPY, QQQ, IWM (daily bars,
     # 30-45 DTE) — the second, independent options strategy: selling
     # defined-risk premium rather than buying long options. Parameters

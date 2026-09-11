@@ -1,6 +1,6 @@
 import pandas as pd
 
-from tradingbot.indicators import avg_volume, fib_retracement_fraction, rolling_vwap, rsi
+from tradingbot.indicators import avg_volume, fib_retracement_fraction, rolling_vwap, rsi, volume_spike_ratio
 
 
 def make_bars(closes: list[float], volumes: list[float] | None = None) -> pd.DataFrame:
@@ -132,3 +132,29 @@ def pytest_approx(value: float, tol: float = 1e-9):
     import pytest
 
     return pytest.approx(value, abs=tol)
+
+
+def test_volume_spike_ratio_flags_extreme_day():
+    # 20 normal days at 1M volume, then a 21.5x spike (matches the real
+    # PMTS incident that motivated this filter).
+    volumes = [1_000_000.0] * 20 + [21_500_000.0]
+    bars = make_bars([100.0] * 21, volumes=volumes)
+    ratio = volume_spike_ratio(bars["volume"], window=20).iloc[-1]
+    assert ratio == pytest_approx(21.5)
+
+
+def test_volume_spike_ratio_normal_day_is_low():
+    volumes = [1_000_000.0] * 20 + [1_750_000.0]  # matches the real OMDA day: 1.75x, not a spike
+    bars = make_bars([100.0] * 21, volumes=volumes)
+    ratio = volume_spike_ratio(bars["volume"], window=20).iloc[-1]
+    assert ratio == pytest_approx(1.75)
+
+
+def test_volume_spike_ratio_excludes_today_from_its_own_baseline():
+    # If today's huge volume leaked into its own baseline, the ratio would
+    # be understated. 20 days at 1M, then today at 21M: baseline must stay
+    # 1M (today excluded), giving ratio 21x, not something smaller.
+    volumes = [1_000_000.0] * 20 + [21_000_000.0]
+    bars = make_bars([100.0] * 21, volumes=volumes)
+    ratio = volume_spike_ratio(bars["volume"], window=20).iloc[-1]
+    assert ratio == pytest_approx(21.0)

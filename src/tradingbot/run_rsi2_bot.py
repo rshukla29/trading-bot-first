@@ -13,6 +13,28 @@ never end up fighting over the same position (see config.py). Any
 currently-held qualifying stock position is always evaluated for its EXIT
 signal even if its symbol drops off a later day's scan.
 
+Two guardrails specific to scanner-discovered movers, added after a real
+incident on 2026-09-11 (three same-day BUY orders — CADL, OMDA, PMTS —
+all still pending, unfilled, when the weekend arrived, each a scanner
+pick with elevated single-day volume):
+
+  - The movers scan is skipped entirely on Fridays (see
+    should_scan_movers_today): a Friday entry would sit queued over the
+    full weekend before it could even fill, compounding weekend gap risk
+    on top of a name the scanner already selected *for* being unusually
+    volatile that specific day. The fixed watchlist still trades normally
+    on Fridays — only new scanner-sourced entries are skipped, and
+    existing positions (from any source) are still managed/exited daily
+    regardless of day of week.
+  - A volume-spike filter blocks any BUY (from either source) when
+    today's volume is an extreme multiple of normal — the signature of a
+    news/event-driven move rather than routine technical price action,
+    which the RSI(2) edge doesn't reliably transfer to. This is a partial
+    mitigation, not a complete fix: checked against the 2026-09-11
+    incident, it would have caught PMTS (21.5x normal volume) and CADL
+    (3.36x), but not OMDA (only 1.75x — not a volume-spike signature at
+    all despite also being an ungrounded, now-stale signal by Monday).
+
 Intended to be run once per day (after market data for the day is final)
 via a scheduled task. Refuses to trade on a non-paper account unless
 LIVE_TRADING=true is explicitly set (see ibkr/client.py).
@@ -22,18 +44,25 @@ LIVE_TRADING=true is explicitly set (see ibkr/client.py).
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pandas as pd
 
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import place_bracket_buy, place_market_sell
-from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe
+from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe, should_scan_movers_today
+from tradingbot.indicators import volume_spike_ratio
 from tradingbot.journal import Journal
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+ET = ZoneInfo("America/New_York")
 
 
 def main() -> None:
@@ -64,7 +93,9 @@ def main() -> None:
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
 
         movers: list[str] = []
-        if settings.rsi2_scan_top_movers:
+        if settings.rsi2_scan_top_movers and not should_scan_movers_today(datetime.now(ET)):
+            logger.info("Friday: skipping top-movers scan for new entries (weekend gap risk) — fixed watchlist only")
+        elif settings.rsi2_scan_top_movers:
             try:
                 movers = fetch_top_movers(
                     client.ib, settings.rsi2_scan_rows, settings.rsi2_scan_min_price, settings.rsi2_scan_min_volume,
@@ -106,6 +137,14 @@ def main() -> None:
                 continue  # already in a position, no RSI overbought exit today; stop-loss is broker-side
 
             if signal.action != "BUY":
+                continue
+
+            spike_ratio = volume_spike_ratio(bars["volume"], settings.rsi2_volume_spike_window).iloc[-1]
+            if pd.notna(spike_ratio) and spike_ratio > settings.rsi2_volume_spike_multiplier:
+                logger.info(
+                    "%s: BUY blocked, volume %.1fx normal (>%0.1fx threshold) — likely news-driven, not a technical dip",
+                    symbol, spike_ratio, settings.rsi2_volume_spike_multiplier,
+                )
                 continue
 
             if kill_switch.is_tripped():

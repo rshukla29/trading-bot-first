@@ -43,6 +43,24 @@ def avg_volume(volume: pd.Series, window: int = 20) -> pd.Series:
     return volume.rolling(window).mean()
 
 
+def volume_spike_ratio(volume: pd.Series, window: int = 20) -> pd.Series:
+    """Each bar's volume as a multiple of the average of the *preceding*
+    `window` bars — today's own volume is excluded from its baseline
+    (same lagging convention used for the realized-volatility estimate in
+    options/pricing.py), otherwise an extreme volume day would inflate
+    its own baseline and understate its own ratio.
+
+    A high ratio is the signature of a news/event-driven move (earnings,
+    FDA action, etc.) rather than routine technical price action — used
+    to filter RSI(2) mean-reversion entries, since the "buy the oversold
+    dip" edge is a bet on short-term technical overextension snapping
+    back, an assumption that doesn't reliably transfer to a stock that
+    just re-rated on real new information.
+    """
+    baseline = volume.shift(1).rolling(window).mean()
+    return volume / baseline
+
+
 def fib_retracement_fraction(bars: pd.DataFrame, lookback: int) -> pd.Series:
     """How far each bar's close has retraced from the `lookback`-window
     swing high back toward the swing low, as a fraction: 0.0 = sitting at

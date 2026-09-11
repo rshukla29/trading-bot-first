@@ -4,7 +4,11 @@ orders placed here.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from ib_async import IB, ScannerSubscription
+
+_FRIDAY = 4  # datetime.weekday(): Monday=0 ... Sunday=6
 
 # Without price/volume filters these return mostly illiquid penny stocks
 # and micro-caps (confirmed by manual check) — abovePrice/aboveVolume cut
@@ -44,3 +48,16 @@ def merge_scan_universe(fixed: list[str], movers: list[str], exclude: list[str])
     two stock strategies from ever fighting over the same symbol)."""
     exclude_set = set(exclude)
     return sorted((set(fixed) | set(movers)) - exclude_set)
+
+
+def should_scan_movers_today(now: datetime) -> bool:
+    """False on Fridays: a scanner-discovered entry placed after Friday's
+    close would sit queued over the full weekend before it could even
+    fill — compounding weekend gap risk on top of names the scanner
+    already selected *for* being unusually volatile that specific day
+    (confirmed live: CADL/OMDA/PMTS on 2026-09-11, each a sharp,
+    high-volume single-day move likely driven by news, queued to fill
+    three calendar days later). The fixed watchlist's calmer names don't
+    carry the same risk and are unaffected by this — only the movers scan
+    is skipped."""
+    return now.weekday() != _FRIDAY
