@@ -16,15 +16,16 @@ class LiveAccountBlockedError(RuntimeError):
 class IBKRClient:
     """Thin wrapper around ib_async.IB with a paper-account safety guard."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, client_id: int | None = None):
         self.settings = settings
+        self.client_id = client_id if client_id is not None else settings.ibkr_client_id
         self.ib = IB()
 
     def connect(self) -> None:
         self.ib.connect(
             self.settings.ibkr_host,
             self.settings.ibkr_port,
-            clientId=self.settings.ibkr_client_id,
+            clientId=self.client_id,
         )
         self._enforce_paper_account_guard()
         logger.info("Connected to IBKR at %s:%s", self.settings.ibkr_host, self.settings.ibkr_port)

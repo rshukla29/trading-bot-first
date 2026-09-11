@@ -163,7 +163,7 @@ def main() -> None:
     if label not in ("premarket", "postmarket"):
         raise SystemExit("usage: python -m tradingbot.run_snapshot [premarket|postmarket]")
 
-    with IBKRClient(settings) as client:
+    with IBKRClient(settings, client_id=settings.snapshot_client_id) as client:
         report = build_report(client, label)
 
     path = write_report_file(report, label)

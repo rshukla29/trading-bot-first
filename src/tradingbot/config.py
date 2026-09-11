@@ -9,6 +9,16 @@ class Settings(BaseSettings):
     ibkr_port: int = 7497
     ibkr_client_id: int = 1
 
+    # run_snapshot.py's own client ID, distinct from ibkr_client_id. It's
+    # scheduled at the same time as RSI2TradingBot (4:30pm ET) — sharing
+    # clientId=1 caused a real collision (IBKR error 326 "client id already
+    # in use") that silently killed the RSI2 run entirely on 2026-09-10.
+    # Snapshot is read-only and never places/modifies orders, so giving it
+    # a dedicated ID is risk-free (unlike changing the order-placing bots'
+    # IDs, which would orphan their ability to manage already-open
+    # positions placed under clientId=1).
+    snapshot_client_id: int = 99
+
     # Risk management
     risk_pct_per_trade: float = 0.01
     stop_loss_pct: float = 0.10
