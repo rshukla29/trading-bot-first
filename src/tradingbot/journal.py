@@ -66,6 +66,30 @@ CREATE TABLE IF NOT EXISTS condor_positions (
     exit_reason TEXT,
     realized_pnl REAL
 );
+
+-- run_orb_bot.py's single-leg long-option position. Only ever one open at
+-- a time (mirrors the backtest's single open_trade slot for one symbol).
+-- Persisted (not just kept in memory) so a crashed/restarted process can
+-- recover which position it's still responsible for monitoring — a 0DTE
+-- long option left unmonitored is a real risk.
+CREATE TABLE IF NOT EXISTS orb_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    entry_date TEXT NOT NULL,
+    expiry TEXT NOT NULL,
+    strike REAL NOT NULL,
+    right TEXT NOT NULL,
+    conid INTEGER NOT NULL,
+    entry_premium REAL NOT NULL,
+    contracts INTEGER NOT NULL,
+    range_low REAL NOT NULL,
+    range_high REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    exit_date TEXT,
+    exit_premium REAL,
+    exit_reason TEXT,
+    realized_pnl REAL
+);
 """
 
 
@@ -180,6 +204,48 @@ class Journal:
                    SET status='closed', exit_date=?, exit_cost=?, exit_reason=?, realized_pnl=?
                    WHERE id=?""",
                 (exit_date, exit_cost, exit_reason, realized_pnl, position_id),
+            )
+
+    def open_orb_position(
+        self,
+        symbol: str,
+        entry_date: str,
+        expiry: str,
+        strike: float,
+        right: str,
+        conid: int,
+        entry_premium: float,
+        contracts: int,
+        range_low: float,
+        range_high: float,
+    ) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO orb_positions
+                   (symbol, entry_date, expiry, strike, right, conid, entry_premium,
+                    contracts, range_low, range_high, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')""",
+                (symbol, entry_date, expiry, strike, right, conid, entry_premium, contracts, range_low, range_high),
+            )
+            return cur.lastrowid
+
+    def open_orb_position_row(self, symbol: str) -> sqlite3.Row | None:
+        """At most one open ORB position at a time — used both to check
+        "is anything open" and, on process restart, to recover which
+        position needs continued exit monitoring."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                "SELECT * FROM orb_positions WHERE status='open' AND symbol=? ORDER BY id DESC LIMIT 1", (symbol,)
+            ).fetchone()
+
+    def close_orb_position(self, position_id: int, exit_date: str, exit_premium: float, exit_reason: str, realized_pnl: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE orb_positions
+                   SET status='closed', exit_date=?, exit_premium=?, exit_reason=?, realized_pnl=?
+                   WHERE id=?""",
+                (exit_date, exit_premium, exit_reason, realized_pnl, position_id),
             )
 
     def log_fill(

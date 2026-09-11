@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # positions placed under clientId=1).
     snapshot_client_id: int = 99
 
+    # run_orb_bot.py's own client ID — a long-running intraday process,
+    # given a dedicated ID up front rather than waiting to discover a
+    # collision the way snapshot_client_id's was found.
+    orb_client_id: int = 98
+
     # Risk management
     risk_pct_per_trade: float = 0.01
     stop_loss_pct: float = 0.10
@@ -71,6 +76,12 @@ class Settings(BaseSettings):
     options_iv_premium_multiplier: float = 1.2
     options_exit_on_range_reentry: bool = True
     options_rate: float = 0.04
+    # Same reasoning as credit_spread_max_contracts_per_trade: a raw
+    # risk-pct sizing formula can occasionally spike to a much larger
+    # position than intended (confirmed twice already — BRZE stock sizing,
+    # iron condor contract sizing) — cap regardless of what the formula
+    # computes.
+    options_max_contracts_per_trade: int = 10
 
     # RSI(2) mean-reversion swing strategy (stocks, daily bars) — the
     # second, independent stock strategy: mean-reversion rather than
