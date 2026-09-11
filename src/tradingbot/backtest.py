@@ -81,15 +81,45 @@ def run_backtest(
     BUY signals (sized by risk-per-trade) and exiting on the strategy's EXIT
     signal or the configured stop-loss, whichever comes first. No lookahead: each
     day's decision only sees bars up to and including that day.
+
+    Signal-based fills (BUY entries and EXIT-signal exits) execute at the
+    *next* bar's open, not the signal bar's own close. A daily-bar signal
+    can only be computed once that bar is final — which, live, means after
+    the exchange has already closed for the day (see run_rsi2_bot.py /
+    run_ibkr_bot.py's 4:30pm ET schedule) — so "buy at the same bar's
+    close" was never actually achievable; the earliest realistic fill is
+    the next session's open. Stop-loss exits are different and stay
+    same-bar: they're a resting broker-side order (see orders.py's
+    place_bracket_buy) that can trigger intraday the moment the bar's low
+    touches it, no next-day delay involved.
     """
     result = BacktestResult(starting_equity=starting_equity)
     equity = starting_equity
     open_trade: Trade | None = None
+    pending_entry_reason: str | None = None
+    pending_exit_reason: str | None = None
 
     for i in range(warmup, len(bars)):
         window = bars.iloc[: i + 1]
         today = window.index[-1]
         row = window.iloc[-1]
+        today_open = float(row["open"])
+
+        # Fill anything queued from yesterday's signal, at today's open.
+        if pending_exit_reason is not None and open_trade is not None:
+            open_trade.exit_date = today
+            open_trade.exit_price = today_open
+            open_trade.exit_reason = pending_exit_reason
+            equity += open_trade.pnl or 0.0
+            result.trades.append(open_trade)
+            open_trade = None
+            pending_exit_reason = None
+
+        if pending_entry_reason is not None and open_trade is None:
+            qty = position_size(equity, today_open, risk_pct, stop_loss_pct)
+            if qty > 0:
+                open_trade = Trade(symbol, today, today_open, qty, entry_reason=pending_entry_reason)
+            pending_entry_reason = None
 
         if open_trade is not None:
             stop_price = open_trade.entry_price * (1 - stop_loss_pct)
@@ -103,18 +133,11 @@ def run_backtest(
             else:
                 signal = strategy.generate_signal(symbol, window)
                 if signal.action == "EXIT":
-                    open_trade.exit_date = today
-                    open_trade.exit_price = float(row["close"])
-                    open_trade.exit_reason = signal.reason
-                    equity += open_trade.pnl or 0.0
-                    result.trades.append(open_trade)
-                    open_trade = None
+                    pending_exit_reason = signal.reason
         else:
             signal = strategy.generate_signal(symbol, window)
             if signal.action == "BUY":
-                qty = position_size(equity, signal.price, risk_pct, stop_loss_pct)
-                if qty > 0:
-                    open_trade = Trade(symbol, today, signal.price, qty, entry_reason=signal.reason)
+                pending_entry_reason = signal.reason
 
         mark_price = float(row["close"])
         unrealized = (mark_price - open_trade.entry_price) * open_trade.quantity if open_trade else 0.0

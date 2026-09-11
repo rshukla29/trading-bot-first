@@ -69,12 +69,14 @@ def make_bars(closes: list[float]) -> pd.DataFrame:
 
 def test_stop_loss_caps_loss_per_trade():
     # Deterministic setup: flat baseline (10 bars) so both SMAs sit at 100,
-    # then a jump to 150 triggers a golden cross BUY (fast=5/slow=10) with
-    # entry_price=150 and stop_price=150*0.8=120, then the next bar's low
-    # (110*0.99=108.9) breaches the stop, forcing a stop-loss exit at 120 —
-    # exactly a 20% loss on that trade.
+    # then a jump to 150 triggers a golden cross BUY signal (fast=5/slow=10)
+    # on that bar's close — but the fill happens at the *next* bar's open
+    # (see run_backtest's next-open-fill docstring), which is also 150
+    # here, giving entry_price=150 and stop_price=150*0.8=120. The bar
+    # after that drops to 110, whose low (110*0.99=108.9) breaches the
+    # stop, forcing a stop-loss exit at 120 — exactly a 20% loss.
     strategy = MovingAverageCrossoverStrategy(fast=5, slow=10, **NO_FILTERS)
-    closes = [100.0] * 10 + [150.0, 110.0, 110.0, 110.0]
+    closes = [100.0] * 10 + [150.0, 150.0, 110.0, 110.0]
     bars = make_bars(closes)
     result = run_backtest(
         "TEST", bars, strategy,
@@ -85,6 +87,35 @@ def test_stop_loss_caps_loss_per_trade():
     for trade in stop_loss_trades:
         loss_pct = (trade.exit_price - trade.entry_price) / trade.entry_price
         assert loss_pct <= -0.19  # allow tiny float rounding
+
+
+def test_entry_fills_at_next_bar_open_not_signal_bar_close():
+    # Flat at 100 for 10 bars, then a jump straight to a different open/close
+    # pair on the signal bar (open=140, close=150 -- distinguishable from
+    # both) so a same-bar-close fill (the old, unrealistic behavior) would
+    # show entry_price=150, while a next-bar-open fill (the fix) shows
+    # whatever the *following* bar's open is -- set here to 145, a third
+    # distinct value neither 100, 140 nor 150 could be confused with.
+    strategy = MovingAverageCrossoverStrategy(fast=5, slow=10, **NO_FILTERS)
+    dates = pd.date_range("2022-01-01", periods=13, freq="B")
+    opens = [100.0] * 10 + [140.0, 145.0, 145.0]
+    closes = [100.0] * 10 + [150.0, 145.0, 145.0]
+    bars = pd.DataFrame(
+        {
+            "open": opens,
+            "high": [max(o, c) * 1.01 for o, c in zip(opens, closes)],
+            "low": [min(o, c) * 0.99 for o, c in zip(opens, closes)],
+            "close": closes,
+            "volume": [1_000_000] * 13,
+        },
+        index=dates,
+    )
+    result = run_backtest(
+        "TEST", bars, strategy,
+        starting_equity=100_000, risk_pct=0.01, stop_loss_pct=0.20, warmup=10,
+    )
+    assert result.trades, f"expected a trade, got: {result.trades}"
+    assert result.trades[0].entry_price == 145.0
 
 
 def test_backtest_with_trend_filter_integrates_without_crashing():
