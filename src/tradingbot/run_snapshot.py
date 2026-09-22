@@ -1,7 +1,17 @@
-"""Daily pre-market / post-market account snapshot: open orders,
-per-position unrealized P&L, and account-level realized/unrealized/daily
-P&L. Writes a local HTML report under reports_dir and commits it to git
-(no push) so the account history accumulates in version control.
+"""Daily pre-market / post-market account snapshot, plus week-to-date and
+month-to-date period reports (generated alongside the postmarket run):
+open orders, per-position unrealized P&L, closed-position realized P&L
+for the period, and account-level P&L. Writes local HTML reports under
+reports_dir and commits them to git (no push) so the account history
+accumulates in version control.
+
+Every run persists today's closed trades to the journal's closed_trades
+table (see journal.py) — this is the *only* record of them once the day
+passes: IBKR's reqExecutions() only returns today's executions regardless
+of the requested start time (confirmed live: a filter asking for
+everything since 2026-09-01 still returned only same-day fills), so a
+weekly/monthly report can't reconstruct earlier closes by re-querying
+IBKR after the fact. Period reports read from the journal, not IBKR.
 
 Read-only — never places orders.
 
@@ -11,14 +21,19 @@ Read-only — never places orders.
 from __future__ import annotations
 
 import logging
+import sqlite3
 import subprocess
 import sys
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, timedelta
 from html import escape
 from pathlib import Path
 
+from ib_async import IB, ExecutionFilter, Fill
+
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
+from tradingbot.journal import Journal
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -35,6 +50,15 @@ th:first-child, td:first-child { text-align: left; }
 """
 
 
+@dataclass
+class ClosedTrade:
+    symbol: str
+    side: str
+    quantity: float
+    price: float
+    realized_pnl: float
+
+
 def _describe_contract(c) -> str:
     if c.secType == "OPT":
         return f"{c.symbol} {c.lastTradeDateOrContractMonth} {c.strike}{c.right}"
@@ -47,7 +71,108 @@ def _pnl_class(value: float) -> str:
     return "pos" if value >= 0 else "neg"
 
 
-def build_report(client: IBKRClient, label: str) -> str:
+def get_closed_fills_today(ib: IB, today: date) -> list[Fill]:
+    """Today's fills whose commission report shows a nonzero realizedPNL
+    — IBKR attributes the whole round-trip's realized P&L to the closing
+    fill, so an opening fill always reports 0.0 here.
+
+    reqExecutions()'s own return value is unreliable for this: commission
+    reports arrive asynchronously via a separate event shortly after the
+    fill, so realizedPNL often reads back as 0.0 even on a genuine closing
+    trade if read immediately. Waiting briefly and re-reading from
+    ib.fills() (the live-updating cache) gets the real number — confirmed
+    live: a same-day SPY option round-trip read realizedPNL=0.0 from the
+    immediate return, then 418.06 (the correct value) after this wait.
+    """
+    today_str = today.strftime("%Y%m%d") + "-00:00:00"
+    ib.reqExecutions(ExecutionFilter(time=today_str))
+    ib.sleep(2)
+    return [f for f in ib.fills() if f.commissionReport and f.commissionReport.realizedPNL != 0.0]
+
+
+def persist_closed_fills(journal: Journal, fills: list[Fill], today: date) -> list[ClosedTrade]:
+    """Records each fill in the journal (safe to call every run — dedup is
+    by IBKR's own exec_id) and returns the normalized list for immediate
+    use in today's report."""
+    trades = []
+    for f in fills:
+        trade = ClosedTrade(
+            symbol=_describe_contract(f.contract),
+            side=f.execution.side,
+            quantity=f.execution.shares,
+            price=f.execution.price,
+            realized_pnl=f.commissionReport.realizedPNL,
+        )
+        journal.record_closed_trade(
+            f.execution.execId, today.isoformat(), trade.symbol, trade.side, trade.quantity, trade.price,
+            trade.realized_pnl,
+        )
+        trades.append(trade)
+    return trades
+
+
+def _closed_trades_from_journal_rows(rows: list[sqlite3.Row]) -> list[ClosedTrade]:
+    return [
+        ClosedTrade(row["symbol"], row["side"], row["quantity"], row["price"], row["realized_pnl"])
+        for row in rows
+    ]
+
+
+def _render_positions_section(portfolio) -> tuple[list[str], float]:
+    parts: list[str] = ["<h2>Open positions &amp; unrealized P&amp;L</h2>"]
+    if not portfolio:
+        parts.append("<p class='empty'>(none)</p>")
+        return parts, 0.0
+
+    parts.append(
+        "<table><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th>"
+        "<th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>"
+    )
+    total_unrealized = 0.0
+    for p in portfolio:
+        desc = _describe_contract(p.contract)
+        total_unrealized += p.unrealizedPNL
+        parts.append(
+            f"<tr><td>{escape(desc)}</td><td>{p.position:.0f}</td>"
+            f"<td>{p.averageCost:.2f}</td><td>{p.marketPrice:.2f}</td>"
+            f"<td>{p.marketValue:.2f}</td>"
+            f"<td class='{_pnl_class(p.unrealizedPNL)}'>{p.unrealizedPNL:.2f}</td></tr>"
+        )
+    parts.append(
+        f"<tr><td colspan='5'><b>TOTAL</b></td>"
+        f"<td class='{_pnl_class(total_unrealized)}'><b>{total_unrealized:.2f}</b></td></tr>"
+    )
+    parts.append("</table>")
+    return parts, total_unrealized
+
+
+def _render_closed_trades_section(trades: list[ClosedTrade], period_label: str) -> tuple[list[str], float]:
+    parts: list[str] = [f"<h2>Closed positions P&amp;L ({escape(period_label)})</h2>"]
+    if not trades:
+        parts.append("<p class='empty'>(none)</p>")
+        return parts, 0.0
+
+    parts.append(
+        "<table><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Fill Price</th>"
+        "<th>Realized P&amp;L</th></tr>"
+    )
+    total_realized = 0.0
+    for t in trades:
+        total_realized += t.realized_pnl
+        parts.append(
+            f"<tr><td>{escape(t.symbol)}</td><td>{escape(t.side)}</td>"
+            f"<td>{t.quantity:.0f}</td><td>{t.price:.2f}</td>"
+            f"<td class='{_pnl_class(t.realized_pnl)}'>{t.realized_pnl:.2f}</td></tr>"
+        )
+    parts.append(
+        f"<tr><td colspan='4'><b>TOTAL</b></td>"
+        f"<td class='{_pnl_class(total_realized)}'><b>{total_realized:.2f}</b></td></tr>"
+    )
+    parts.append("</table>")
+    return parts, total_realized
+
+
+def build_report(client: IBKRClient, label: str, closed_trades: list[ClosedTrade]) -> str:
     ib = client.ib
     accounts = ib.managedAccounts()
     account = accounts[0] if accounts else ""
@@ -85,29 +210,11 @@ def build_report(client: IBKRClient, label: str) -> str:
             )
         parts.append("</table>")
 
-    parts.append("<h2>Open positions &amp; unrealized P&amp;L</h2>")
-    if not portfolio:
-        parts.append("<p class='empty'>(none)</p>")
-    else:
-        parts.append(
-            "<table><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th>"
-            "<th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>"
-        )
-        total_unrealized = 0.0
-        for p in portfolio:
-            desc = _describe_contract(p.contract)
-            total_unrealized += p.unrealizedPNL
-            parts.append(
-                f"<tr><td>{escape(desc)}</td><td>{p.position:.0f}</td>"
-                f"<td>{p.averageCost:.2f}</td><td>{p.marketPrice:.2f}</td>"
-                f"<td>{p.marketValue:.2f}</td>"
-                f"<td class='{_pnl_class(p.unrealizedPNL)}'>{p.unrealizedPNL:.2f}</td></tr>"
-            )
-        parts.append(
-            f"<tr><td colspan='5'><b>TOTAL</b></td>"
-            f"<td class='{_pnl_class(total_unrealized)}'><b>{total_unrealized:.2f}</b></td></tr>"
-        )
-        parts.append("</table>")
+    positions_parts, _ = _render_positions_section(portfolio)
+    parts.extend(positions_parts)
+
+    closed_parts, _ = _render_closed_trades_section(closed_trades, "today")
+    parts.extend(closed_parts)
 
     net_liq = client.net_liquidation()
     ytd_pnl = net_liq - settings.account_starting_balance
@@ -135,21 +242,89 @@ def build_report(client: IBKRClient, label: str) -> str:
     return "\n".join(parts)
 
 
-def write_report_file(report: str, label: str) -> Path:
+def build_period_report(client: IBKRClient, journal: Journal, period_label: str, period_start: date) -> str:
+    """Week-to-date ("weekly", Monday through today) or month-to-date
+    ("monthly", the 1st through today) report. On the last trading day of
+    the period this doubles as the final summary for that week/month —
+    no separate "closing" report needed. Closed trades come from the
+    journal (see module docstring), not a live IBKR query, since IBKR's
+    execution history doesn't actually reach back before today."""
+    ib = client.ib
+    accounts = ib.managedAccounts()
+    account = accounts[0] if accounts else ""
+    today = date.today()
+
+    portfolio = [p for p in ib.portfolio() if p.position != 0]
+    closed_trades = _closed_trades_from_journal_rows(
+        journal.closed_trades_between(period_start.isoformat(), today.isoformat())
+    )
+    net_liq = client.net_liquidation()
+    baseline = journal.balance_before(period_start.isoformat())
+
+    parts: list[str] = [
+        f"<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{period_label.capitalize()} report {today.isoformat()}</title>"
+        f"<style>{_STYLE}</style></head><body>",
+        f"<h1>Trading bot {escape(period_label)} report — {period_start.isoformat()} to "
+        f"{today.isoformat()} (account {escape(account)})</h1>",
+    ]
+
+    positions_parts, unrealized_now = _render_positions_section(portfolio)
+    parts.extend(positions_parts)
+
+    closed_parts, realized_period = _render_closed_trades_section(closed_trades, period_label)
+    parts.extend(closed_parts)
+
+    total_period_pnl = realized_period + unrealized_now
+
+    parts.append(f"<h2>Account P&amp;L ({escape(period_label)})</h2>")
+    parts.append(
+        "<table>"
+        f"<tr><td>Realized P&amp;L</td><td class='{_pnl_class(realized_period)}'>{realized_period:.2f}</td></tr>"
+        f"<tr><td>Unrealized P&amp;L (current)</td><td class='{_pnl_class(unrealized_now)}'>{unrealized_now:.2f}</td></tr>"
+        f"<tr><td>Total P&amp;L</td><td class='{_pnl_class(total_period_pnl)}'>{total_period_pnl:.2f}</td></tr>"
+        "</table>"
+    )
+
+    parts.append("<h2>Overall</h2>")
+    if baseline is None:
+        parts.append(
+            "<table><tr><td>Total Balance (Net Liquidation)</td><td>"
+            f"{net_liq:,.2f}</td></tr>"
+            "<tr><td colspan='2' class='empty'>No prior balance recorded before this period yet — "
+            "period % change unavailable until at least one full day has been recorded.</td></tr></table>"
+        )
+    else:
+        balance_pnl = net_liq - baseline
+        balance_pct = (balance_pnl / baseline * 100) if baseline else 0.0
+        parts.append(
+            "<table>"
+            f"<tr><td>Total Balance (Net Liquidation)</td><td>{net_liq:,.2f}</td></tr>"
+            f"<tr><td>{escape(period_label.capitalize())} P&amp;L (vs {baseline:,.2f} balance "
+            f"on {period_start.isoformat()})</td>"
+            f"<td class='{_pnl_class(balance_pnl)}'>{balance_pnl:,.2f} ({balance_pct:+.2f}%)</td></tr>"
+            "</table>"
+        )
+
+    parts.append("</body></html>")
+    return "\n".join(parts)
+
+
+def write_report_file(report: str, filename_stem: str) -> Path:
     reports_dir = Path(settings.reports_dir)
     reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"snapshot_{date.today().isoformat()}_{label}.html"
+    path = reports_dir / f"{filename_stem}.html"
     path.write_text(report, encoding="utf-8")
     return path
 
 
-def commit_report(path: Path, label: str) -> None:
+def commit_report(path: Path, description: str) -> None:
     """Commit the report locally (no push) so the account history
     accumulates in version control without needing manual intervention."""
     try:
         subprocess.run(["git", "add", str(path)], check=True, capture_output=True, text=True)
         subprocess.run(
-            ["git", "commit", "-m", f"Snapshot: {label} {date.today().isoformat()}"],
+            ["git", "commit", "-m", f"Snapshot: {description}"],
             check=True, capture_output=True, text=True,
         )
         logger.info("Committed %s", path)
@@ -158,17 +333,46 @@ def commit_report(path: Path, label: str) -> None:
         logger.warning("git commit skipped/failed for %s: %s", path, e.stderr.strip())
 
 
+def _week_start(today: date) -> date:
+    return today - timedelta(days=today.weekday())  # Monday
+
+
+def _month_start(today: date) -> date:
+    return today.replace(day=1)
+
+
 def main() -> None:
     label = sys.argv[1] if len(sys.argv) > 1 else "snapshot"
     if label not in ("premarket", "postmarket"):
         raise SystemExit("usage: python -m tradingbot.run_snapshot [premarket|postmarket]")
 
-    with IBKRClient(settings, client_id=settings.snapshot_client_id) as client:
-        report = build_report(client, label)
+    journal = Journal(settings.db_path)
+    today = date.today()
 
-    path = write_report_file(report, label)
-    print(f"Saved to {path}")
-    commit_report(path, label)
+    with IBKRClient(settings, client_id=settings.snapshot_client_id) as client:
+        fills = get_closed_fills_today(client.ib, today)
+        closed_trades_today = persist_closed_fills(journal, fills, today)
+
+        report = build_report(client, label, closed_trades_today)
+        path = write_report_file(report, f"snapshot_{today.isoformat()}_{label}")
+        print(f"Saved to {path}")
+        commit_report(path, f"{label} {today.isoformat()}")
+
+        if label == "postmarket":
+            # Recorded once per day, after the trading day is done — the
+            # baseline weekly/monthly reports compare future periods
+            # against. Also drives this run's own week/month-to-date figures.
+            journal.record_daily_balance(today.isoformat(), client.net_liquidation())
+
+            weekly_report = build_period_report(client, journal, "weekly", _week_start(today))
+            weekly_path = write_report_file(weekly_report, f"weekly_{today.isoformat()}")
+            print(f"Saved to {weekly_path}")
+            commit_report(weekly_path, f"weekly {today.isoformat()}")
+
+            monthly_report = build_period_report(client, journal, "monthly", _month_start(today))
+            monthly_path = write_report_file(monthly_report, f"monthly_{today.isoformat()}")
+            print(f"Saved to {monthly_path}")
+            commit_report(monthly_path, f"monthly {today.isoformat()}")
 
 
 if __name__ == "__main__":

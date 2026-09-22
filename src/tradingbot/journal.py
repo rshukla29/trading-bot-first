@@ -90,6 +90,39 @@ CREATE TABLE IF NOT EXISTS orb_positions (
     exit_reason TEXT,
     realized_pnl REAL
 );
+
+-- One row per calendar date, recorded by the postmarket snapshot after
+-- that day's trading is done. Gives weekly/monthly reports a real
+-- baseline balance to compare against — IBKR's own API has no
+-- calendar-period PnL tag (see run_snapshot.py's YTD comment for the
+-- same constraint), so period P&L is computed as (current
+-- NetLiquidation - the balance recorded on the last trading day before
+-- the period started).
+CREATE TABLE IF NOT EXISTS daily_balances (
+    date TEXT PRIMARY KEY,
+    net_liquidation REAL NOT NULL,
+    ts TEXT NOT NULL
+);
+
+-- Individual closed-position fills, recorded by every snapshot run (see
+-- run_snapshot.py). IBKR's reqExecutions() only returns *today's*
+-- executions regardless of the requested start time — confirmed live: a
+-- filter asking for everything since 2026-09-01 still returned only
+-- same-day fills — so a weekly/monthly report can't reconstruct earlier
+-- closes by re-querying IBKR after the fact. This table is the only
+-- record of them once the day they happened on has passed. exec_id is
+-- IBKR's own unique execution id, giving natural, safe dedup across
+-- reruns of the same day's snapshot.
+CREATE TABLE IF NOT EXISTS closed_trades (
+    exec_id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    price REAL NOT NULL,
+    realized_pnl REAL NOT NULL,
+    ts TEXT NOT NULL
+);
 """
 
 
@@ -274,3 +307,48 @@ class Journal:
                     realized_pnl,
                 ),
             )
+
+    def record_daily_balance(self, date: str, net_liquidation: float) -> None:
+        """Upsert — safe to call more than once for the same date (e.g. a
+        rerun), always keeping the latest value recorded for that date."""
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO daily_balances (date, net_liquidation, ts) VALUES (?, ?, ?)
+                   ON CONFLICT(date) DO UPDATE SET net_liquidation=excluded.net_liquidation, ts=excluded.ts""",
+                (date, net_liquidation, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def balance_before(self, date: str) -> float | None:
+        """Most recent recorded balance strictly before `date` (YYYY-MM-DD)
+        — the baseline for a period starting on `date`. None if no balance
+        has ever been recorded before then (e.g. the very first week this
+        table existed)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT net_liquidation FROM daily_balances WHERE date < ? ORDER BY date DESC LIMIT 1",
+                (date,),
+            ).fetchone()
+            return row[0] if row else None
+
+    def record_closed_trade(
+        self, exec_id: str, date: str, symbol: str, side: str, quantity: float, price: float, realized_pnl: float,
+    ) -> None:
+        """INSERT OR IGNORE: exec_id is IBKR's own unique execution id, so
+        re-recording the same fill on a later rerun of the same day's
+        snapshot is a safe no-op, not a duplicate."""
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO closed_trades
+                   (exec_id, date, symbol, side, quantity, price, realized_pnl, ts)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (exec_id, date, symbol, side, quantity, price, realized_pnl, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def closed_trades_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        """Inclusive of both endpoints (YYYY-MM-DD)."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                "SELECT * FROM closed_trades WHERE date >= ? AND date <= ? ORDER BY ts",
+                (start_date, end_date),
+            ).fetchall()
