@@ -20,6 +20,7 @@ Read-only — never places orders.
 """
 from __future__ import annotations
 
+import calendar
 import logging
 import sqlite3
 import subprocess
@@ -341,6 +342,24 @@ def _month_start(today: date) -> date:
     return today.replace(day=1)
 
 
+def _is_friday(today: date) -> bool:
+    return today.weekday() == 4
+
+
+def _is_last_trading_day_of_month(today: date) -> bool:
+    """True on the last weekday (Mon-Fri) on or before the month's actual
+    last calendar day — not simply "today's the 28th-31st", since when
+    the calendar's last day falls on a weekend the real last trading day
+    is the Friday before it. Doesn't know about market holidays (nothing
+    else in this system does either — schtasks itself just fires Mon-Fri)
+    so a holiday-shortened month's true last session could differ."""
+    last_day_num = calendar.monthrange(today.year, today.month)[1]
+    last_day = today.replace(day=last_day_num)
+    while last_day.weekday() >= 5:  # Saturday=5, Sunday=6
+        last_day -= timedelta(days=1)
+    return today == last_day
+
+
 def main() -> None:
     label = sys.argv[1] if len(sys.argv) > 1 else "snapshot"
     if label not in ("premarket", "postmarket"):
@@ -359,20 +378,22 @@ def main() -> None:
         commit_report(path, f"{label} {today.isoformat()}")
 
         if label == "postmarket":
-            # Recorded once per day, after the trading day is done — the
-            # baseline weekly/monthly reports compare future periods
-            # against. Also drives this run's own week/month-to-date figures.
+            # Recorded every postmarket day regardless of period boundaries
+            # — this is the running history weekly/monthly baselines are
+            # read from later, not something itself gated to Friday/month-end.
             journal.record_daily_balance(today.isoformat(), client.net_liquidation())
 
-            weekly_report = build_period_report(client, journal, "weekly", _week_start(today))
-            weekly_path = write_report_file(weekly_report, f"weekly_{today.isoformat()}")
-            print(f"Saved to {weekly_path}")
-            commit_report(weekly_path, f"weekly {today.isoformat()}")
+            if _is_friday(today):
+                weekly_report = build_period_report(client, journal, "weekly", _week_start(today))
+                weekly_path = write_report_file(weekly_report, f"weekly_{today.isoformat()}")
+                print(f"Saved to {weekly_path}")
+                commit_report(weekly_path, f"weekly {today.isoformat()}")
 
-            monthly_report = build_period_report(client, journal, "monthly", _month_start(today))
-            monthly_path = write_report_file(monthly_report, f"monthly_{today.isoformat()}")
-            print(f"Saved to {monthly_path}")
-            commit_report(monthly_path, f"monthly {today.isoformat()}")
+            if _is_last_trading_day_of_month(today):
+                monthly_report = build_period_report(client, journal, "monthly", _month_start(today))
+                monthly_path = write_report_file(monthly_report, f"monthly_{today.isoformat()}")
+                print(f"Saved to {monthly_path}")
+                commit_report(monthly_path, f"monthly {today.isoformat()}")
 
 
 if __name__ == "__main__":
