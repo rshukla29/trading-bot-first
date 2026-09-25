@@ -32,7 +32,14 @@ def main() -> None:
         equity = client.net_liquidation()
         kill_switch = DailyLossKillSwitch(settings.max_daily_loss_pct, equity)
 
-        open_positions = {p.contract.symbol: p for p in client.positions() if p.position != 0}
+        # Only this strategy's own positions (watchlist stocks) — counting
+        # every account position let the other strategies' holdings (each
+        # iron condor alone is 4 option legs) permanently fill
+        # max_positions and block every MA entry.
+        open_positions = {
+            p.contract.symbol: p for p in client.positions()
+            if p.position != 0 and p.contract.secType == "STK" and p.contract.symbol in settings.symbols
+        }
         logger.info("Equity: %.2f | Open positions: %s", equity, list(open_positions))
 
         for symbol in settings.symbols:

@@ -9,11 +9,11 @@ you explicitly opt into live money.**
 
 | # | Strategy | Instrument | Style | Schedule (ET, Mon–Fri) | Entrypoint |
 |---|---|---|---|---|---|
-| 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | Manual only (no scheduled task) | `run_ibkr_bot` |
+| 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | 4:30pm, right after RSI(2) — `RSI2TradingBot` | `run_ibkr_bot` |
 | 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top-movers scanner (not Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
 | 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
-| 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` (not yet registered) | `run_trend_join_bot` |
+| 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 
 Run any of them manually with `python -m tradingbot.<entrypoint>`.
 
@@ -102,7 +102,12 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
 ### How the strategies stay out of each other's way
 
 - MA-crossover and RSI(2) watchlists don't overlap; RSI(2)'s scanner
-  excludes the MA watchlist.
+  excludes the MA watchlist. Both use client ID 1, so they run one after
+  the other in the same 4:30pm task (`run_rsi2_scheduled.ps1`), never at
+  the same time.
+- MA-crossover manages (and can sell) **any** stock position on its
+  watchlist, including ones bought manually — keep manual trades off
+  `WATCHLIST`.
 - Trend Join skips both watchlists and any symbol already held, and
   records its positions in the journal (`trend_join_positions`) so RSI(2)
   never treats them as its own.
