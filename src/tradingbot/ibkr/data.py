@@ -25,7 +25,9 @@ def fetch_daily_bars(ib: IB, symbol: str, duration: str = "2 Y") -> pd.DataFrame
     return df[["open", "high", "low", "close", "volume"]]
 
 
-def fetch_intraday_bars(ib: IB, symbol: str, bar_minutes: int, duration: str = "2 D") -> pd.DataFrame:
+def fetch_intraday_bars(
+    ib: IB, symbol: str, bar_minutes: int, duration: str = "2 D", use_rth: bool = True,
+) -> pd.DataFrame:
     """Fetch intraday historical bars (e.g. for an opening-range strategy)
     as a DataFrame indexed by US/Eastern timestamps — the ORB strategy
     identifies "today's session" via `.index.date`, which must line up
@@ -42,7 +44,7 @@ def fetch_intraday_bars(ib: IB, symbol: str, bar_minutes: int, duration: str = "
         durationStr=duration,
         barSizeSetting=f"{bar_minutes} mins",
         whatToShow="TRADES",
-        useRTH=True,
+        useRTH=use_rth,  # False includes pre/post-market bars (4:00-20:00 ET)
         formatDate=2,  # UTC; converted to America/New_York below
     )
     df = util.df(bars)

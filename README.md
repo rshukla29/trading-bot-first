@@ -1,18 +1,146 @@
 # trading-bot
 
-Automated swing-trading bot for stocks: moving-average crossover entries,
-10%-stop-loss risk management, one shared strategy driving two brokers —
-Interactive Brokers (via `ib_async`, direct Python bot) and Robinhood (via
-its official Agentic Trading MCP, driven by a scheduled Claude Code
-routine). **Paper/sandbox trading only until you explicitly opt into live
-money.**
+Automated trading bots for Interactive Brokers (via `ib_async`): five
+independent strategies covering stocks and SPY options, plus daily,
+weekly and monthly P&L reports. **Paper trading only (account `DU…`) until
+you explicitly opt into live money.**
+
+## Strategies at a glance
+
+| # | Strategy | Instrument | Style | Schedule (ET, Mon–Fri) | Entrypoint |
+|---|---|---|---|---|---|
+| 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | Manual only (no scheduled task) | `run_ibkr_bot` |
+| 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top-movers scanner (not Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
+| 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
+| 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
+| 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` (not yet registered) | `run_trend_join_bot` |
+
+Run any of them manually with `python -m tradingbot.<entrypoint>`.
+
+### 1. MA-crossover + consolidation retest
+
+Code: [strategy/ma_crossover.py](src/tradingbot/strategy/ma_crossover.py),
+[strategy/consolidation_retest.py](src/tradingbot/strategy/consolidation_retest.py)
+
+- **Entry A — golden cross:** 20-SMA crosses above 50-SMA, **and** price
+  above 200-SMA, 5-day avg volume ≥ 20-day avg, RSI(14) < 70, price above
+  the 20-day rolling VWAP.
+- **Entry B — consolidation retest:** 15-day range ≤ 6% → breakout close
+  above it on ≥ 1.2× volume → within 5 bars, a dip back to the breakout
+  level that closes back above it.
+- **Exit:** death cross (20-SMA below 50-SMA), or RSI(14) goes above 80 and
+  falls back below it; plus the broker-side 10% stop.
+
+### 2. RSI(2) mean-reversion
+
+Code: [strategy/rsi2_mean_reversion.py](src/tradingbot/strategy/rsi2_mean_reversion.py),
+[run_rsi2_bot.py](src/tradingbot/run_rsi2_bot.py)
+
+- **Entry:** price above 200-SMA **and** RSI(2) < 5. Blocked if today's
+  volume is > 3× the 20-day average (news-driven move, not a technical dip).
+- **Exit:** RSI(2) > 65; plus the broker-side 10% stop.
+- **Universe:** fixed `RSI2_WATCHLIST` + IBKR top gainers/losers/most-active
+  (price ≥ $10, volume ≥ 500k). Scanner skipped on Fridays to avoid
+  weekend-gap risk. Runs after the close, so orders fill at the next open.
+
+**Sizing for #1 and #2:** 1% account risk per trade, capped at $2,000
+notional per position (`MAX_POSITION_VALUE`), 10% broker-side stop, max 5
+positions.
+
+### 3. Opening Range Breakout (SPY 0DTE options)
+
+Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
+[run_orb_bot.py](src/tradingbot/run_orb_bot.py)
+
+- **Opening range:** high/low of the first 15 minutes.
+- **Entry:** first 5-min close above the range → buy ATM call; below →
+  buy ATM put.
+- **Exit (first hit):** −30% of premium, +50% of premium, SPY back inside
+  the range, or 3:55pm flatten.
+- One position at a time, max 10 contracts; exits checked every ~60s.
+  Open position is recovered from the journal if the process restarts.
+
+### 4. Iron condor (SPY)
+
+Code: [options/iron_condor.py](src/tradingbot/options/iron_condor.py),
+[run_iron_condor_bot.py](src/tradingbot/run_iron_condor_bot.py)
+
+- **Entry:** sell ~16-delta call and put, buy $5-wide wings, ~45 DTE. At
+  most one new condor every 7 days, max 3 open.
+- **Exit (first hit):** 50% of credit captured, loss = 2× credit, or 21 DTE.
+- Max 10 contracts per trade. SPY only — QQQ/IWM options fail to fill on
+  this account (data entitlement gap).
+
+### 5. Trend Join Long (S&P 500 intraday gap-and-go)
+
+Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
+[run_trend_join_bot.py](src/tradingbot/run_trend_join_bot.py). Source:
+[Humbled Trader — AI trading bot with Claude + IBKR](https://www.humbledtrader.com/blog/ai-trading-bot-claude-ibkr/)
+
+- **Prefilter** (yfinance, at 9:55, 10:25 … 12:55): S&P 500 names whose
+  open gapped ≥ 3% above yesterday's close **and** whose close yesterday
+  was above the 200-SMA; top 20 by gap size.
+- **Entry** (every completed 5-min bar, 10:05–3:30) — all must pass:
+  - price above yesterday's high
+  - price above today's premarket high (4:00–9:30)
+  - bar closes at a new high of day
+  - relative volume ≥ 2× (cumulative volume vs. the 14-day average at the
+    same time of day)
+- **Exit:**
+  - initial stop = low of day − 1% (never more than 10% below entry),
+    placed at IBKR together with the entry
+  - +0.75R → sell ⅓ (R = entry − initial stop)
+  - +1R → stop to breakeven
+  - after breakeven → trail stop 1¢ under 5-min swing lows (2 bars each side)
+  - 3:51pm → flatten everything
+- **Limits:** $2,000 per position, max 5 open, max 5 trades/day, one entry
+  per symbol per day. Never trades symbols on the other watchlists or
+  already held.
+- No backtest — the article's own backtest doesn't transfer to live
+  execution; paper-trade it for at least 2 weeks before judging it.
+
+### How the strategies stay out of each other's way
+
+- MA-crossover and RSI(2) watchlists don't overlap; RSI(2)'s scanner
+  excludes the MA watchlist.
+- Trend Join skips both watchlists and any symbol already held, and
+  records its positions in the journal (`trend_join_positions`) so RSI(2)
+  never treats them as its own.
+- Each long-running process has its own IBKR client ID (orders can only be
+  modified by the client ID that placed them):
+
+  | Client ID | Used by |
+  |---|---|
+  | 1 | MA-crossover, RSI(2), iron condor |
+  | 97 | Trend Join |
+  | 98 | ORB |
+  | 99 | Snapshot reports |
+
+## Reports
+
+`run_snapshot` writes HTML to [reports/](reports/) and commits it locally
+(no push):
+
+- **Daily** — 9:00am premarket and 4:30pm postmarket: open orders, open
+  positions with unrealized P&L, positions closed today, account P&L,
+  total balance, YTD P&L (vs. `ACCOUNT_STARTING_BALANCE`).
+- **Weekly** — Fridays after the close (Mon–Fri).
+- **Monthly** — last trading day of the month after the close.
+
+## Tools
+
+- **S&P 500 scanner** (read-only, yfinance): top gainers/losers, unusual
+  volume, and which names strategies #1 and #2 would buy right now.
+  `python -m tradingbot.sp500_scanner [--top 20] [--csv path]`
+- **IBKR top movers check** (read-only): `python -m scripts.check_top_movers`
+- **Backtests:** `scripts/backtest_report.py`, `rsi2_backtest_report.py`,
+  `options_backtest_report.py`, `iron_condor_backtest_report.py`
 
 ## Setup
 
 ### 1. Python environment
 
-Requires Python 3.11+ (already installed on this machine as of project
-creation). From `trading-bot/`:
+Requires Python 3.11+. From `trading-bot/`:
 
 ```
 python -m venv .venv
@@ -26,10 +154,10 @@ pip install -e ".[dev]"
 copy .env.example .env
 ```
 
-Edit `.env`: at minimum confirm `IBKR_PORT` matches your TWS/Gateway paper
-port (7497 for TWS paper, 4002 for Gateway paper), and adjust `WATCHLIST`,
-`RISK_PCT_PER_TRADE`, `STOP_LOSS_PCT`, `MAX_POSITIONS` as you like. Never
-commit `.env` — it's gitignored.
+Edit `.env`: confirm `IBKR_PORT` matches your TWS/Gateway paper port (7497
+for TWS paper, 4002 for Gateway paper). Every strategy parameter above is
+configurable there — see `.env.example` for the full list. Never commit
+`.env` — it's gitignored.
 
 ### 3. IBKR paper account
 
@@ -37,51 +165,21 @@ commit `.env` — it's gitignored.
 2. Enable API access: File → Global Configuration → API → Settings →
    check "Enable ActiveX and Socket Clients", confirm the port matches
    `.env`, and add `127.0.0.1` to trusted IPs.
-3. Leave TWS/Gateway running whenever you run this bot — it connects to it
-   locally, there is no cloud IBKR endpoint here.
+3. Leave TWS/Gateway running whenever the bots run — they connect locally.
 
-### 4. Robinhood Agentic Trading (optional, for the second broker)
+### 4. Scheduling
 
-See [robinhood/AGENT_INSTRUCTIONS.md](robinhood/AGENT_INSTRUCTIONS.md) —
-this requires you to connect Robinhood's MCP server and open a dedicated
-Agentic account yourself (desktop setup, can't be automated). Once done,
-tell Claude and it'll set up the scheduled routine that mirrors signals
-into Robinhood.
-
-## Usage
-
-Run tests:
-
-```
-pytest
-```
-
-Backtest the strategy over the configured watchlist:
-
-```
-python scripts\backtest_report.py
-```
-
-Print today's signals without trading (sanity check):
-
-```
-python -m tradingbot.signal_report
-```
-
-Run the IBKR bot for real (paper account) — places orders:
-
-```
-python -m tradingbot.run_ibkr_bot
-```
-
-Schedule this daily via Windows Task Scheduler once you're comfortable
-with backtest results and a few manual dry runs.
+Each scheduled bot has a wrapper in [scripts/](scripts/)
+(`run_*_scheduled.ps1`) registered in Windows Task Scheduler; logs go to
+`logs/<bot>_<date>.log`.
 
 ## Safety
 
-- `run_ibkr_bot.py` refuses to trade on any account whose ID doesn't start
-  with `DU` (IBKR's paper-account prefix) unless `LIVE_TRADING=true` is set
-  explicitly in `.env`.
-- Every signal, order, and fill is logged to `data/journal.db` (SQLite).
-- A daily-loss kill-switch (`MAX_DAILY_LOSS_PCT`) halts new entries once
-  tripped.
+- Every bot refuses to trade on an account whose ID doesn't start with
+  `DU` (IBKR paper) unless `LIVE_TRADING=true` is set in `.env`.
+- Every signal, order, and position is logged to `data/journal.db` (SQLite).
+- Hard caps: $2,000 per stock position, 10 contracts per options trade.
+- A daily-loss kill-switch (`MAX_DAILY_LOSS_PCT`) halts new stock entries
+  once tripped.
+
+Run tests with `pytest`.

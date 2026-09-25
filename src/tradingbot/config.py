@@ -146,6 +146,31 @@ class Settings(BaseSettings):
     credit_spread_min_vol_percentile: float = 0.0  # 0 disables the vol-timing filter
     credit_spread_vol_percentile_lookback: int = 252
 
+    # "Trend Join Long" intraday gap-and-go on S&P 500 names (see
+    # strategy/trend_join.py for the full rule set and source). Sizing
+    # reuses risk_pct_per_trade and max_position_value (the account-wide
+    # $2,000 cap — the article used $2,500 = 10% of a $25k account).
+    trend_join_client_id: int = 97
+    trend_join_min_gap_pct: float = 3.0
+    trend_join_min_price: float = 3.0
+    trend_join_trend_ma: int = 200
+    trend_join_min_rvol: float = 2.0
+    trend_join_rvol_lookback_days: int = 14
+    trend_join_max_candidates: int = 20
+    trend_join_max_positions: int = 5
+    trend_join_max_trades_per_day: int = 5
+    trend_join_bar_minutes: int = 5
+    trend_join_lod_stop_buffer_pct: float = 0.01
+    trend_join_partial_r: float = 0.75
+    trend_join_partial_fraction: float = 0.3333
+    trend_join_breakeven_r: float = 1.0
+    trend_join_swing_bars: int = 2
+    trend_join_entry_start: str = "10:05"
+    trend_join_entry_end: str = "15:30"
+    trend_join_flatten_time: str = "15:51"
+    # Prefilter (yfinance daily-bar gap scan) reruns at these ET times.
+    trend_join_prefilter_times: str = "09:55,10:25,10:55,11:25,11:55,12:25,12:55"
+
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.
     live_trading: bool = False
@@ -191,6 +216,10 @@ class Settings(BaseSettings):
     @property
     def rsi2_symbols(self) -> list[str]:
         return [s.strip().upper() for s in self.rsi2_watchlist.split(",") if s.strip()]
+
+    @property
+    def trend_join_prefilter_time_list(self) -> list[str]:
+        return [t.strip() for t in self.trend_join_prefilter_times.split(",") if t.strip()]
 
     @property
     def credit_spread_symbol_list(self) -> list[str]:

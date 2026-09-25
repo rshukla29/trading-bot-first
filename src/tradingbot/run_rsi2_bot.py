@@ -81,14 +81,16 @@ def main() -> None:
         kill_switch = DailyLossKillSwitch(settings.max_daily_loss_pct, equity)
 
         # Any held stock (non-option) position outside the MA-crossover
-        # watchlist is unambiguously ours: MA-crossover only ever trades
-        # settings.symbols, and RSI2 is the only other strategy that
-        # trades equities. This lets a position opened via a dynamic
-        # mover still get evaluated for its EXIT signal on a later day
-        # even if that symbol has since dropped off the scanner.
+        # watchlist is ours, except Trend Join's intraday positions (tracked
+        # in its own journal table — normally flat by 15:51, but one could
+        # be left over if its flatten failed). This lets a position opened
+        # via a dynamic mover still get evaluated for its EXIT signal on a
+        # later day even if that symbol has since dropped off the scanner.
+        trend_join_symbols = {row["symbol"] for row in journal.open_trend_join_positions()}
         rsi2_positions = {
             p.contract.symbol: p for p in client.positions()
-            if p.position != 0 and p.contract.secType == "STK" and p.contract.symbol not in settings.symbols
+            if p.position != 0 and p.contract.secType == "STK"
+            and p.contract.symbol not in settings.symbols and p.contract.symbol not in trend_join_symbols
         }
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
 

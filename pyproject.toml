@@ -10,6 +10,9 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "python-dotenv>=1.0",
+    "yfinance>=0.2.40",
+    "lxml>=5.0",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]

@@ -52,3 +52,24 @@ def test_record_closed_trade_dedupes_by_exec_id(journal):
     journal.record_closed_trade("e1", "2026-09-21", "SPY", "SLD", 10, 1.27, 418.06)  # rerun same snapshot
     rows = journal.closed_trades_between("2026-09-21", "2026-09-21")
     assert len(rows) == 1
+
+
+def test_trend_join_position_lifecycle(journal):
+    pid = journal.open_trend_join_position("AAA", "2026-09-25", 106.0, 18, 101.97, 555, "gap 4%")
+    assert [r["symbol"] for r in journal.open_trend_join_positions()] == ["AAA"]
+    assert journal.trend_join_symbols_traded_on("2026-09-25") == ["AAA"]
+
+    journal.update_trend_join_position(pid, remaining=12, partial_taken=1, realized_pnl=15.0)
+    row = journal.open_trend_join_positions()[0]
+    assert row["remaining"] == 12 and row["partial_taken"] == 1
+
+    journal.close_trend_join_position(pid, "trailing_stop", 40.0)
+    assert journal.open_trend_join_positions() == []
+    # Still counts toward the day's trades after closing (no same-day re-entry).
+    assert journal.trend_join_symbols_traded_on("2026-09-25") == ["AAA"]
+
+
+def test_update_trend_join_position_rejects_unknown_fields(journal):
+    pid = journal.open_trend_join_position("AAA", "2026-09-25", 106.0, 18, 101.97, None, "x")
+    with pytest.raises(ValueError):
+        journal.update_trend_join_position(pid, status="closed")

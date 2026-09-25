@@ -91,6 +91,32 @@ CREATE TABLE IF NOT EXISTS orb_positions (
     realized_pnl REAL
 );
 
+-- run_trend_join_bot.py's intraday stock positions. Persisted for the same
+-- reason as orb_positions (restart recovery), plus it records which
+-- symbols this strategy owns — IBKR positions carry no strategy tag, and
+-- run_rsi2_bot.py otherwise treats any non-watchlist stock as its own.
+-- stop_order_id is the broker-side protective stop, modified in place as
+-- the stop moves to breakeven and trails.
+CREATE TABLE IF NOT EXISTS trend_join_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    entry_ts TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    qty INTEGER NOT NULL,
+    remaining INTEGER NOT NULL,
+    initial_stop REAL NOT NULL,
+    stop_price REAL NOT NULL,
+    stop_order_id INTEGER,
+    partial_taken INTEGER NOT NULL DEFAULT 0,
+    breakeven INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    exit_ts TEXT,
+    exit_reason TEXT,
+    realized_pnl REAL
+);
+
 -- One row per calendar date, recorded by the postmarket snapshot after
 -- that day's trading is done. Gives weekly/monthly reports a real
 -- baseline balance to compare against — IBKR's own API has no
@@ -279,6 +305,55 @@ class Journal:
                    SET status='closed', exit_date=?, exit_premium=?, exit_reason=?, realized_pnl=?
                    WHERE id=?""",
                 (exit_date, exit_premium, exit_reason, realized_pnl, position_id),
+            )
+
+    def open_trend_join_position(
+        self, symbol: str, trade_date: str, entry_price: float, qty: int,
+        initial_stop: float, stop_order_id: int | None, reason: str,
+    ) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO trend_join_positions
+                   (symbol, trade_date, entry_ts, entry_price, qty, remaining, initial_stop,
+                    stop_price, stop_order_id, reason, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')""",
+                (symbol, trade_date, datetime.now(timezone.utc).isoformat(), entry_price, qty, qty,
+                 initial_stop, initial_stop, stop_order_id, reason),
+            )
+            return cur.lastrowid
+
+    def open_trend_join_positions(self) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute("SELECT * FROM trend_join_positions WHERE status='open' ORDER BY id").fetchall()
+
+    def trend_join_symbols_traded_on(self, trade_date: str) -> list[str]:
+        """Every symbol entered on `trade_date`, open or closed — enforces
+        max trades/day and one entry per symbol per day."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT symbol FROM trend_join_positions WHERE trade_date=? ORDER BY id", (trade_date,)
+            ).fetchall()
+            return [r[0] for r in rows]
+
+    def update_trend_join_position(self, position_id: int, **fields) -> None:
+        allowed = {"remaining", "stop_price", "stop_order_id", "partial_taken", "breakeven", "realized_pnl"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"Unknown trend_join_positions fields: {unknown}")
+        assignments = ", ".join(f"{k}=?" for k in fields)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE trend_join_positions SET {assignments} WHERE id=?", (*fields.values(), position_id)
+            )
+
+    def close_trend_join_position(self, position_id: int, exit_reason: str, realized_pnl: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE trend_join_positions
+                   SET status='closed', remaining=0, exit_ts=?, exit_reason=?, realized_pnl=?
+                   WHERE id=?""",
+                (datetime.now(timezone.utc).isoformat(), exit_reason, realized_pnl, position_id),
             )
 
     def log_fill(
