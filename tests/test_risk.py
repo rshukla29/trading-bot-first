@@ -47,3 +47,30 @@ def test_kill_switch_reset():
 def test_can_open_new_position():
     assert can_open_new_position(current_open_positions=3, max_positions=5)
     assert not can_open_new_position(current_open_positions=5, max_positions=5)
+
+
+# --- stepped profit-locking stop ---------------------------------------------
+
+from tradingbot.risk import step_trailing_stop  # noqa: E402
+
+
+def test_step_stop_user_example():
+    # 100 shares @ $10 = $1,000: +11% -> stop $1,100 total; +21% -> $1,200.
+    assert step_trailing_stop(10.0, 11.10) == 11.00
+    assert step_trailing_stop(10.0, 12.10) == 12.00
+    assert step_trailing_stop(10.0, 13.10) == 13.00
+
+
+def test_step_stop_none_below_first_step():
+    assert step_trailing_stop(10.0, 10.00) is None
+    assert step_trailing_stop(10.0, 10.50) is None
+    assert step_trailing_stop(10.0, 11.09) is None  # +10.9%: buffer not yet cleared
+
+
+def test_step_stop_between_steps_stays_on_lower_step():
+    assert step_trailing_stop(10.0, 11.90) == 11.00  # +19%
+    assert step_trailing_stop(10.0, 12.09) == 11.00  # +20.9%
+
+
+def test_step_stop_on_a_loss_is_none():
+    assert step_trailing_stop(10.0, 8.00) is None

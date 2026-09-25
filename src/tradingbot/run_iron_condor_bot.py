@@ -175,7 +175,7 @@ def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) ->
 def main() -> None:
     journal = Journal(settings.db_path)
 
-    with IBKRClient(settings) as client:
+    with IBKRClient(settings, client_id=settings.condor_client_id) as client:
         equity = client.net_liquidation()
         logger.info("Equity: %.2f", equity)
 

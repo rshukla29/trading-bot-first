@@ -23,6 +23,27 @@ def position_size(
     return qty
 
 
+def step_trailing_stop(entry: float, price: float, step_pct: float = 0.10, buffer_pct: float = 0.01) -> float | None:
+    """Profit-locking stop level in fixed steps: once the gain reaches
+    step + buffer, the stop moves to entry + step; at 2*step + buffer to
+    entry + 2*step; and so on. With the defaults, bought at $10:
+    +11% ($11.10) -> stop $11.00, +21% ($12.10) -> stop $12.00.
+
+    Returns None below the first step (+11%) — the original stop stays in
+    force. Callers must only ever *raise* a stop with this (take the max
+    with the current stop), never lower it. The buffer keeps the new stop
+    from landing right at the current price and firing on the next tick.
+    """
+    if entry <= 0 or step_pct <= 0:
+        return None
+    gain = price / entry - 1
+    # epsilon: 0.11 - 0.01 = 0.0999999... in floating point
+    steps = math.floor((gain - buffer_pct) / step_pct + 1e-9)
+    if steps < 1:
+        return None
+    return round(entry * (1 + steps * step_pct), 2)
+
+
 @dataclass
 class DailyLossKillSwitch:
     """Halts new trading for the day once realized losses exceed a threshold."""

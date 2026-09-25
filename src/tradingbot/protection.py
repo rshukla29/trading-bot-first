@@ -25,6 +25,7 @@ from ib_async import IB, Stock, StopOrder
 from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import cancel_stop_orders, place_market_sell
 from tradingbot.journal import Journal
+from tradingbot.risk import step_trailing_stop
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,17 @@ def check_protection(
     if last_price <= stop_price:
         return StopCheck("sell_now", stop_price)
     return StopCheck("place_stop", stop_price)
+
+
+def plan_stop_raise(
+    avg_cost: float, price: float, current_stop: float, step_pct: float, buffer_pct: float,
+) -> float | None:
+    """New (higher) stop level from the 10% step rule, or None to leave
+    the stop alone. Never returns a level at or below the current stop."""
+    level = step_trailing_stop(avg_cost, price, step_pct, buffer_pct)
+    if level is None or level <= current_stop:
+        return None
+    return level
 
 
 def working_stop_qty_by_symbol(trades) -> dict[str, float]:

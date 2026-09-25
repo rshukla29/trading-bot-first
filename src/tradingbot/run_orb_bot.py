@@ -16,10 +16,12 @@ daily-bar bots (low win rate, large average win per the ORB strategy's own
 docstring) — settings.options_max_contracts_per_trade caps sizing
 regardless of what the risk-pct formula computes.
 
-Exit priority exactly matches the backtest: eod_flatten (15:55 ET, 5 min
-before the close, matching the iron condor's own close-buffer reasoning)
-> stop_loss > profit_target > range_reentry — see
-options/live_orb.py:determine_exit_reason.
+Exit priority: eod_flatten (15:55 ET, 5 min before the close, matching
+the iron condor's own close-buffer reasoning) > stop_loss > step_stop >
+profit_target > range_reentry — see options/live_orb.py:
+determine_exit_reason. All but step_stop match the backtest; step_stop
+(the 10% step profit lock, added 2026-09-25) is live-only, so live
+results will differ from the backtest when it fires.
 
 If the process crashes and is restarted mid-day, it recovers any
 already-open position from the journal (orb_positions table) rather than
@@ -53,6 +55,7 @@ from tradingbot.options.live_orb import (
     wait_for_fill,
 )
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
+from tradingbot.risk import step_trailing_stop
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("ib_async").setLevel(logging.WARNING)  # its own wrapper logs every tick/portfolio update at INFO
@@ -97,6 +100,16 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
     _, _, spot_mid = get_quote(ib, underlying)
     _, _, premium_mid = get_quote(ib, position["contract"])
 
+    # Step stop is based on the highest premium seen, so a spike to +21%
+    # that fades still exits at +20%. Peak is in-memory only: after a
+    # restart it rebuilds from the current premium.
+    position["peak_premium"] = max(position.get("peak_premium", position["entry_premium"]), premium_mid)
+    step_stop = None
+    if settings.step_stop_enabled:
+        step_stop = step_trailing_stop(
+            position["entry_premium"], position["peak_premium"], settings.step_stop_pct, settings.step_stop_buffer_pct,
+        )
+
     reason = determine_exit_reason(
         now_time=_now_et().time(),
         current_premium=premium_mid,
@@ -108,11 +121,13 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         range_low=position["range_low"],
         range_high=position["range_high"],
         exit_on_range_reentry=settings.options_exit_on_range_reentry,
+        step_stop_premium=step_stop,
     )
     if reason is None:
         logger.info(
-            "%s: ORB position holding (premium %.2f vs entry %.2f, spot %.2f)",
-            symbol, premium_mid, position["entry_premium"], spot_mid,
+            "%s: ORB position holding (premium %.2f vs entry %.2f, peak %.2f, step stop %s, spot %.2f)",
+            symbol, premium_mid, position["entry_premium"], position["peak_premium"],
+            f"{step_stop:.2f}" if step_stop else "none", spot_mid,
         )
         return False
 

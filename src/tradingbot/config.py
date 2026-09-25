@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     # collision the way snapshot_client_id's was found.
     orb_client_id: int = 98
 
+    # run_iron_condor_bot.py (3:45pm) — its own ID so it can't collide with
+    # run_step_stop_bot.py, which holds client 1 from 9:30am to 4:00pm. The
+    # condor bot never leaves resting orders (it waits for a fill or
+    # cancels), so moving it off client 1 orphans nothing.
+    condor_client_id: int = 96
+
     # Risk management
     risk_pct_per_trade: float = 0.01
     stop_loss_pct: float = 0.10
@@ -34,6 +40,14 @@ class Settings(BaseSettings):
     # top-movers universe from sizing a large position in a volatile
     # small/mid-cap the way it would size one in a stable blue-chip.
     max_position_value: float = 2000.0
+
+    # Stepped profit-locking stop (risk.step_trailing_stop): at +11% gain the
+    # stop moves to +10%, at +21% to +20%, etc. — never lowered. Applied to
+    # MA-crossover and RSI(2) stock positions by run_step_stop_bot.py
+    # (every ~60s during market hours) and to ORB option premium.
+    step_stop_enabled: bool = True
+    step_stop_pct: float = 0.10
+    step_stop_buffer_pct: float = 0.01
 
     # Strategy
     fast_ma: int = 20

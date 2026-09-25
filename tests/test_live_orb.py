@@ -59,3 +59,17 @@ def test_range_reentry_put_side():
 
 def test_range_reentry_disabled():
     assert determine_exit_reason(**_base_kwargs(right="C", spot=101.0, exit_on_range_reentry=False)) is None
+
+
+def test_step_stop_exits_when_premium_falls_to_locked_step():
+    # entry 1.00, peak reached +21% -> step stop 1.20
+    assert determine_exit_reason(**_base_kwargs(current_premium=1.20, step_stop_premium=1.20)) == "step_stop"
+    assert determine_exit_reason(**_base_kwargs(current_premium=1.21, step_stop_premium=1.20)) is None
+
+
+def test_step_stop_none_means_disabled():
+    assert determine_exit_reason(**_base_kwargs(current_premium=1.05, step_stop_premium=None)) is None
+
+
+def test_stop_loss_still_outranks_step_stop():
+    assert determine_exit_reason(**_base_kwargs(current_premium=0.70, step_stop_premium=1.10)) == "stop_loss"

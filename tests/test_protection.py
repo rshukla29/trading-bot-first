@@ -104,3 +104,20 @@ def test_snapshot_flags_unprotected_bot_positions_only():
     assert "ASTX" not in html.split("WARNING")[1].split("</p>")[0]
     assert "manual — not managed by bots" in html
     assert "53.52" in html
+
+
+# --- step stop raise -----------------------------------------------------------
+
+from tradingbot.protection import plan_stop_raise  # noqa: E402
+
+
+def test_plan_stop_raise_moves_up_in_steps():
+    # cost $10, initial stop $9: +11% -> $11, +21% -> $12
+    assert plan_stop_raise(10.0, 11.10, 9.00, 0.10, 0.01) == 11.00
+    assert plan_stop_raise(10.0, 12.10, 11.00, 0.10, 0.01) == 12.00
+
+
+def test_plan_stop_raise_never_lowers_or_repeats():
+    assert plan_stop_raise(10.0, 11.50, 11.00, 0.10, 0.01) is None  # already at the +10% step
+    assert plan_stop_raise(10.0, 11.10, 12.00, 0.10, 0.01) is None  # price fell back: stop stays at 12
+    assert plan_stop_raise(10.0, 10.50, 9.00, 0.10, 0.01) is None   # below +11%: keep -10%

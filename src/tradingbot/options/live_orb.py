@@ -40,15 +40,21 @@ def determine_exit_reason(
     range_high: float,
     exit_on_range_reentry: bool,
     eod_flatten_time: time = EOD_FLATTEN_TIME,
+    step_stop_premium: float | None = None,
 ) -> str | None:
-    """Pure decision logic, mirrors options/backtest.py's exit priority
-    exactly (eod_flatten > stop_loss > profit_target > range_reentry) so
-    live behavior matches what was actually backtested. Returns the exit
-    reason, or None to keep holding."""
+    """Pure decision logic. Priority: eod_flatten > stop_loss > step_stop >
+    profit_target > range_reentry. Everything except step_stop mirrors
+    options/backtest.py; step_stop (10% step profit lock on premium) is
+    live-only and disabled when step_stop_premium is None. Returns the
+    exit reason, or None to keep holding."""
     if now_time >= eod_flatten_time:
         return "eod_flatten"
     if current_premium <= entry_premium * (1 - stop_loss_pct_of_premium):
         return "stop_loss"
+    # 10% step profit lock (risk.step_trailing_stop, computed from the peak
+    # premium): once the option has been up +11%, falling back to +10% exits.
+    if step_stop_premium is not None and current_premium <= step_stop_premium:
+        return "step_stop"
     if profit_target_pct is not None and current_premium >= entry_premium * (1 + profit_target_pct):
         return "profit_target"
     if exit_on_range_reentry:

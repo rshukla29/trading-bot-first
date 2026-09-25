@@ -13,9 +13,37 @@ you explicitly opt into live money.**
 | 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top-movers scanner (not Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
 | 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
+| — | Step-stop manager (see below) | MA-crossover + RSI(2) positions | Raises stops as profit grows | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 
 Run any of them manually with `python -m tradingbot.<entrypoint>`.
+
+### Profit-locking step stop (MA-crossover, RSI(2), ORB)
+
+Once a position is in profit, its stop moves up in 10% steps and never
+comes back down. Bought 100 shares at $10 ($1,000):
+
+| Gain reaches | Stop moves to | Locked-in value |
+|---|---|---|
+| (entry) | −10% ($9.00) | $900 |
+| +11% ($11.10) | +10% ($11.00) | $1,100 |
+| +21% ($12.10) | +20% ($12.00) | $1,200 |
+| +31% … | +30% … | … |
+
+The stop stays at −10% until the gain first reaches +11% (the 1% buffer
+keeps the new stop from sitting right at the current price).
+
+- **Stocks (MA-crossover, RSI(2)):** `run_step_stop_bot` checks every ~60s
+  from 9:30am to 4:00pm (`StepStopTradingBot`, starts 9:25am) and raises
+  the stop order at IBKR, so an intraday spike that fades still locks in
+  its step. Uses client ID 1 (the ID that placed the stops) — don't run
+  the MA/RSI(2) bots by hand while it's running.
+- **ORB:** applied to the option premium, from the highest premium seen
+  since entry; exits with reason `step_stop`. Live-only — the ORB backtest
+  doesn't model it.
+- Not applied to Trend Join (its own breakeven + swing-low trail) or the
+  iron condor (short premium; already closes at 50% of max profit).
+- Settings: `STEP_STOP_ENABLED`, `STEP_STOP_PCT`, `STEP_STOP_BUFFER_PCT`.
 
 ### 1. MA-crossover + consolidation retest
 
@@ -118,7 +146,8 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
 
   | Client ID | Used by |
   |---|---|
-  | 1 | MA-crossover, RSI(2), iron condor |
+  | 1 | MA-crossover, RSI(2) (4:30pm), step-stop manager (9:30am–4:00pm) |
+  | 96 | Iron condor |
   | 97 | Trend Join |
   | 98 | ORB |
   | 99 | Snapshot reports |
