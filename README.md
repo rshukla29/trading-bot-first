@@ -13,10 +13,22 @@ you explicitly opt into live money.**
 | 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top-movers scanner (not Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
 | 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
-| — | Step-stop manager (see below) | MA-crossover + RSI(2) positions | Raises stops as profit grows | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
+| — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Raises stops in 10% profit steps | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
 
 Run any of them manually with `python -m tradingbot.<entrypoint>`.
+
+### Daily schedule (ET, Mon–Fri — Windows Task Scheduler)
+
+| Time | Task | What happens |
+|---|---|---|
+| 9:00am | `SnapshotPremarketBot` | Premarket report |
+| 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
+| 9:29am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout; flat by 3:55pm |
+| 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
+| 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
+| 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
+| 4:30pm | `SnapshotPostmarketBot` | Postmarket report (+ weekly on Fridays, monthly on the last trading day) |
 
 ### Profit-locking step stop (MA-crossover, RSI(2), ORB)
 
@@ -57,7 +69,8 @@ Code: [strategy/ma_crossover.py](src/tradingbot/strategy/ma_crossover.py),
   above it on ≥ 1.2× volume → within 5 bars, a dip back to the breakout
   level that closes back above it.
 - **Exit:** death cross (20-SMA below 50-SMA), or RSI(14) goes above 80 and
-  falls back below it; plus the broker-side 10% stop.
+  falls back below it; plus the broker-side stop (−10%, then raised in 10%
+  profit steps).
 
 ### 2. RSI(2) mean-reversion
 
@@ -66,7 +79,8 @@ Code: [strategy/rsi2_mean_reversion.py](src/tradingbot/strategy/rsi2_mean_revers
 
 - **Entry:** price above 200-SMA **and** RSI(2) < 5. Blocked if today's
   volume is > 3× the 20-day average (news-driven move, not a technical dip).
-- **Exit:** RSI(2) > 65; plus the broker-side 10% stop.
+- **Exit:** RSI(2) > 65; plus the broker-side stop (−10%, then raised in
+  10% profit steps).
 - **Universe:** fixed `RSI2_WATCHLIST` + IBKR top gainers/losers/most-active
   (price ≥ $10, volume ≥ 500k). Scanner skipped on Fridays to avoid
   weekend-gap risk. Runs after the close, so orders fill at the next open.
@@ -83,8 +97,9 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
 - **Opening range:** high/low of the first 15 minutes.
 - **Entry:** first 5-min close above the range → buy ATM call; below →
   buy ATM put.
-- **Exit (first hit):** −30% of premium, +50% of premium, SPY back inside
-  the range, or 3:55pm flatten.
+- **Exit (first hit):** 3:55pm flatten, −30% of premium, step stop (premium
+  falls back to a locked 10% step), +50% of premium, or SPY back inside
+  the range.
 - One position at a time, max 10 contracts; exits checked every ~60s.
   Open position is recovered from the journal if the process restarts.
 
@@ -159,7 +174,9 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
 
 - **Daily** — 9:00am premarket and 4:30pm postmarket: open orders, open
   positions with unrealized P&L, positions closed today, account P&L,
-  total balance, YTD P&L (vs. `ACCOUNT_STARTING_BALANCE`).
+  total balance, YTD P&L (vs. `ACCOUNT_STARTING_BALANCE`), and a
+  **stop-loss coverage** table (each stock's owner and working stop, with
+  an UNPROTECTED warning for any bot position missing one).
 - **Weekly** — Fridays after the close (Mon–Fri).
 - **Monthly** — last trading day of the month after the close.
 
@@ -215,6 +232,7 @@ Each scheduled bot has a wrapper in [scripts/](scripts/)
   `DU` (IBKR paper) unless `LIVE_TRADING=true` is set in `.env`.
 - Every signal, order, and position is logged to `data/journal.db` (SQLite).
 - Hard caps: $2,000 per stock position, 10 contracts per options trade.
+- Bots never manage, sell or add to manual positions (see ownership above).
 - **Stop audit:** every MA/RSI(2) run first checks that each position it
   owns has a working stop covering the full quantity. Missing → a GTC
   stop is placed at 10% below cost; already below that level → sold. Each
@@ -224,3 +242,8 @@ Each scheduled bot has a wrapper in [scripts/](scripts/)
   once tripped.
 
 Run tests with `pytest`.
+
+## Repositories
+
+Pushed to both `rshukla29/trading-bot` (origin) and
+`rshukla29/trading-bot-first` (copy), both private.
