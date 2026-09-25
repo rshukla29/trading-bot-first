@@ -186,6 +186,11 @@ Each scheduled bot has a wrapper in [scripts/](scripts/)
   `DU` (IBKR paper) unless `LIVE_TRADING=true` is set in `.env`.
 - Every signal, order, and position is logged to `data/journal.db` (SQLite).
 - Hard caps: $2,000 per stock position, 10 contracts per options trade.
+- **Stop audit:** every MA/RSI(2) run first checks that each position it
+  owns has a working stop covering the full quantity. Missing → a GTC
+  stop is placed at 10% below cost; already below that level → sold. Each
+  snapshot also has a "Stop-loss coverage" table that flags any bot
+  position as UNPROTECTED. See [protection.py](src/tradingbot/protection.py).
 - A daily-loss kill-switch (`MAX_DAILY_LOSS_PCT`) halts new stock entries
   once tripped.
 

@@ -57,6 +57,7 @@ from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe, shoul
 from tradingbot.indicators import volume_spike_ratio
 from tradingbot.journal import Journal
 from tradingbot.ownership import resolve_ownership
+from tradingbot.protection import ensure_protective_stops
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
 
@@ -94,6 +95,11 @@ def main() -> None:
         open_order_symbols = {t.contract.symbol for t in client.ib.reqAllOpenOrders()}
         ownership = resolve_ownership(journal, STRATEGY, set(held), open_order_symbols)
         rsi2_positions = {s: held[s] for s in ownership.mine}
+        # Every owned position must have a working stop; anything already
+        # through its 10% level without one is sold (see protection.py).
+        stop_audit_sold = ensure_protective_stops(client.ib, journal, rsi2_positions, settings.stop_loss_pct, "run_rsi2_bot")
+        for symbol in stop_audit_sold:
+            rsi2_positions.pop(symbol)
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
 
         movers: list[str] = []
@@ -110,7 +116,7 @@ def main() -> None:
 
         entry_universe = merge_scan_universe(settings.rsi2_symbols, movers, settings.symbols)
         # Held by someone else (manual or another strategy): never buy on top of it.
-        symbols_to_check = sorted((set(entry_universe) - ownership.not_mine) | set(rsi2_positions))
+        symbols_to_check = sorted((set(entry_universe) - ownership.not_mine - stop_audit_sold) | set(rsi2_positions))
         skipped = set(entry_universe) & ownership.not_mine
         if skipped:
             logger.info("Held but not opened by this bot (left alone): %s", sorted(skipped))

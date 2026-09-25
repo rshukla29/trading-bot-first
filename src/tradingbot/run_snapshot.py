@@ -35,6 +35,7 @@ from ib_async import IB, ExecutionFilter, Fill
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.journal import Journal
+from tradingbot.protection import working_stop_qty_by_symbol
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ th { background: #f4f4f4; text-align: right; }
 th:first-child, td:first-child { text-align: left; }
 .pos { color: #0a7a2f; } .neg { color: #b3261e; }
 .empty { color: #888; font-style: italic; }
+.warn { color: #b3261e; font-weight: bold; }
 """
 
 
@@ -147,6 +149,58 @@ def _render_positions_section(portfolio) -> tuple[list[str], float]:
     return parts, total_unrealized
 
 
+def stock_owners(journal: Journal) -> dict[str, str]:
+    """symbol -> which bot owns that stock position (absent = manual)."""
+    owners = {row["symbol"]: "trend_join" for row in journal.open_trend_join_positions()}
+    for strategy in ("ma_crossover", "rsi2"):
+        owners.update({s: strategy for s in journal.owned_stocks(strategy)})
+    return owners
+
+
+def _render_stop_coverage_section(portfolio, orders, owners: dict[str, str]) -> list[str]:
+    """Every stock position, its owner and its working stop — so a bot
+    position without a stop (the 2026-09-25 expired-DAY-stop failure) is
+    visible in every snapshot instead of going unnoticed for days."""
+    parts: list[str] = ["<h2>Stop-loss coverage (stocks)</h2>"]
+    stocks = [p for p in portfolio if p.contract.secType == "STK"]
+    if not stocks:
+        parts.append("<p class='empty'>(no stock positions)</p>")
+        return parts
+
+    stop_qty = working_stop_qty_by_symbol(orders)
+    stop_px: dict[str, float] = {}
+    for t in orders:
+        if t.contract.secType == "STK" and t.order.action == "SELL" and t.order.orderType == "STP":
+            stop_px[t.contract.symbol] = t.order.auxPrice
+
+    unprotected = []
+    parts.append(
+        "<table><tr><th>Symbol</th><th>Owner</th><th>Qty</th><th>Stop Qty</th>"
+        "<th>Stop Price</th><th>Status</th></tr>"
+    )
+    for p in stocks:
+        sym = p.contract.symbol
+        owner = owners.get(sym, "manual")
+        covered = stop_qty.get(sym, 0.0)
+        if owner == "manual":
+            status = "manual — not managed by bots"
+        elif covered >= p.position:
+            status = "protected"
+        else:
+            status = "<span class='warn'>UNPROTECTED</span>"
+            unprotected.append(sym)
+        price = f"{stop_px[sym]:.2f}" if sym in stop_px else "—"
+        parts.append(
+            f"<tr><td>{escape(sym)}</td><td>{escape(owner)}</td><td>{p.position:.0f}</td>"
+            f"<td>{covered:.0f}</td><td>{price}</td><td>{status}</td></tr>"
+        )
+    parts.append("</table>")
+    if unprotected:
+        parts.insert(1, f"<p class='warn'>WARNING: bot positions without a working stop: {escape(', '.join(unprotected))}. "
+                        "The next MA/RSI(2) run will re-place the stop (or sell if already below it).</p>")
+    return parts
+
+
 def _render_closed_trades_section(trades: list[ClosedTrade], period_label: str) -> tuple[list[str], float]:
     parts: list[str] = [f"<h2>Closed positions P&amp;L ({escape(period_label)})</h2>"]
     if not trades:
@@ -173,7 +227,9 @@ def _render_closed_trades_section(trades: list[ClosedTrade], period_label: str) 
     return parts, total_realized
 
 
-def build_report(client: IBKRClient, label: str, closed_trades: list[ClosedTrade]) -> str:
+def build_report(
+    client: IBKRClient, label: str, closed_trades: list[ClosedTrade], owners: dict[str, str] | None = None,
+) -> str:
     ib = client.ib
     accounts = ib.managedAccounts()
     account = accounts[0] if accounts else ""
@@ -213,6 +269,8 @@ def build_report(client: IBKRClient, label: str, closed_trades: list[ClosedTrade
 
     positions_parts, _ = _render_positions_section(portfolio)
     parts.extend(positions_parts)
+
+    parts.extend(_render_stop_coverage_section(portfolio, orders, owners or {}))
 
     closed_parts, _ = _render_closed_trades_section(closed_trades, "today")
     parts.extend(closed_parts)
@@ -372,7 +430,7 @@ def main() -> None:
         fills = get_closed_fills_today(client.ib, today)
         closed_trades_today = persist_closed_fills(journal, fills, today)
 
-        report = build_report(client, label, closed_trades_today)
+        report = build_report(client, label, closed_trades_today, stock_owners(journal))
         path = write_report_file(report, f"snapshot_{today.isoformat()}_{label}")
         print(f"Saved to {path}")
         commit_report(path, f"{label} {today.isoformat()}")

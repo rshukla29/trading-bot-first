@@ -70,7 +70,9 @@ def place_market_sell(ib: IB, symbol: str, quantity: int) -> Trade:
     contract = Stock(symbol, "SMART", "USD")
     ib.qualifyContracts(contract)
     cancel_stop_orders(ib, symbol)
-    order = MarketOrder("SELL", quantity)
+    # Explicit tif: left unset, the account's order preset rewrites it to
+    # DAY via error 10349 and a cancel/resubmit cycle (seen 2026-09-25).
+    order = MarketOrder("SELL", quantity, tif="DAY")
     trade = ib.placeOrder(contract, order)
     logger.info("Placed market SELL %s x%d", symbol, quantity)
     return trade
