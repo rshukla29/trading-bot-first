@@ -17,11 +17,14 @@ from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import place_bracket_buy, place_market_sell
 from tradingbot.journal import Journal
+from tradingbot.ownership import resolve_ownership
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.factory import build_strategy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+STRATEGY = "ma_crossover"
 
 
 def main() -> None:
@@ -32,17 +35,23 @@ def main() -> None:
         equity = client.net_liquidation()
         kill_switch = DailyLossKillSwitch(settings.max_daily_loss_pct, equity)
 
-        # Only this strategy's own positions (watchlist stocks) — counting
-        # every account position let the other strategies' holdings (each
-        # iron condor alone is 4 option legs) permanently fill
-        # max_positions and block every MA entry.
-        open_positions = {
+        # Only positions this bot opened itself (see ownership.py) — never a
+        # manual trade or another strategy's position, even on the watchlist.
+        held = {
             p.contract.symbol: p for p in client.positions()
-            if p.position != 0 and p.contract.secType == "STK" and p.contract.symbol in settings.symbols
+            if p.position != 0 and p.contract.secType == "STK"
         }
-        logger.info("Equity: %.2f | Open positions: %s", equity, list(open_positions))
+        open_order_symbols = {t.contract.symbol for t in client.ib.reqAllOpenOrders()}
+        ownership = resolve_ownership(journal, STRATEGY, set(held), open_order_symbols)
+        open_positions = {s: held[s] for s in ownership.mine}
+        unmanaged = ownership.not_mine & set(settings.symbols)
+        logger.info("Equity: %.2f | MA positions: %s", equity, list(open_positions))
+        if unmanaged:
+            logger.info("Held but not opened by this bot (left alone): %s", sorted(unmanaged))
 
         for symbol in settings.symbols:
+            if symbol in unmanaged:
+                continue
             try:
                 bars = fetch_daily_bars(client.ib, symbol, duration="2 Y")
             except Exception:
@@ -91,6 +100,7 @@ def main() -> None:
                 continue
 
             place_bracket_buy(client.ib, symbol, qty, signal.price, settings.stop_loss_pct)
+            journal.claim_stock(symbol, STRATEGY)
             journal.log_order(
                 symbol, "BUY", qty, "MKT+STP", broker="IBKR", status="submitted",
                 stop_price=round(signal.price * (1 - settings.stop_loss_pct), 2),

@@ -44,8 +44,8 @@ Code: [strategy/rsi2_mean_reversion.py](src/tradingbot/strategy/rsi2_mean_revers
   weekend-gap risk. Runs after the close, so orders fill at the next open.
 
 **Sizing for #1 and #2:** 1% account risk per trade, capped at $2,000
-notional per position (`MAX_POSITION_VALUE`), 10% broker-side stop, max 5
-positions.
+notional per position (`MAX_POSITION_VALUE`), 10% broker-side **GTC** stop
+(cancelled automatically when the bot sells), max 5 positions each.
 
 ### 3. Opening Range Breakout (SPY 0DTE options)
 
@@ -105,9 +105,11 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
   excludes the MA watchlist. Both use client ID 1, so they run one after
   the other in the same 4:30pm task (`run_rsi2_scheduled.ps1`), never at
   the same time.
-- MA-crossover manages (and can sell) **any** stock position on its
-  watchlist, including ones bought manually — keep manual trades off
-  `WATCHLIST`.
+- **Manual trades are never touched.** MA-crossover and RSI(2) record
+  every position they open (`stock_ownership` table) and only manage
+  those. Any other held stock — bought manually or by another strategy —
+  is never sold by a bot, and no bot buys more of it (IBKR merges shares
+  into one position). See [ownership.py](src/tradingbot/ownership.py).
 - Trend Join skips both watchlists and any symbol already held, and
   records its positions in the journal (`trend_join_positions`) so RSI(2)
   never treats them as its own.

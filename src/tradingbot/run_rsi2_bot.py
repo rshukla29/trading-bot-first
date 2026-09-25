@@ -56,6 +56,7 @@ from tradingbot.ibkr.orders import place_bracket_buy, place_market_sell
 from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe, should_scan_movers_today
 from tradingbot.indicators import volume_spike_ratio
 from tradingbot.journal import Journal
+from tradingbot.ownership import resolve_ownership
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
 
@@ -63,6 +64,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
+STRATEGY = "rsi2"
 
 
 def main() -> None:
@@ -80,18 +82,18 @@ def main() -> None:
         equity = client.net_liquidation()
         kill_switch = DailyLossKillSwitch(settings.max_daily_loss_pct, equity)
 
-        # Any held stock (non-option) position outside the MA-crossover
-        # watchlist is ours, except Trend Join's intraday positions (tracked
-        # in its own journal table — normally flat by 15:51, but one could
-        # be left over if its flatten failed). This lets a position opened
-        # via a dynamic mover still get evaluated for its EXIT signal on a
-        # later day even if that symbol has since dropped off the scanner.
-        trend_join_symbols = {row["symbol"] for row in journal.open_trend_join_positions()}
-        rsi2_positions = {
+        # Only positions this bot opened itself (see ownership.py) — never a
+        # manual trade, an MA-crossover position, or a Trend Join leftover.
+        # Tracking ownership (rather than "any stock off the MA watchlist")
+        # still lets a position opened via a dynamic mover get evaluated
+        # for its EXIT on a later day after it drops off the scanner.
+        held = {
             p.contract.symbol: p for p in client.positions()
             if p.position != 0 and p.contract.secType == "STK"
-            and p.contract.symbol not in settings.symbols and p.contract.symbol not in trend_join_symbols
         }
+        open_order_symbols = {t.contract.symbol for t in client.ib.reqAllOpenOrders()}
+        ownership = resolve_ownership(journal, STRATEGY, set(held), open_order_symbols)
+        rsi2_positions = {s: held[s] for s in ownership.mine}
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
 
         movers: list[str] = []
@@ -107,7 +109,11 @@ def main() -> None:
                 logger.exception("Top-movers scan failed, continuing with fixed watchlist only")
 
         entry_universe = merge_scan_universe(settings.rsi2_symbols, movers, settings.symbols)
-        symbols_to_check = sorted(set(entry_universe) | set(rsi2_positions))
+        # Held by someone else (manual or another strategy): never buy on top of it.
+        symbols_to_check = sorted((set(entry_universe) - ownership.not_mine) | set(rsi2_positions))
+        skipped = set(entry_universe) & ownership.not_mine
+        if skipped:
+            logger.info("Held but not opened by this bot (left alone): %s", sorted(skipped))
 
         for symbol in symbols_to_check:
             try:
@@ -166,6 +172,7 @@ def main() -> None:
                 continue
 
             place_bracket_buy(client.ib, symbol, qty, signal.price, settings.stop_loss_pct)
+            journal.claim_stock(symbol, STRATEGY)
             journal.log_order(
                 symbol, "BUY", qty, "MKT+STP", broker="IBKR", status="submitted",
                 stop_price=round(signal.price * (1 - settings.stop_loss_pct), 2),

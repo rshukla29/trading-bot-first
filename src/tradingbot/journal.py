@@ -117,6 +117,17 @@ CREATE TABLE IF NOT EXISTS trend_join_positions (
     realized_pnl REAL
 );
 
+-- Which daily stock bot (run_ibkr_bot = "ma_crossover", run_rsi2_bot =
+-- "rsi2") opened each stock position. IBKR positions carry no strategy
+-- tag, so without this a bot would manage (and could sell) any position on
+-- its watchlist — including ones bought manually. A bot only manages
+-- symbols it has claimed here; see ownership.py.
+CREATE TABLE IF NOT EXISTS stock_ownership (
+    symbol TEXT PRIMARY KEY,
+    strategy TEXT NOT NULL,
+    ts TEXT NOT NULL
+);
+
 -- One row per calendar date, recorded by the postmarket snapshot after
 -- that day's trading is done. Gives weekly/monthly reports a real
 -- baseline balance to compare against — IBKR's own API has no
@@ -355,6 +366,23 @@ class Journal:
                    WHERE id=?""",
                 (datetime.now(timezone.utc).isoformat(), exit_reason, realized_pnl, position_id),
             )
+
+    def claim_stock(self, symbol: str, strategy: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO stock_ownership (symbol, strategy, ts) VALUES (?, ?, ?)
+                   ON CONFLICT(symbol) DO UPDATE SET strategy=excluded.strategy, ts=excluded.ts""",
+                (symbol, strategy, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def release_stock(self, symbol: str) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM stock_ownership WHERE symbol=?", (symbol,))
+
+    def owned_stocks(self, strategy: str) -> set[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT symbol FROM stock_ownership WHERE strategy=?", (strategy,)).fetchall()
+            return {r[0] for r in rows}
 
     def log_fill(
         self,
