@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # cancels), so moving it off client 1 orphans nothing.
     condor_client_id: int = 96
 
+    # run_expiry_guard.py (3:57pm): closes any option expiring today that a
+    # bot failed to flatten (see its docstring). Own ID so it can run while
+    # the ORB/step-stop/condor processes are still connected.
+    expiry_guard_client_id: int = 90
+
     # Risk management
     risk_pct_per_trade: float = 0.01
     stop_loss_pct: float = 0.10

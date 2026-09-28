@@ -27,6 +27,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 | 9:29am → 4:00pm | `ORBTradingBot` | SPY + IWM opening-range breakout, VWAP exit; flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
+| 3:57pm | `ExpiryGuardBot` | Safety net: closes any option expiring today still open (normally nothing) |
 | 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
 | 4:30pm | `SnapshotPostmarketBot` | Postmarket report (+ weekly on Fridays, monthly on the last trading day) |
 
@@ -184,6 +185,7 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
   | Client ID | Used by |
   |---|---|
   | 1 | MA-crossover, RSI(2) (4:30pm), step-stop manager (9:30am–4:00pm) |
+  | 90 | Expiry guard (3:57pm) |
   | 96 | Iron condor |
   | 97 | Trend Join |
   | 98 | ORB |
@@ -276,6 +278,13 @@ Each scheduled bot has a wrapper in [scripts/](scripts/)
   with an exit order already working, and leftover stops are cancelled
   automatically (every step-stop tick and every MA/RSI(2) run). Stops on
   new entries still waiting for the open are left alone.
+- **Expiry guard (3:57pm):** ORB options have no broker-side stop — the
+  bot checks its VWAP exit every ~60s and flattens at 3:55pm. If the bot
+  were down at the close, an in-the-money SPY/IWM option would be
+  auto-exercised into shares (10 IWM contracts = 1,000 shares, ~$280k).
+  `run_expiry_guard` closes any option expiring today, from any strategy,
+  at market; it waits out any exit already in progress so it can't
+  double-sell. See [run_expiry_guard.py](src/tradingbot/run_expiry_guard.py).
 - A daily-loss kill-switch (`MAX_DAILY_LOSS_PCT`) halts new stock entries
   once tripped.
 

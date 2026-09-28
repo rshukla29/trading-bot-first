@@ -309,6 +309,13 @@ class Journal:
                 "SELECT * FROM orb_positions WHERE status='open' AND symbol=? ORDER BY id DESC LIMIT 1", (symbol,)
             ).fetchone()
 
+    def open_orb_positions_by_conid(self, conid: int) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                "SELECT * FROM orb_positions WHERE status='open' AND conid=?", (conid,)
+            ).fetchall()
+
     def close_orb_position(self, position_id: int, exit_date: str, exit_premium: float, exit_reason: str, realized_pnl: float) -> None:
         with self._connect() as conn:
             conn.execute(
