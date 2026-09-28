@@ -73,3 +73,23 @@ def test_step_stop_none_means_disabled():
 
 def test_stop_loss_still_outranks_step_stop():
     assert determine_exit_reason(**_base_kwargs(current_premium=0.70, step_stop_premium=1.10)) == "stop_loss"
+
+
+def test_vwap_cross_exits_call_on_close_below_vwap():
+    assert determine_exit_reason(**_base_kwargs(right="C", bar_close=99.9, vwap=100.0)) == "vwap_cross"
+    assert determine_exit_reason(**_base_kwargs(right="C", bar_close=100.1, vwap=100.0)) is None
+
+
+def test_vwap_cross_exits_put_on_close_above_vwap():
+    assert determine_exit_reason(**_base_kwargs(right="P", spot=98.0, bar_close=100.1, vwap=100.0)) == "vwap_cross"
+    assert determine_exit_reason(**_base_kwargs(right="P", spot=98.0, bar_close=99.9, vwap=100.0)) is None
+
+
+def test_stop_loss_can_be_disabled():
+    assert determine_exit_reason(**_base_kwargs(current_premium=0.10, use_stop_loss=False)) is None
+
+
+def test_eod_flatten_still_applies_with_vwap_only():
+    assert determine_exit_reason(**_base_kwargs(
+        now_time=time(15, 55), use_stop_loss=False, bar_close=101.0, vwap=100.0,
+    )) == "eod_flatten"

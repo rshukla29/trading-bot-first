@@ -24,13 +24,13 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 |---|---|---|
 | 9:00am | `SnapshotPremarketBot` | Premarket report |
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
-| 9:29am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout; flat by 3:55pm |
+| 9:29am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout, VWAP exit; flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
 | 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
 | 4:30pm | `SnapshotPostmarketBot` | Postmarket report (+ weekly on Fridays, monthly on the last trading day) |
 
-### Profit-locking step stop (MA-crossover, RSI(2), ORB)
+### Profit-locking step stop (MA-crossover, RSI(2))
 
 Once a position is in profit, its stop moves up in 10% steps and never
 comes back down. Bought 100 shares at $10 ($1,000):
@@ -50,9 +50,9 @@ keeps the new stop from sitting right at the current price).
   the stop order at IBKR, so an intraday spike that fades still locks in
   its step. Uses client ID 1 (the ID that placed the stops) — don't run
   the MA/RSI(2) bots by hand while it's running.
-- **ORB:** applied to the option premium, from the highest premium seen
-  since entry; exits with reason `step_stop`. Live-only — the ORB backtest
-  doesn't model it.
+- **Not on ORB:** the ORB exit comparison showed the step stop removes its
+  edge (profit factor 0.98 vs 1.34 for VWAP-only), so ORB exits on VWAP
+  instead. Available via `OPTIONS_STEP_STOP_ENABLED`, off.
 - Not applied to Trend Join (its own breakeven + swing-low trail) or the
   iron condor (short premium; already closes at 50% of max profit).
 - Settings: `STEP_STOP_ENABLED`, `STEP_STOP_PCT`, `STEP_STOP_BUFFER_PCT`.
@@ -97,9 +97,15 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
 - **Opening range:** high/low of the first 15 minutes.
 - **Entry:** first 5-min close above the range → buy ATM call; below →
   buy ATM put.
-- **Exit (first hit):** 3:55pm flatten, −30% of premium, step stop (premium
-  falls back to a locked 10% step), +50% of premium, or SPY back inside
-  the range.
+- **Exit (since 2026-09-28):** a completed 5-min bar closes back across
+  today's VWAP (call: below, put: above), or the 3:55pm flatten. Max loss
+  per trade is the premium paid.
+- **Why VWAP-only:** [scripts/orb_exit_comparison.py](scripts/orb_exit_comparison.py)
+  tested exits on 999 SPY sessions (Oct 2022–Sep 2026, with costs).
+  Profit factor: VWAP-only 1.34, old exits (−30% stop, +50% target, range
+  re-entry) 0.87, old exits + step stop 0.98. It wins only ~25% of trades —
+  a few large winners pay for many small losses, so judge it over 40–60
+  trades, not a week. The old exits are still in settings, switched off.
 - One position at a time, max 10 contracts; exits checked every ~60s.
   Open position is recovered from the journal if the process restarts.
 

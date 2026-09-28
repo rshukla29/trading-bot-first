@@ -74,3 +74,16 @@ def fib_retracement_fraction(bars: pd.DataFrame, lookback: int) -> pd.Series:
     swing_low = bars["low"].rolling(lookback).min()
     span = (swing_high - swing_low).replace(0, float("nan"))
     return (swing_high - bars["close"]) / span
+
+
+def session_vwap(bars: pd.DataFrame) -> pd.Series:
+    """Intraday VWAP anchored to each session's first bar — the standard
+    day-trading VWAP (unlike rolling_vwap above, which is a multi-day
+    daily-bar approximation). Resets every calendar day, so bars must be
+    regular-session only and indexed in exchange-local time. Each bar's
+    value includes that bar, i.e. it's known at the bar's close."""
+    typical_price = (bars["high"] + bars["low"] + bars["close"]) / 3
+    day = pd.Index(bars.index.date)
+    pv = (typical_price * bars["volume"]).groupby(day).cumsum()
+    vol = bars["volume"].groupby(day).cumsum()
+    return pd.Series(pv.to_numpy() / vol.to_numpy(), index=bars.index)

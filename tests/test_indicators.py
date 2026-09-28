@@ -1,3 +1,4 @@
+import pytest
 import pandas as pd
 
 from tradingbot.indicators import avg_volume, fib_retracement_fraction, rolling_vwap, rsi, volume_spike_ratio
@@ -158,3 +159,18 @@ def test_volume_spike_ratio_excludes_today_from_its_own_baseline():
     bars = make_bars([100.0] * 21, volumes=volumes)
     ratio = volume_spike_ratio(bars["volume"], window=20).iloc[-1]
     assert ratio == pytest_approx(21.0)
+
+
+def test_session_vwap_resets_each_day():
+    from tradingbot.indicators import session_vwap
+
+    idx = pd.to_datetime(["2024-01-02 09:30", "2024-01-02 09:35", "2024-01-03 09:30"])
+    bars = pd.DataFrame(
+        {"high": [10.0, 20.0, 50.0], "low": [10.0, 20.0, 50.0], "close": [10.0, 20.0, 50.0],
+         "volume": [100.0, 300.0, 10.0]},
+        index=idx,
+    )
+    vwap = session_vwap(bars)
+    assert vwap.iloc[0] == 10.0
+    assert vwap.iloc[1] == pytest.approx((10 * 100 + 20 * 300) / 400)  # 17.5
+    assert vwap.iloc[2] == 50.0  # new day: previous day's volume doesn't carry over

@@ -16,12 +16,14 @@ daily-bar bots (low win rate, large average win per the ORB strategy's own
 docstring) — settings.options_max_contracts_per_trade caps sizing
 regardless of what the risk-pct formula computes.
 
-Exit priority: eod_flatten (15:55 ET, 5 min before the close, matching
-the iron condor's own close-buffer reasoning) > stop_loss > step_stop >
-profit_target > range_reentry — see options/live_orb.py:
-determine_exit_reason. All but step_stop match the backtest; step_stop
-(the 10% step profit lock, added 2026-09-25) is live-only, so live
-results will differ from the backtest when it fires.
+Exits (since 2026-09-28): a completed 5-min bar closing back across the
+session VWAP, or the 15:55 ET flatten. The older rules (-30% premium
+stop, +50% target, range re-entry, 10% step stop) are still available via
+settings but off — scripts/orb_exit_comparison.py found each of them
+removed the edge (see config.py's options_vwap_exit comment). Priority
+when several are enabled: eod_flatten > stop_loss > step_stop >
+profit_target > vwap_cross > range_reentry, identical to the backtest —
+see options/live_orb.py:determine_exit_reason.
 
 If the process crashes and is restarted mid-day, it recovers any
 already-open position from the journal (orb_positions table) rather than
@@ -39,11 +41,13 @@ import logging
 from datetime import datetime, time, timezone
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 from ib_async import Option, Stock
 
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
+from tradingbot.indicators import session_vwap
 from tradingbot.journal import Journal
 from tradingbot.options.live_chain import get_quote, get_real_chain
 from tradingbot.options.live_orb import (
@@ -56,6 +60,7 @@ from tradingbot.options.live_orb import (
 )
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
 from tradingbot.risk import step_trailing_stop
+from tradingbot.strategy.trend_join import completed_bars
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("ib_async").setLevel(logging.WARNING)  # its own wrapper logs every tick/portfolio update at INFO
@@ -95,6 +100,19 @@ def recover_open_position(ib, journal: Journal, symbol: str) -> dict | None:
     }
 
 
+def latest_bar_vs_vwap(ib, symbol: str) -> tuple[float | None, float | None]:
+    """(close, session VWAP) of today's last *completed* 5-min bar. IBKR
+    returns the still-forming bar last, which must not count — the rule is
+    a 5-min close across VWAP, not a tick through it."""
+    bm = settings.options_bar_minutes
+    now = pd.Timestamp(_now_et())
+    bars = fetch_intraday_bars(ib, symbol, bm, duration="1 D")
+    bars = completed_bars(bars[bars.index.date == now.date()], now, bm)
+    if bars.empty:
+        return None, None
+    return float(bars["close"].iloc[-1]), float(session_vwap(bars).iloc[-1])
+
+
 def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: dict) -> bool:
     """Returns True if the position was closed this call."""
     _, _, spot_mid = get_quote(ib, underlying)
@@ -105,10 +123,14 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
     # restart it rebuilds from the current premium.
     position["peak_premium"] = max(position.get("peak_premium", position["entry_premium"]), premium_mid)
     step_stop = None
-    if settings.step_stop_enabled:
+    if settings.options_step_stop_enabled:
         step_stop = step_trailing_stop(
             position["entry_premium"], position["peak_premium"], settings.step_stop_pct, settings.step_stop_buffer_pct,
         )
+
+    bar_close = vwap = None
+    if settings.options_vwap_exit:
+        bar_close, vwap = latest_bar_vs_vwap(ib, symbol)
 
     reason = determine_exit_reason(
         now_time=_now_et().time(),
@@ -122,12 +144,15 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         range_high=position["range_high"],
         exit_on_range_reentry=settings.options_exit_on_range_reentry,
         step_stop_premium=step_stop,
+        use_stop_loss=settings.options_use_stop_loss,
+        bar_close=bar_close,
+        vwap=vwap,
     )
     if reason is None:
         logger.info(
-            "%s: ORB position holding (premium %.2f vs entry %.2f, peak %.2f, step stop %s, spot %.2f)",
-            symbol, premium_mid, position["entry_premium"], position["peak_premium"],
-            f"{step_stop:.2f}" if step_stop else "none", spot_mid,
+            "%s: ORB position holding (premium %.2f vs entry %.2f, spot %.2f, last 5-min close %s vs VWAP %s)",
+            symbol, premium_mid, position["entry_premium"], spot_mid,
+            f"{bar_close:.2f}" if bar_close is not None else "n/a", f"{vwap:.2f}" if vwap is not None else "n/a",
         )
         return False
 

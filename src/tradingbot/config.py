@@ -82,13 +82,23 @@ class Settings(BaseSettings):
     options_opening_range_minutes: int = 15
     options_risk_pct_per_trade: float = 0.01
     options_stop_loss_pct_of_premium: float = 0.30
-    options_profit_target_pct: float = 0.50  # set to 0 to disable
+    options_profit_target_pct: float = 0.0  # 0 disables (was 0.50)
     options_dte_days: int = 0
     options_otm_pct: float = 0.0
     options_strike_increment: float = 1.0
     options_vol_window: int = 20
     options_iv_premium_multiplier: float = 1.2
-    options_exit_on_range_reentry: bool = True
+    options_exit_on_range_reentry: bool = False
+    # ORB exit rules since 2026-09-28: exit only when a completed 5-min bar
+    # closes back across the session VWAP (plus the 15:55 flatten). In
+    # scripts/orb_exit_comparison.py over Oct 2022-Sep 2026 (999 sessions,
+    # with costs), VWAP-only had profit factor 1.34 vs 0.87 for the old
+    # stop/target/range exits and 0.98 with the step stop added — every
+    # rule that cut winners or losers early removed the edge. Max loss per
+    # trade is the premium paid (1% of equity, <= 10 contracts).
+    options_vwap_exit: bool = True
+    options_use_stop_loss: bool = False
+    options_step_stop_enabled: bool = False
     options_rate: float = 0.04
     # Same reasoning as credit_spread_max_contracts_per_trade: a raw
     # risk-pct sizing formula can occasionally spike to a much larger

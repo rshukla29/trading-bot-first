@@ -41,15 +41,20 @@ def determine_exit_reason(
     exit_on_range_reentry: bool,
     eod_flatten_time: time = EOD_FLATTEN_TIME,
     step_stop_premium: float | None = None,
+    use_stop_loss: bool = True,
+    bar_close: float | None = None,
+    vwap: float | None = None,
 ) -> str | None:
-    """Pure decision logic. Priority: eod_flatten > stop_loss > step_stop >
-    profit_target > range_reentry. Everything except step_stop mirrors
-    options/backtest.py; step_stop (10% step profit lock on premium) is
-    live-only and disabled when step_stop_premium is None. Returns the
-    exit reason, or None to keep holding."""
+    """Pure decision logic, same priority as options/backtest.py:
+    eod_flatten > stop_loss > step_stop > profit_target > vwap_cross >
+    range_reentry. Each optional rule is off when its input is None/False.
+    vwap_cross uses the last *completed* 5-min bar's close vs the session
+    VWAP at that bar (a call exits on a close below VWAP, a put above) —
+    the same bar-close test the backtest runs. Returns the exit reason, or
+    None to keep holding."""
     if now_time >= eod_flatten_time:
         return "eod_flatten"
-    if current_premium <= entry_premium * (1 - stop_loss_pct_of_premium):
+    if use_stop_loss and current_premium <= entry_premium * (1 - stop_loss_pct_of_premium):
         return "stop_loss"
     # 10% step profit lock (risk.step_trailing_stop, computed from the peak
     # premium): once the option has been up +11%, falling back to +10% exits.
@@ -57,6 +62,9 @@ def determine_exit_reason(
         return "step_stop"
     if profit_target_pct is not None and current_premium >= entry_premium * (1 + profit_target_pct):
         return "profit_target"
+    if bar_close is not None and vwap is not None:
+        if (right == "C" and bar_close < vwap) or (right == "P" and bar_close > vwap):
+            return "vwap_cross"
     if exit_on_range_reentry:
         if right == "C" and spot <= range_high:
             return "range_reentry"

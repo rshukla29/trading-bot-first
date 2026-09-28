@@ -1,6 +1,7 @@
 from datetime import time
 
 import pandas as pd
+import pytest
 
 from tradingbot.options.backtest import run_options_backtest
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
@@ -132,3 +133,46 @@ def test_equity_curve_length_matches_evaluated_bars():
     warmup = max(strategy().min_history, 20 + 1)
     result = run(bars, warmup=warmup)
     assert len(result.equity_curve) == len(bars) - warmup
+
+
+# --- VWAP exit, step stop, costs (ORB exit comparison) ------------------------
+
+def test_vwap_exit_when_call_closes_below_session_vwap():
+    # Session VWAP after RANGE + 105 is ~101.3 (equal volume); 101.0 closes
+    # below it while still above range_high (100.8), so range re-entry
+    # wouldn't have fired — only the VWAP exit does.
+    day = make_bars(RANGE + [105.0, 101.0], start="2024-01-03 09:30")
+    result = run(pd.concat([PADDING, day]), vwap_exit=True, stop_loss_pct_of_premium=0.99)
+    closed = result.closed_trades
+    assert len(closed) == 1 and closed[0].exit_reason == "vwap_cross"
+
+
+def test_vwap_exit_holds_while_price_stays_above_vwap():
+    day = make_bars(RANGE + [105.0, 104.0], start="2024-01-03 09:30")
+    result = run(pd.concat([PADDING, day]), vwap_exit=True, stop_loss_pct_of_premium=0.99)
+    assert result.closed_trades == []
+
+
+def test_step_stop_locks_profit_after_spike_and_fade():
+    day = make_bars(RANGE + [105.0, 106.5, 105.4], start="2024-01-03 09:30")
+    result = run(pd.concat([PADDING, day]), step_stop_pct=0.10, stop_loss_pct_of_premium=0.99)
+    closed = result.closed_trades
+    assert len(closed) == 1 and closed[0].exit_reason == "step_stop"
+    assert closed[0].pnl > 0
+
+
+def test_costs_reduce_pnl_by_slippage_and_commission():
+    day = make_bars(RANGE + [105.0, 101.0], start="2024-01-03 09:30")
+    bars = pd.concat([PADDING, day])
+    free = run(bars, vwap_exit=True, stop_loss_pct_of_premium=0.99).closed_trades[0]
+    costly = run(bars, vwap_exit=True, stop_loss_pct_of_premium=0.99,
+                 slippage_per_share=0.02, commission_per_contract=0.65).closed_trades[0]
+    assert costly.entry_premium == pytest.approx(free.entry_premium + 0.02)
+    assert costly.fees == pytest.approx(2 * 0.65 * costly.contracts)
+    assert costly.pnl < free.pnl
+
+
+def test_max_contracts_caps_position_size():
+    day = make_bars(RANGE + [105.0], start="2024-01-03 09:30")
+    result = run(pd.concat([PADDING, day]), max_contracts=2)
+    assert result.trades[0].contracts == 2
