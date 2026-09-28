@@ -8,7 +8,7 @@ import pandas as pd
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
 from tradingbot.indicators import session_vwap
 from tradingbot.options.pricing import bs_price, realized_volatility
-from tradingbot.risk import step_trailing_stop
+from tradingbot.risk import profit_lock_floor, step_trailing_stop
 
 TRADING_MINUTES_PER_DAY = 390  # 9:30-16:00 ET
 TRADING_DAYS_PER_YEAR = 252
@@ -31,12 +31,17 @@ class OptionTrade:
     exit_reason: str | None = None
     peak_premium: float = 0.0
     fees: float = 0.0  # commissions for the round trip, in dollars
+    partial_pnl: float = 0.0  # realized on contracts sold early (partial booking)
+    partial_done: bool = False
 
     @property
     def pnl(self) -> float | None:
+        """Whole-trade P&L: the remaining `contracts` at exit plus anything
+        booked earlier by a partial sale."""
         if self.exit_premium is None:
             return None
-        return (self.exit_premium - self.entry_premium) * self.contracts * CONTRACT_MULTIPLIER - self.fees
+        return ((self.exit_premium - self.entry_premium) * self.contracts * CONTRACT_MULTIPLIER
+                + self.partial_pnl - self.fees)
 
 
 @dataclass
@@ -97,6 +102,10 @@ def run_options_backtest(
     commission_per_contract: float = 0.0,
     max_contracts: int | None = None,
     compound: bool = True,
+    lock_trigger_pct: float | None = None,
+    lock_keep_pct: float = 0.0,
+    partial_trigger_pct: float | None = None,
+    partial_fraction: float = 0.5,
 ) -> OptionsBacktestResult:
     """Intraday-only long-options backtest: opening-range-breakout entries,
     Black-Scholes-simulated premiums (see options/pricing.py — no real
@@ -114,6 +123,13 @@ def run_options_backtest(
     Costs: slippage_per_share is added to the simulated entry premium and
     subtracted from the exit premium (half the bid-ask spread, per share);
     commission_per_contract is charged on entry and on exit.
+    Profit booking (all off by default):
+      - lock_trigger_pct / lock_keep_pct: once the peak premium has gained
+        lock_trigger_pct, exit ("profit_lock") if the premium falls back to
+        entry + lock_keep_pct x (peak - entry). keep=0 is a breakeven lock.
+      - partial_trigger_pct / partial_fraction: the first time the premium
+        is up partial_trigger_pct, sell that fraction of the contracts; the
+        rest keeps running on the other exit rules.
     Sizing: max_contracts mirrors the live cap; compound=False sizes every
     trade off starting_equity so variants are compared per trade rather
     than by how much an early lead snowballs.
@@ -156,6 +172,19 @@ def run_options_backtest(
             )
             vwap = float(vwap_series.iloc[i]) if vwap_series is not None else None
 
+            entry = open_trade.entry_premium
+            if (partial_trigger_pct is not None and not open_trade.partial_done
+                    and premium >= entry * (1 + partial_trigger_pct)):
+                n = int(open_trade.contracts * partial_fraction)
+                if 1 <= n < open_trade.contracts:
+                    open_trade.partial_pnl += (premium - slippage_per_share - entry) * n * CONTRACT_MULTIPLIER
+                    open_trade.contracts -= n
+                open_trade.partial_done = True
+            lock_floor = (
+                profit_lock_floor(entry, open_trade.peak_premium, lock_trigger_pct, lock_keep_pct)
+                if lock_trigger_pct is not None else None
+            )
+
             exit_reason = None
             if now.time() >= eod_flatten_time:
                 exit_reason = "eod_flatten"
@@ -163,6 +192,8 @@ def run_options_backtest(
                 exit_reason = "stop_loss"
             elif step_stop is not None and premium <= step_stop:
                 exit_reason = "step_stop"
+            elif lock_floor is not None and premium <= lock_floor:
+                exit_reason = "profit_lock"
             elif profit_target_pct is not None and premium >= open_trade.entry_premium * (1 + profit_target_pct):
                 exit_reason = "profit_target"
             elif vwap is not None and (
@@ -219,7 +250,9 @@ def run_options_backtest(
         if open_trade is not None:
             t_years = _time_to_expiry_years(now, open_trade.expiry)
             mark = bs_price(spot, open_trade.strike, t_years, rate, vol, open_trade.right)
-            unrealized = (mark - open_trade.entry_premium) * open_trade.contracts * CONTRACT_MULTIPLIER
+            unrealized = (
+                (mark - open_trade.entry_premium) * open_trade.contracts * CONTRACT_MULTIPLIER + open_trade.partial_pnl
+            )
         result.equity_curve.append((now, equity + unrealized))
 
     if open_trade is not None:

@@ -93,3 +93,22 @@ def test_eod_flatten_still_applies_with_vwap_only():
     assert determine_exit_reason(**_base_kwargs(
         now_time=time(15, 55), use_stop_loss=False, bar_close=101.0, vwap=100.0,
     )) == "eod_flatten"
+
+
+# --- profit lock (keep half the peak gain once up 100%) -----------------------
+
+from tradingbot.risk import profit_lock_floor  # noqa: E402
+
+
+def test_profit_lock_floor_only_after_doubling():
+    assert profit_lock_floor(1.00, 1.99, 1.0, 0.5) is None
+    assert profit_lock_floor(1.00, 2.00, 1.0, 0.5) == 1.50
+    assert profit_lock_floor(1.00, 2.40, 1.0, 0.5) == 1.70  # rises with the peak
+    assert profit_lock_floor(1.00, 5.00, 0.0, 0.5) is None  # 0 disables
+
+
+def test_profit_lock_exits_when_premium_gives_back_half_the_peak_gain():
+    assert determine_exit_reason(**_base_kwargs(current_premium=1.70, lock_floor_premium=1.70,
+                                                use_stop_loss=False, profit_target_pct=None)) == "profit_lock"
+    assert determine_exit_reason(**_base_kwargs(current_premium=1.71, lock_floor_premium=1.70,
+                                                use_stop_loss=False, profit_target_pct=None)) is None

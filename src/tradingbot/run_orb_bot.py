@@ -61,7 +61,7 @@ from tradingbot.options.live_orb import (
     wait_for_fill,
 )
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
-from tradingbot.risk import step_trailing_stop
+from tradingbot.risk import profit_lock_floor, step_trailing_stop
 from tradingbot.strategy.trend_join import completed_bars
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -130,6 +130,11 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
             position["entry_premium"], position["peak_premium"], settings.step_stop_pct, settings.step_stop_buffer_pct,
         )
 
+    lock_floor = profit_lock_floor(
+        position["entry_premium"], position["peak_premium"],
+        settings.options_lock_trigger_pct, settings.options_lock_keep_pct,
+    )
+
     bar_close = vwap = None
     if settings.options_vwap_exit:
         bar_close, vwap = latest_bar_vs_vwap(ib, symbol)
@@ -149,11 +154,14 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         use_stop_loss=settings.options_use_stop_loss,
         bar_close=bar_close,
         vwap=vwap,
+        lock_floor_premium=lock_floor,
     )
     if reason is None:
         logger.info(
-            "%s: ORB position holding (premium %.2f vs entry %.2f, spot %.2f, last 5-min close %s vs VWAP %s)",
-            symbol, premium_mid, position["entry_premium"], spot_mid,
+            "%s: ORB position holding (premium %.2f vs entry %.2f, peak %.2f, profit lock %s, spot %.2f, "
+            "last 5-min close %s vs VWAP %s)",
+            symbol, premium_mid, position["entry_premium"], position["peak_premium"],
+            f"{lock_floor:.2f}" if lock_floor is not None else "not yet (needs +100%)", spot_mid,
             f"{bar_close:.2f}" if bar_close is not None else "n/a", f"{vwap:.2f}" if vwap is not None else "n/a",
         )
         return False

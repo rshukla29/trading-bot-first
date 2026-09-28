@@ -108,6 +108,15 @@ class Settings(BaseSettings):
     # rule that cut winners or losers early removed the edge. Max loss per
     # trade is the premium paid (1% of equity, <= 10 contracts).
     options_vwap_exit: bool = True
+    # Profit booking on top of the VWAP exit (since 2026-09-28): once an
+    # option has gained options_lock_trigger_pct (100% = doubled), exit if it
+    # falls back to entry + options_lock_keep_pct of the peak gain. Chosen
+    # from scripts/orb_exit_comparison.py --profit-booking on SPY: PF 1.27
+    # vs 1.34 with no booking (gives up ~27% of long-run profit) but the
+    # lowest drawdown (-12.7%) and 1 in 3 trades winning instead of 1 in 4.
+    # 0 disables.
+    options_lock_trigger_pct: float = 1.0
+    options_lock_keep_pct: float = 0.5
     options_use_stop_loss: bool = False
     options_step_stop_enabled: bool = False
     options_rate: float = 0.04

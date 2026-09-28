@@ -44,10 +44,11 @@ def determine_exit_reason(
     use_stop_loss: bool = True,
     bar_close: float | None = None,
     vwap: float | None = None,
+    lock_floor_premium: float | None = None,
 ) -> str | None:
     """Pure decision logic, same priority as options/backtest.py:
-    eod_flatten > stop_loss > step_stop > profit_target > vwap_cross >
-    range_reentry. Each optional rule is off when its input is None/False.
+    eod_flatten > stop_loss > step_stop > profit_lock > profit_target >
+    vwap_cross > range_reentry. Each optional rule is off when its input is None/False.
     vwap_cross uses the last *completed* 5-min bar's close vs the session
     VWAP at that bar (a call exits on a close below VWAP, a put above) —
     the same bar-close test the backtest runs. Returns the exit reason, or
@@ -60,6 +61,8 @@ def determine_exit_reason(
     # premium): once the option has been up +11%, falling back to +10% exits.
     if step_stop_premium is not None and current_premium <= step_stop_premium:
         return "step_stop"
+    if lock_floor_premium is not None and current_premium <= lock_floor_premium:
+        return "profit_lock"
     if profit_target_pct is not None and current_premium >= entry_premium * (1 + profit_target_pct):
         return "profit_target"
     if bar_close is not None and vwap is not None:

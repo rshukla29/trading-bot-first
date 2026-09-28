@@ -103,6 +103,26 @@ def variants() -> list[Variant]:
     ]
 
 
+def profit_booking_variants() -> list[Variant]:
+    """VWAP-only exit plus one profit-booking rule each, to find a way to
+    keep some gains on trades that reverse without capping the big winners
+    the edge depends on."""
+    base = dict(use_stop_loss=False, profit_target_pct=None, exit_on_range_reentry=False, vwap_exit=True)
+    return [
+        Variant("vwap_only", "VWAP trail only (baseline)", base),
+        Variant("be_after_50", "+ breakeven lock once up 50%", {**base, "lock_trigger_pct": 0.5}),
+        Variant("be_after_100", "+ breakeven lock once up 100%", {**base, "lock_trigger_pct": 1.0}),
+        Variant("keep50_after_50", "+ keep half the peak gain once up 50%",
+                {**base, "lock_trigger_pct": 0.5, "lock_keep_pct": 0.5}),
+        Variant("keep50_after_100", "+ keep half the peak gain once up 100%",
+                {**base, "lock_trigger_pct": 1.0, "lock_keep_pct": 0.5}),
+        Variant("half_at_50", "+ sell half at +50%, rest rides", {**base, "partial_trigger_pct": 0.5}),
+        Variant("half_at_100", "+ sell half at +100%, rest rides", {**base, "partial_trigger_pct": 1.0}),
+        Variant("half_at_50_be", "+ sell half at +50%, breakeven on the rest",
+                {**base, "partial_trigger_pct": 0.5, "lock_trigger_pct": 0.5}),
+    ]
+
+
 def max_drawdown(curve: list[tuple[pd.Timestamp, float]]) -> float:
     peak, worst = -math.inf, 0.0
     for _, eq in curve:
@@ -149,6 +169,8 @@ def main() -> None:
     parser.add_argument("--slippage", type=float, default=0.02, help="$/share per side (half the bid-ask + slip)")
     parser.add_argument("--commission", type=float, default=0.65, help="$/contract per side")
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--profit-booking", action="store_true",
+                        help="compare profit-booking rules on top of the VWAP exit instead")
     args = parser.parse_args()
 
     bars = fetch_history(args.symbol, args.years, args.refresh)
@@ -174,7 +196,7 @@ def main() -> None:
     )
 
     results, rows = {}, []
-    for v in variants():
+    for v in (profit_booking_variants() if args.profit_booking else variants()):
         result = run_options_backtest(**common, **v.kwargs)
         results[v.name] = result
         rows.append(summarize(v.name, result))

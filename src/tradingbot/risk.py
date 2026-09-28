@@ -44,6 +44,17 @@ def step_trailing_stop(entry: float, price: float, step_pct: float = 0.10, buffe
     return round(entry * (1 + steps * step_pct), 2)
 
 
+def profit_lock_floor(entry: float, peak: float, trigger_pct: float, keep_pct: float) -> float | None:
+    """Once the peak price has gained `trigger_pct` over entry, the exit
+    floor is entry + keep_pct x (peak - entry); None before that. ORB uses
+    trigger 1.0 / keep 0.5: once an option has doubled, it exits if it
+    gives back more than half of its best gain ($1.00 -> peak $2.40 ->
+    floor $1.70). Rises with the peak, never falls."""
+    if trigger_pct <= 0 or entry <= 0 or peak < entry * (1 + trigger_pct):
+        return None
+    return entry + keep_pct * (peak - entry)
+
+
 @dataclass
 class DailyLossKillSwitch:
     """Halts new trading for the day once realized losses exceed a threshold."""
