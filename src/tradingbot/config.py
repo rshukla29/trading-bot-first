@@ -77,7 +77,13 @@ class Settings(BaseSettings):
     # flow has been built here). Option prices are simulated via
     # Black-Scholes (see options/pricing.py) rather than read from real
     # historical options data, which this account can't access.
-    options_symbol: str = "SPY"
+    options_symbol: str = "SPY"  # backtest default
+    # Live ORB symbols, traded independently in one process: each has its
+    # own opening range, signal and position, and positions on different
+    # symbols can be open at the same time (so risk adds up: ~1% of equity
+    # per open position). QQQ is excluded — this account lacks the Nasdaq
+    # market data subscription its stock and option quotes need (10089/10091).
+    orb_symbols: str = "SPY,IWM"
     options_bar_minutes: int = 5
     options_opening_range_minutes: int = 15
     options_risk_pct_per_trade: float = 0.01
@@ -244,6 +250,10 @@ class Settings(BaseSettings):
     @property
     def trend_join_prefilter_time_list(self) -> list[str]:
         return [t.strip() for t in self.trend_join_prefilter_times.split(",") if t.strip()]
+
+    @property
+    def orb_symbol_list(self) -> list[str]:
+        return [s.strip().upper() for s in self.orb_symbols.split(",") if s.strip()]
 
     @property
     def credit_spread_symbol_list(self) -> list[str]:

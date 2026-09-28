@@ -11,7 +11,7 @@ you explicitly opt into live money.**
 |---|---|---|---|---|---|
 | 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | 4:30pm, right after RSI(2) — `RSI2TradingBot` | `run_ibkr_bot` |
 | 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top-movers scanner (not Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
-| 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
+| 3 | Opening Range Breakout (ORB) | SPY + IWM 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 | — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Raises stops in 10% profit steps | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
@@ -89,11 +89,15 @@ Code: [strategy/rsi2_mean_reversion.py](src/tradingbot/strategy/rsi2_mean_revers
 notional per position (`MAX_POSITION_VALUE`), 10% broker-side **GTC** stop
 (cancelled automatically when the bot sells), max 5 positions each.
 
-### 3. Opening Range Breakout (SPY 0DTE options)
+### 3. Opening Range Breakout (SPY + IWM 0DTE options)
 
 Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
 [run_orb_bot.py](src/tradingbot/run_orb_bot.py)
 
+- **Symbols:** `ORB_SYMBOLS` (SPY, IWM), traded independently — each has
+  its own range, signal and position, and both can be open at once (~1%
+  of equity at risk per open position). QQQ is out: the account lacks the
+  Nasdaq market data subscription its quotes need.
 - **Opening range:** high/low of the first 15 minutes.
 - **Entry:** first 5-min close above the range → buy ATM call; below →
   buy ATM put.

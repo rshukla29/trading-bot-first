@@ -8,7 +8,9 @@ options data was available on this account). Runs until end of day, then
 exits the process; a scheduled task starts it fresh each morning rather
 than re-invoking it repeatedly.
 
-Single-symbol (settings.options_symbol), single open position at a time —
+Trades each symbol in settings.orb_symbol_list independently (one
+position per symbol; different symbols can be open at once). Per symbol,
+single open position at a time —
 mirrors options/backtest.py's own single open_trade slot exactly, so live
 behavior matches what was actually backtested. 0DTE by default
 (options_dte_days=0): this strategy is meaningfully higher-risk than the
@@ -237,8 +239,23 @@ def check_entry(
     }
 
 
+def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStrategy, state: dict) -> None:
+    """One monitoring tick for one symbol: manage its open position, or
+    look for an entry on each newly-completed bar."""
+    symbol = state["symbol"]
+    if state["position"] is not None:
+        if check_exit(ib, journal, symbol, state["underlying"], state["position"]):
+            state["position"] = None
+        return
+    bars = fetch_intraday_bars(ib, symbol, settings.options_bar_minutes)
+    latest_bar_ts = bars.index[-1]
+    if latest_bar_ts != state["last_bar_ts"]:
+        state["last_bar_ts"] = latest_bar_ts
+        state["position"] = check_entry(ib, journal, symbol, strategy, state["chain"], client.net_liquidation())
+
+
 def main() -> None:
-    symbol = settings.options_symbol
+    symbols = settings.orb_symbol_list
     strategy = OpeningRangeBreakoutStrategy(
         opening_range_minutes=settings.options_opening_range_minutes, bar_minutes=settings.options_bar_minutes,
     )
@@ -246,12 +263,19 @@ def main() -> None:
 
     with IBKRClient(settings, client_id=settings.orb_client_id) as client:
         ib = client.ib
-        underlying = Stock(symbol, "SMART", "USD")
-        ib.qualifyContracts(underlying)
-        chain = get_real_chain(ib, symbol)
-
-        position = recover_open_position(ib, journal, symbol)
-        last_bar_ts = None
+        states = []
+        for symbol in symbols:
+            # A symbol that can't be set up (no chain, no data) is skipped
+            # for the day rather than stopping the others.
+            try:
+                underlying = Stock(symbol, "SMART", "USD")
+                ib.qualifyContracts(underlying)
+                states.append({
+                    "symbol": symbol, "underlying": underlying, "chain": get_real_chain(ib, symbol),
+                    "position": recover_open_position(ib, journal, symbol), "last_bar_ts": None,
+                })
+            except Exception:
+                logger.exception("%s: ORB setup failed — skipping this symbol today", symbol)
 
         now = _now_et()
         if now.time() < MARKET_OPEN:
@@ -259,26 +283,26 @@ def main() -> None:
             logger.info("Started before market open, waiting %.0fs for 9:30am ET", wait_s)
             ib.sleep(max(0.0, wait_s))
 
-        logger.info("%s: ORB live loop starting", symbol)
+        logger.info("ORB live loop starting for %s", [s["symbol"] for s in states])
         while _now_et().time() < MARKET_CLOSE:
-            if position is not None:
-                if check_exit(ib, journal, symbol, underlying, position):
-                    position = None
-            else:
-                bars = fetch_intraday_bars(ib, symbol, settings.options_bar_minutes)
-                latest_bar_ts = bars.index[-1]
-                if latest_bar_ts != last_bar_ts:
-                    last_bar_ts = latest_bar_ts
-                    equity = client.net_liquidation()
-                    position = check_entry(ib, journal, symbol, strategy, chain, equity)
-
+            for state in states:
+                try:
+                    tick_symbol(ib, client, journal, strategy, state)
+                except Exception:
+                    # One symbol's failure (bad quote, data error) must not
+                    # stop monitoring the others' open positions.
+                    logger.exception("%s: ORB tick failed — will retry next tick", state["symbol"])
             ib.sleep(TICK_SECONDS)
 
-        if position is not None:
-            logger.warning("%s: still open at market close, final safety-net flatten", symbol)
-            check_exit(ib, journal, symbol, underlying, position)
+        for state in states:
+            if state["position"] is not None:
+                logger.warning("%s: still open at market close, final safety-net flatten", state["symbol"])
+                try:
+                    check_exit(ib, journal, state["symbol"], state["underlying"], state["position"])
+                except Exception:
+                    logger.exception("%s: final flatten failed", state["symbol"])
 
-        logger.info("%s: ORB live loop finished for today", symbol)
+        logger.info("ORB live loop finished for today")
 
 
 if __name__ == "__main__":
