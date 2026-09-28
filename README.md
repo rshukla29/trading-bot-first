@@ -1,7 +1,7 @@
 # trading-bot
 
 Automated trading bots for Interactive Brokers (via `ib_async`): five
-independent strategies covering stocks and SPY options, plus daily,
+independent strategies covering stocks and SPY/IWM options, plus daily,
 weekly and monthly P&L reports. **Paper trading only (account `DU…`) until
 you explicitly opt into live money.**
 
@@ -10,7 +10,7 @@ you explicitly opt into live money.**
 | # | Strategy | Instrument | Style | Schedule (ET, Mon–Fri) | Entrypoint |
 |---|---|---|---|---|---|
 | 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | 4:30pm, right after RSI(2) — `RSI2TradingBot` | `run_ibkr_bot` |
-| 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top-movers scanner (not Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
+| 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top movers + S&P 500 yfinance screen (scans not on Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
 | 3 | Opening Range Breakout (ORB) | SPY + IWM 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
@@ -24,7 +24,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 |---|---|---|
 | 9:00am | `SnapshotPremarketBot` | Premarket report |
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
-| 9:29am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout, VWAP exit; flat by 3:55pm |
+| 9:29am → 4:00pm | `ORBTradingBot` | SPY + IWM opening-range breakout, VWAP exit; flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
 | 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
@@ -104,8 +104,12 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
   of equity at risk per open position). QQQ is out: the account lacks the
   Nasdaq market data subscription its quotes need.
 - **Opening range:** high/low of the first 15 minutes.
-- **Entry:** first 5-min close above the range → buy ATM call; below →
-  buy ATM put.
+- **Entry:** first *completed* 5-min bar closing above the range → buy
+  ATM call; below → buy ATM put. At most one call and one put per symbol
+  per day; the bot keeps watching all day (a VWAP exit on the call doesn't
+  stop a later put). Each bar is judged once, right after it closes — the
+  same rule as the backtest (fixed 2026-09-28: live had been judging the
+  still-forming bar and missed most breakouts).
 - **Exit (since 2026-09-28):** a completed 5-min bar closes back across
   today's VWAP (call: below, put: above), or the 3:55pm flatten. Max loss
   per trade is the premium paid.
@@ -115,8 +119,9 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
   re-entry) 0.87, old exits + step stop 0.98. It wins only ~25% of trades —
   a few large winners pay for many small losses, so judge it over 40–60
   trades, not a week. The old exits are still in settings, switched off.
-- One position at a time, max 10 contracts; exits checked every ~60s.
-  Open position is recovered from the journal if the process restarts.
+- One position per symbol at a time, max 10 contracts; exits checked
+  every ~60s. Open positions are recovered from the journal if the
+  process restarts.
 
 ### 4. Iron condor (SPY)
 
@@ -126,8 +131,10 @@ Code: [options/iron_condor.py](src/tradingbot/options/iron_condor.py),
 - **Entry:** sell ~16-delta call and put, buy $5-wide wings, ~45 DTE. At
   most one new condor every 7 days, max 3 open.
 - **Exit (first hit):** 50% of credit captured, loss = 2× credit, or 21 DTE.
-- Max 10 contracts per trade. SPY only — QQQ/IWM options fail to fill on
-  this account (data entitlement gap).
+- Max 10 contracts per trade. SPY only (`CREDIT_SPREAD_SYMBOLS`). QQQ is
+  blocked (no Nasdaq market data subscription). IWM option quotes were
+  confirmed live on 2026-09-28, but IWM condors haven't been re-tested
+  since earlier 4-leg orders failed to fill.
 
 ### 5. Trend Join Long (S&P 500 intraday gap-and-go)
 
@@ -191,7 +198,8 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
   positions with unrealized P&L, positions closed today, account P&L,
   total balance, YTD P&L (vs. `ACCOUNT_STARTING_BALANCE`), and a
   **stop-loss coverage** table (each stock's owner and working stop, with
-  an UNPROTECTED warning for any bot position missing one).
+  an UNPROTECTED warning for any bot position missing one, plus a warning
+  for any stop order left on a position that no longer exists).
 - **Weekly** — Fridays after the close (Mon–Fri).
 - **Monthly** — last trading day of the month after the close.
 
@@ -203,6 +211,9 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
 - **IBKR top movers check** (read-only): `python -m scripts.check_top_movers`
 - **Backtests:** `scripts/backtest_report.py`, `rsi2_backtest_report.py`,
   `options_backtest_report.py`, `iron_condor_backtest_report.py`
+- **ORB exit comparison:** `python scripts/orb_exit_comparison.py --symbol SPY
+  [--slippage 0.05]` — six exit-rule variants on 4 years of cached 5-min
+  bars, with costs and a half-year breakdown.
 
 ## Setup
 
@@ -253,6 +264,11 @@ Each scheduled bot has a wrapper in [scripts/](scripts/)
   stop is placed at 10% below cost; already below that level → sold. Each
   snapshot also has a "Stop-loss coverage" table that flags any bot
   position as UNPROTECTED. See [protection.py](src/tradingbot/protection.py).
+- **No stops on flat positions:** a stop left behind after its shares are
+  sold would open a short if triggered. The stop audit skips any stock
+  with an exit order already working, and leftover stops are cancelled
+  automatically (every step-stop tick and every MA/RSI(2) run). Stops on
+  new entries still waiting for the open are left alone.
 - A daily-loss kill-switch (`MAX_DAILY_LOSS_PCT`) halts new stock entries
   once tripped.
 
@@ -260,5 +276,6 @@ Run tests with `pytest`.
 
 ## Repositories
 
-Pushed to both `rshukla29/trading-bot` (origin) and
-`rshukla29/trading-bot-first` (copy), both private.
+Both private: `rshukla29/trading-bot` (origin — all commits, including
+the automatic daily report commits when pushed) and
+`rshukla29/trading-bot-first` (copy — updated only on request).
