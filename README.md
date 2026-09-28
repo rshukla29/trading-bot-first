@@ -212,7 +212,9 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
 
 - **S&P 500 scanner** (read-only, yfinance): top gainers/losers, unusual
   volume, and which names strategies #1 and #2 would buy right now.
-  `python -m tradingbot.sp500_scanner [--top 20] [--csv path]`
+  `python -m tradingbot.sp500_scanner [--top 20] [--save]` — `--save`
+  writes the full scan to `scans/YYYY/MM/DD/sp500_scan_<date>.csv`, a
+  separate tree from `reports/` (gitignored; local only).
 - **IBKR top movers check** (read-only): `python -m scripts.check_top_movers`
 - **Backtests:** `scripts/backtest_report.py`, `rsi2_backtest_report.py`,
   `options_backtest_report.py`, `iron_condor_backtest_report.py`

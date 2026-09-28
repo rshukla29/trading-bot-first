@@ -40,3 +40,12 @@ def test_report_dir_is_year_month_day_tree():
     base = Path("reports")
     assert report_dir(base, date(2026, 9, 8), per_day=True) == Path("reports/2026/09/08")
     assert report_dir(base, date(2026, 9, 25), per_day=False) == Path("reports/2026/09")
+
+
+def test_dated_dir_shared_by_reports_and_scans():
+    from pathlib import Path
+
+    from tradingbot.paths import dated_dir
+
+    assert dated_dir(Path("scans"), date(2026, 9, 25)) == Path("scans/2026/09/25")
+    assert dated_dir(Path("scans"), date(2026, 9, 25), per_day=False) == Path("scans/2026/09")

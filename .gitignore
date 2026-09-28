@@ -8,3 +8,4 @@ data/*.sqlite
 *.egg-info/
 logs/
 data/*.csv
+scans/

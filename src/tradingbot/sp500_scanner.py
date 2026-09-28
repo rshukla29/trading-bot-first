@@ -9,7 +9,7 @@ reports:
     mean-reversion) would BUY right now
 
     python -m tradingbot.sp500_scanner
-    python -m tradingbot.sp500_scanner --top 20 --csv reports/sp500_scan.csv
+    python -m tradingbot.sp500_scanner --top 20 --save   # -> scans/YYYY/MM/DD/sp500_scan_<date>.csv
 
 Caveats:
   - Run during market hours, the latest bar is today's partial session
@@ -33,6 +33,7 @@ import yfinance as yf
 
 from tradingbot.config import settings
 from tradingbot.indicators import rsi, volume_spike_ratio
+from tradingbot.paths import dated_dir
 from tradingbot.strategy.base import Strategy
 from tradingbot.strategy.factory import build_strategy
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
@@ -190,6 +191,8 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="S&P 500 scanner (yfinance, read-only)")
     parser.add_argument("--top", type=int, default=15, help="rows per gainers/losers/volume table")
     parser.add_argument("--csv", type=Path, help="also write the full scan to this CSV path")
+    parser.add_argument("--save", action="store_true",
+                        help="write the full scan to scans/YYYY/MM/DD/sp500_scan_<date>.csv")
     parser.add_argument("--refresh-constituents", action="store_true", help="ignore the 7-day constituent cache")
     args = parser.parse_args(argv)
 
@@ -218,10 +221,13 @@ def main(argv: list[str] | None = None) -> None:
         hits = results[results[label] != ""]
         _print_table(f"{label} BUY signals", hits, ["symbol", "name", "close", "change_pct", "volume_ratio", label])
 
-    if args.csv:
-        args.csv.parent.mkdir(parents=True, exist_ok=True)
-        results.to_csv(args.csv, index=False)
-        print(f"\nFull scan written to {args.csv}")
+    csv_path = args.csv
+    if args.save and csv_path is None:
+        csv_path = dated_dir(Path(settings.scans_dir), as_of) / f"sp500_scan_{as_of.isoformat()}.csv"
+    if csv_path:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        results.to_csv(csv_path, index=False)
+        print(f"\nFull scan written to {csv_path}")
 
 
 if __name__ == "__main__":

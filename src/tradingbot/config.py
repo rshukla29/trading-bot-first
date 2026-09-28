@@ -237,6 +237,9 @@ class Settings(BaseSettings):
     # committed to git (no push) so the account history accumulates in
     # version control.
     reports_dir: str = "reports"
+    # S&P 500 scanner CSVs (sp500_scanner --save), kept apart from reports
+    # in the same year/month/day tree: scans/YYYY/MM/DD/. Gitignored.
+    scans_dir: str = "scans"
 
     # IBKR's own realizedPnL/RealizedPnL fields reset to 0 every day and
     # there's no calendar-YTD tag in the API without separately configuring

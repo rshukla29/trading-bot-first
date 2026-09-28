@@ -35,6 +35,7 @@ from ib_async import IB, ExecutionFilter, Fill
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.journal import Journal
+from tradingbot.paths import dated_dir
 from tradingbot.protection import orphan_stops, working_stop_qty_by_symbol
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
@@ -378,8 +379,7 @@ def build_period_report(client: IBKRClient, journal: Journal, period_label: str,
 def report_dir(base: Path, day: date, per_day: bool) -> Path:
     """Year/month/day tree: daily snapshots in reports/YYYY/MM/DD/,
     weekly and monthly reports one level up in reports/YYYY/MM/."""
-    month_dir = base / f"{day.year:04d}" / f"{day.month:02d}"
-    return month_dir / f"{day.day:02d}" if per_day else month_dir
+    return dated_dir(base, day, per_day)
 
 
 def write_report_file(report: str, filename_stem: str, day: date, per_day: bool = True) -> Path:
