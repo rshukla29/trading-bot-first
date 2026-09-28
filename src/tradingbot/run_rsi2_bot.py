@@ -5,7 +5,9 @@ attached stop-loss, and log everything.
 
 The entry universe is `settings.rsi2_symbols` (the fixed watchlist) plus,
 when `rsi2_scan_top_movers` is enabled, today's top US gainers/losers/
-most-active from IBKR's scanner (see ibkr/scanner.py) — the fixed list
+most-active from IBKR's scanner (see ibkr/scanner.py), plus, when
+`rsi2_scan_sp500` is enabled, S&P 500 names a yfinance screen flags as
+RSI(2) buys (sp500_scanner.screen_rsi2_buys) — the fixed list
 alone can miss a real setup on a symbol that just isn't one of those 10
 names today. Movers overlapping `settings.symbols` (the MA-crossover
 bot's watchlist) are excluded so the two independent stock strategies
@@ -35,6 +37,10 @@ pick with elevated single-day volume):
     (3.36x), but not OMDA (only 1.75x — not a volume-spike signature at
     all despite also being an ungrounded, now-stale signal by Monday).
 
+All candidates are evaluated first; exits are handled, then new BUYs in
+order of lowest RSI(2) first, so limited position slots go to the most
+oversold setups rather than whichever symbol sorts first alphabetically.
+
 Intended to be run once per day (after market data for the day is final)
 via a scheduled task. Refuses to trade on a non-paper account unless
 LIVE_TRADING=true is explicitly set (see ibkr/client.py).
@@ -54,10 +60,11 @@ from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import place_bracket_buy, place_market_sell
 from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe, should_scan_movers_today
-from tradingbot.indicators import volume_spike_ratio
+from tradingbot.indicators import rsi, volume_spike_ratio
 from tradingbot.journal import Journal
 from tradingbot.ownership import resolve_ownership
 from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops
+from tradingbot.sp500_scanner import screen_rsi2_buys
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
 
@@ -104,9 +111,10 @@ def main() -> None:
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
 
         movers: list[str] = []
-        if settings.rsi2_scan_top_movers and not should_scan_movers_today(datetime.now(ET)):
-            logger.info("Friday: skipping top-movers scan for new entries (weekend gap risk) — fixed watchlist only")
-        elif settings.rsi2_scan_top_movers:
+        scan_today = should_scan_movers_today(datetime.now(ET))
+        if (settings.rsi2_scan_top_movers or settings.rsi2_scan_sp500) and not scan_today:
+            logger.info("Friday: skipping top-movers and S&P 500 scans for new entries (weekend gap risk) — fixed watchlist only")
+        if settings.rsi2_scan_top_movers and scan_today:
             try:
                 movers = fetch_top_movers(
                     client.ib, settings.rsi2_scan_rows, settings.rsi2_scan_min_price, settings.rsi2_scan_min_volume,
@@ -115,6 +123,17 @@ def main() -> None:
             except Exception:
                 logger.exception("Top-movers scan failed, continuing with fixed watchlist only")
 
+        if settings.rsi2_scan_sp500 and scan_today:
+            try:
+                sp500_hits = screen_rsi2_buys(
+                    strategy, settings.rsi2_period, set(settings.symbols) | ownership.not_mine,
+                    settings.rsi2_sp500_max_candidates,
+                )
+                logger.info("S&P 500 RSI(2) screen (yfinance) found %d candidates: %s", len(sp500_hits), sp500_hits)
+                movers = movers + sp500_hits
+            except Exception:
+                logger.exception("S&P 500 screen failed, continuing without it")
+
         entry_universe = merge_scan_universe(settings.rsi2_symbols, movers, settings.symbols)
         # Held by someone else (manual or another strategy): never buy on top of it.
         symbols_to_check = sorted((set(entry_universe) - ownership.not_mine - stop_audit_sold) | set(rsi2_positions))
@@ -122,6 +141,7 @@ def main() -> None:
         if skipped:
             logger.info("Held but not opened by this bot (left alone): %s", sorted(skipped))
 
+        evaluated = []  # (symbol, bars, signal): IBKR bars are the authority, not the screen
         for symbol in symbols_to_check:
             try:
                 bars = fetch_daily_bars(client.ib, symbol, duration="2 Y")
@@ -138,7 +158,9 @@ def main() -> None:
 
             signal = strategy.generate_signal(symbol, bars)
             journal.log_signal(signal.symbol, signal.action, signal.price, signal.reason, source="run_rsi2_bot")
+            evaluated.append((symbol, bars, signal))
 
+        for symbol, bars, signal in order_for_action(evaluated, set(rsi2_positions), settings.rsi2_period):
             held = symbol in rsi2_positions
 
             if held and signal.action == "EXIT":
@@ -186,6 +208,20 @@ def main() -> None:
             )
             rsi2_positions[symbol] = None  # mark as filled-in-this-run to respect max_positions
             logger.info("BUY %s x%d @ ~%.2f (%s)", symbol, qty, signal.price, signal.reason)
+
+
+def order_for_action(evaluated: list, held: set[str], rsi_period: int) -> list:
+    """Held positions first (exits never wait behind entries), then BUY
+    candidates by lowest RSI(2), so the most oversold get the limited
+    position slots, then everything else."""
+    def key(item):
+        symbol, bars, signal = item
+        if symbol in held:
+            return (0, 0.0)
+        if signal.action == "BUY":
+            return (1, float(rsi(bars["close"], rsi_period).iloc[-1]))
+        return (2, 0.0)
+    return sorted(evaluated, key=key)
 
 
 if __name__ == "__main__":

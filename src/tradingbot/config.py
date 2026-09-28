@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     rsi2_scan_rows: int = 15
     rsi2_scan_min_price: float = 10.0
     rsi2_scan_min_volume: int = 500_000
+    # Also screen the whole S&P 500 with yfinance each run (one batched
+    # download) and add its RSI(2) BUY hits, most oversold first. IBKR's
+    # scanner only surfaces ~45 volatile movers and misses calm large-caps
+    # with a clean dip. Every hit is re-checked on IBKR bars before any
+    # order. Skipped on Fridays like the movers scan.
+    rsi2_scan_sp500: bool = True
+    rsi2_sp500_max_candidates: int = 20
 
     # Blocks a BUY when today's volume is an extreme multiple of normal —
     # the signature of a news/event-driven move (earnings, FDA, etc.)

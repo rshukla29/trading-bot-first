@@ -82,8 +82,13 @@ Code: [strategy/rsi2_mean_reversion.py](src/tradingbot/strategy/rsi2_mean_revers
 - **Exit:** RSI(2) > 65; plus the broker-side stop (−10%, then raised in
   10% profit steps).
 - **Universe:** fixed `RSI2_WATCHLIST` + IBKR top gainers/losers/most-active
-  (price ≥ $10, volume ≥ 500k). Scanner skipped on Fridays to avoid
-  weekend-gap risk. Runs after the close, so orders fill at the next open.
+  (price ≥ $10, volume ≥ 500k) + an S&P 500 screen via yfinance (all ~500
+  names in one download; up to 20 RSI(2) buy hits, most oversold first).
+  IBKR re-checks every candidate on its own bars before ordering. Both
+  scans are skipped on Fridays to avoid weekend-gap risk. Runs after the
+  close, so orders fill at the next open.
+- **Entry order:** exits first, then buys lowest RSI(2) first, so limited
+  slots (max 5) go to the most oversold setups.
 
 **Sizing for #1 and #2:** 1% account risk per trade, capped at $2,000
 notional per position (`MAX_POSITION_VALUE`), 10% broker-side **GTC** stop

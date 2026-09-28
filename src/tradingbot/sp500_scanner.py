@@ -51,6 +51,11 @@ def to_yahoo_symbol(symbol: str) -> str:
     return symbol.strip().replace(".", "-")
 
 
+def to_ibkr_symbol(yahoo_symbol: str) -> str:
+    """Yahoo class-share notation (BRK-B) -> IBKR's (BRK B)."""
+    return yahoo_symbol.replace("-", " ")
+
+
 def parse_constituents_html(html: str) -> pd.DataFrame:
     """Extract symbol/name/sector from the Wikipedia constituents table."""
     table = pd.read_html(StringIO(html), attrs={"id": "constituents"})[0]
@@ -102,6 +107,29 @@ def download_daily_bars(symbols: list[str], period: str = "2y") -> dict[str, pd.
         if not df.empty:
             out[symbol] = df
     return out
+
+
+def screen_rsi2_buys(
+    strategy: Strategy, rsi_period: int, exclude: set[str], max_candidates: int,
+    bars_by_symbol: dict[str, pd.DataFrame] | None = None,
+) -> list[str]:
+    """S&P 500 names the RSI(2) strategy would BUY on the latest daily bar,
+    most oversold (lowest RSI) first, capped at `max_candidates`. Returns
+    IBKR symbols. A wide, cheap first pass (one batched yfinance download)
+    — the RSI(2) bot re-checks every hit on IBKR's own bars before
+    ordering, so a Yahoo data quirk can't place a trade by itself.
+    `bars_by_symbol` is injectable for tests; normally downloaded here."""
+    if bars_by_symbol is None:
+        symbols = [s for s in fetch_sp500_constituents()["symbol"] if to_ibkr_symbol(s) not in exclude]
+        bars_by_symbol = download_daily_bars(symbols, period="2y")
+    hits = []
+    for symbol, bars in bars_by_symbol.items():
+        ib_sym = to_ibkr_symbol(symbol)
+        if ib_sym in exclude or len(bars) < strategy.min_history:
+            continue
+        if strategy.generate_signal(symbol, bars).action == "BUY":
+            hits.append((float(rsi(bars["close"], rsi_period).iloc[-1]), ib_sym))
+    return [sym for _, sym in sorted(hits)[:max_candidates]]
 
 
 def build_strategies() -> dict[str, Strategy]:
