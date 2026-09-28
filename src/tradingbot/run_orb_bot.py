@@ -183,8 +183,9 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
 
 def check_entry(
     ib, journal: Journal, symbol: str, strategy: OpeningRangeBreakoutStrategy, chain, equity: float,
+    bars: pd.DataFrame,
 ) -> dict | None:
-    bars = fetch_intraday_bars(ib, symbol, settings.options_bar_minutes)
+    """`bars` must be completed bars only (see tick_symbol)."""
     signal = strategy.generate_signal(symbol, bars)
     journal.log_signal(signal.symbol, signal.action, signal.underlying_price, signal.reason, source="run_orb_bot")
 
@@ -247,11 +248,22 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
         if check_exit(ib, journal, symbol, state["underlying"], state["position"]):
             state["position"] = None
         return
-    bars = fetch_intraday_bars(ib, symbol, settings.options_bar_minutes)
+    # Completed bars only. IBKR returns the still-forming bar last; judging
+    # it seconds after it opened (fix 2026-09-28) meant its "close" was
+    # still inside the range, and by the next check the real breakout bar
+    # counted as "already broken" — live took 4 of 16 backtest signals
+    # 9/11-9/25. Now each bar is judged once, right after it completes,
+    # exactly like the backtest.
+    bm = settings.options_bar_minutes
+    bars = completed_bars(fetch_intraday_bars(ib, symbol, bm), pd.Timestamp(_now_et()), bm)
+    if bars.empty:
+        return
     latest_bar_ts = bars.index[-1]
     if latest_bar_ts != state["last_bar_ts"]:
         state["last_bar_ts"] = latest_bar_ts
-        state["position"] = check_entry(ib, journal, symbol, strategy, state["chain"], client.net_liquidation())
+        state["position"] = check_entry(
+            ib, journal, symbol, strategy, state["chain"], client.net_liquidation(), bars,
+        )
 
 
 def main() -> None:
