@@ -81,8 +81,10 @@ class Variant:
 
 
 def variants() -> list[Variant]:
+    # The pre-2026-09-28 ORB exits, pinned here rather than read from
+    # settings: live settings now have these switched off (VWAP-only).
     stop = settings.options_stop_loss_pct_of_premium
-    pt = settings.options_profit_target_pct or None
+    pt = 0.50
     step = settings.step_stop_pct
     return [
         Variant("original", f"-{stop:.0%} stop, +{pt:.0%} target, range re-entry",
