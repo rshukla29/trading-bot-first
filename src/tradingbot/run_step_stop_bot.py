@@ -33,7 +33,7 @@ from ib_async import Stock
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.journal import Journal
-from tradingbot.protection import ensure_protective_stops, plan_stop_raise
+from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops, plan_stop_raise
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("ib_async").setLevel(logging.WARNING)
@@ -81,8 +81,17 @@ def main() -> None:
 
         tickers = {}
         warned_no_stop: set[str] = set()
+        flat_last_tick: set[str] = set()
         while _now_et().time() < MARKET_CLOSE:
             positions = owned_positions(client, journal)
+            held = {p.contract.symbol for p in client.positions() if p.position > 0 and p.contract.secType == "STK"}
+            # A stop only counts as orphaned once its symbol has looked flat
+            # on two consecutive ticks: right at the open, a bracket BUY can
+            # have filled a moment before IBKR reports the new position.
+            stop_symbols = {t.contract.symbol for t in ib.reqOpenOrders() if t.order.orderType == "STP"}
+            flat_now = stop_symbols - held
+            cancel_orphan_stops(ib, held | (flat_now - flat_last_tick))
+            flat_last_tick = flat_now
             open_trades = ib.reqOpenOrders()
             for symbol, pos in positions.items():
                 if symbol not in tickers:

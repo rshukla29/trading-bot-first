@@ -58,6 +58,51 @@ def plan_stop_raise(
     return level
 
 
+def symbols_with_pending_exit(trades) -> set[str]:
+    """Stock symbols with a working non-stop SELL order — an exit already
+    in progress (e.g. RSI(2)'s after-close market sell waiting for the
+    open). Such a position must not get a new stop: when the sell fills,
+    the stop would be left on a flat position and could open a short."""
+    return {
+        t.contract.symbol for t in trades
+        if t.contract.secType == "STK" and t.order.action == "SELL" and t.order.orderType != "STP"
+    }
+
+
+def orphan_stops(trades, held_symbols: set[str]) -> list:
+    """Working SELL stop orders on stocks that are no longer held. Left in
+    place, one would sell shares that aren't there if price falls to it,
+    opening a short (found 2026-09-28: BAC sold at the open while the
+    stop audit placed a fresh stop one second later).
+
+    A stop on a symbol with a working BUY is NOT an orphan: that's a new
+    bracket entry (placed after the close, fills at the next open) whose
+    stop legitimately exists before the position does."""
+    buying = {t.contract.symbol for t in trades if t.contract.secType == "STK" and t.order.action == "BUY"}
+    return [
+        t for t in trades
+        if t.contract.secType == "STK" and t.order.action == "SELL" and t.order.orderType == "STP"
+        and t.contract.symbol not in held_symbols and t.contract.symbol not in buying
+    ]
+
+
+def cancel_orphan_stops(ib: IB, held_symbols: set[str]) -> list[str]:
+    """Cancel this client's stops on flat positions. Only this client's
+    orders (reqOpenOrders): another client's orders can't be cancelled from
+    here anyway, and manual TWS orders are left to the user."""
+    cancelled = []
+    for t in orphan_stops(ib.reqOpenOrders(), held_symbols):
+        logger.warning(
+            "%s: cancelling orphan stop (SELL %d @ %.2f) — no position left to protect",
+            t.contract.symbol, t.order.totalQuantity, t.order.auxPrice,
+        )
+        ib.cancelOrder(t.order)
+        cancelled.append(t.contract.symbol)
+    if cancelled:
+        ib.sleep(1)
+    return cancelled
+
+
 def working_stop_qty_by_symbol(trades) -> dict[str, float]:
     """Total quantity of working SELL stop orders per stock symbol."""
     qty: dict[str, float] = {}
@@ -75,9 +120,13 @@ def ensure_protective_stops(
     Returns the symbols sold because they were already through their stop
     — the caller must stop treating those as open."""
     stops = working_stop_qty_by_symbol(ib.reqOpenOrders())
+    exiting = symbols_with_pending_exit(ib.reqAllOpenOrders())
     sold: set[str] = set()
     for symbol, pos in positions.items():
         qty = int(pos.position)
+        if symbol in exiting:
+            logger.info("%s: exit order already working — no stop needed", symbol)
+            continue
         try:
             last = float(fetch_daily_bars(ib, symbol, duration="5 D")["close"].iloc[-1])
         except Exception:

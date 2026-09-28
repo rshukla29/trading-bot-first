@@ -18,7 +18,7 @@ from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import place_bracket_buy, place_market_sell
 from tradingbot.journal import Journal
 from tradingbot.ownership import resolve_ownership
-from tradingbot.protection import ensure_protective_stops
+from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.factory import build_strategy
 
@@ -47,6 +47,7 @@ def main() -> None:
         open_positions = {s: held[s] for s in ownership.mine}
         # Every owned position must have a working stop; anything already
         # through its 10% level without one is sold (see protection.py).
+        cancel_orphan_stops(client.ib, {s for s, p in held.items() if p.position > 0})
         stop_audit_sold = ensure_protective_stops(client.ib, journal, open_positions, settings.stop_loss_pct, "run_ibkr_bot")
         for symbol in stop_audit_sold:
             open_positions.pop(symbol)

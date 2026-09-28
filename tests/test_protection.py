@@ -121,3 +121,38 @@ def test_plan_stop_raise_never_lowers_or_repeats():
     assert plan_stop_raise(10.0, 11.50, 11.00, 0.10, 0.01) is None  # already at the +10% step
     assert plan_stop_raise(10.0, 11.10, 12.00, 0.10, 0.01) is None  # price fell back: stop stays at 12
     assert plan_stop_raise(10.0, 10.50, 9.00, 0.10, 0.01) is None   # below +11%: keep -10%
+
+
+# --- orphan stops & pending exits (2026-09-28 BAC incident) ------------------
+
+from tradingbot.protection import orphan_stops, symbols_with_pending_exit  # noqa: E402
+
+
+def test_stop_on_flat_position_is_an_orphan():
+    bac_stop = _trade("BAC", qty=33, aux=53.34)
+    xlf_stop = _trade("XLF", qty=36, aux=49.32)
+    assert orphan_stops([bac_stop, xlf_stop], held_symbols={"XLF"}) == [bac_stop]
+
+
+def test_non_stop_orders_are_never_orphans():
+    assert orphan_stops([_trade("BAC", order_type="MKT"), _trade("BAC", action="BUY")], set()) == []
+
+
+def test_pending_market_sell_marks_exit_in_progress():
+    trades = [_trade("BAC", order_type="MKT"), _trade("XLF")]  # XLF only has its stop
+    assert symbols_with_pending_exit(trades) == {"BAC"}
+
+
+def test_snapshot_warns_about_orphan_stop():
+    html = "\n".join(_render_stop_coverage_section(
+        [_pos("XLF", 36)], [_trade("XLF", qty=36, aux=49.32), _trade("BAC", qty=33, aux=53.34)], {"XLF": "rsi2"},
+    ))
+    assert "no position behind them" in html and "BAC SELL 33 @ 53.34" in html
+
+
+def test_stop_with_pending_bracket_buy_is_not_an_orphan():
+    # RSI(2) buys after the close: parent BUY waits for the open, its stop
+    # already exists. The MA bot running right after must not cancel it.
+    buy = _trade("NEW", action="BUY", order_type="MKT")
+    stop = _trade("NEW", qty=10, aux=45.0)
+    assert orphan_stops([buy, stop], held_symbols=set()) == []

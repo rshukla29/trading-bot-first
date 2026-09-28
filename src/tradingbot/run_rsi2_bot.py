@@ -57,7 +57,7 @@ from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe, shoul
 from tradingbot.indicators import volume_spike_ratio
 from tradingbot.journal import Journal
 from tradingbot.ownership import resolve_ownership
-from tradingbot.protection import ensure_protective_stops
+from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
 
@@ -97,6 +97,7 @@ def main() -> None:
         rsi2_positions = {s: held[s] for s in ownership.mine}
         # Every owned position must have a working stop; anything already
         # through its 10% level without one is sold (see protection.py).
+        cancel_orphan_stops(client.ib, {s for s, p in held.items() if p.position > 0})
         stop_audit_sold = ensure_protective_stops(client.ib, journal, rsi2_positions, settings.stop_loss_pct, "run_rsi2_bot")
         for symbol in stop_audit_sold:
             rsi2_positions.pop(symbol)

@@ -35,7 +35,7 @@ from ib_async import IB, ExecutionFilter, Fill
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.journal import Journal
-from tradingbot.protection import working_stop_qty_by_symbol
+from tradingbot.protection import orphan_stops, working_stop_qty_by_symbol
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ def _render_stop_coverage_section(portfolio, orders, owners: dict[str, str]) -> 
     visible in every snapshot instead of going unnoticed for days."""
     parts: list[str] = ["<h2>Stop-loss coverage (stocks)</h2>"]
     stocks = [p for p in portfolio if p.contract.secType == "STK"]
-    if not stocks:
+    if not stocks and not orphan_stops(orders, set()):
         parts.append("<p class='empty'>(no stock positions)</p>")
         return parts
 
@@ -195,6 +195,12 @@ def _render_stop_coverage_section(portfolio, orders, owners: dict[str, str]) -> 
             f"<td>{covered:.0f}</td><td>{price}</td><td>{status}</td></tr>"
         )
     parts.append("</table>")
+    held = {p.contract.symbol for p in stocks if p.position > 0}
+    orphans = orphan_stops(orders, held)
+    if orphans:
+        names = ", ".join(f"{t.contract.symbol} SELL {t.order.totalQuantity:.0f} @ {t.order.auxPrice:.2f}" for t in orphans)
+        parts.insert(1, f"<p class='warn'>WARNING: stop orders with no position behind them (would open a short "
+                        f"if triggered): {escape(names)}. Cancel them.</p>")
     if unprotected:
         parts.insert(1, f"<p class='warn'>WARNING: bot positions without a working stop: {escape(', '.join(unprotected))}. "
                         "The next MA/RSI(2) run will re-place the stop (or sell if already below it).</p>")
