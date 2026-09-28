@@ -192,7 +192,12 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
 ## Reports
 
 `run_snapshot` writes HTML to [reports/](reports/) and commits it locally
-(no push):
+(no push), in a year/month/day tree:
+
+```
+reports/2026/09/28/snapshot_2026-09-28_premarket.html   (daily, per day)
+reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per month)
+```
 
 - **Daily** — 9:00am premarket and 4:30pm postmarket: open orders, open
   positions with unrealized P&L, positions closed today, account P&L,

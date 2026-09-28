@@ -30,3 +30,13 @@ def test_last_trading_day_rolls_back_from_a_weekend():
 
 def test_last_trading_day_false_mid_month():
     assert _is_last_trading_day_of_month(date(2026, 9, 15)) is False
+
+
+def test_report_dir_is_year_month_day_tree():
+    from pathlib import Path
+
+    from tradingbot.run_snapshot import report_dir
+
+    base = Path("reports")
+    assert report_dir(base, date(2026, 9, 8), per_day=True) == Path("reports/2026/09/08")
+    assert report_dir(base, date(2026, 9, 25), per_day=False) == Path("reports/2026/09")

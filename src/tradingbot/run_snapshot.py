@@ -375,10 +375,17 @@ def build_period_report(client: IBKRClient, journal: Journal, period_label: str,
     return "\n".join(parts)
 
 
-def write_report_file(report: str, filename_stem: str) -> Path:
-    reports_dir = Path(settings.reports_dir)
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"{filename_stem}.html"
+def report_dir(base: Path, day: date, per_day: bool) -> Path:
+    """Year/month/day tree: daily snapshots in reports/YYYY/MM/DD/,
+    weekly and monthly reports one level up in reports/YYYY/MM/."""
+    month_dir = base / f"{day.year:04d}" / f"{day.month:02d}"
+    return month_dir / f"{day.day:02d}" if per_day else month_dir
+
+
+def write_report_file(report: str, filename_stem: str, day: date, per_day: bool = True) -> Path:
+    directory = report_dir(Path(settings.reports_dir), day, per_day)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{filename_stem}.html"
     path.write_text(report, encoding="utf-8")
     return path
 
@@ -437,7 +444,7 @@ def main() -> None:
         closed_trades_today = persist_closed_fills(journal, fills, today)
 
         report = build_report(client, label, closed_trades_today, stock_owners(journal))
-        path = write_report_file(report, f"snapshot_{today.isoformat()}_{label}")
+        path = write_report_file(report, f"snapshot_{today.isoformat()}_{label}", today)
         print(f"Saved to {path}")
         commit_report(path, f"{label} {today.isoformat()}")
 
@@ -449,13 +456,13 @@ def main() -> None:
 
             if _is_friday(today):
                 weekly_report = build_period_report(client, journal, "weekly", _week_start(today))
-                weekly_path = write_report_file(weekly_report, f"weekly_{today.isoformat()}")
+                weekly_path = write_report_file(weekly_report, f"weekly_{today.isoformat()}", today, per_day=False)
                 print(f"Saved to {weekly_path}")
                 commit_report(weekly_path, f"weekly {today.isoformat()}")
 
             if _is_last_trading_day_of_month(today):
                 monthly_report = build_period_report(client, journal, "monthly", _month_start(today))
-                monthly_path = write_report_file(monthly_report, f"monthly_{today.isoformat()}")
+                monthly_path = write_report_file(monthly_report, f"monthly_{today.isoformat()}", today, per_day=False)
                 print(f"Saved to {monthly_path}")
                 commit_report(monthly_path, f"monthly {today.isoformat()}")
 
