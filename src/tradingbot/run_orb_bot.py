@@ -225,17 +225,26 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
 
 def check_entry(
     ib, journal: Journal, symbol: str, strategy: OpeningRangeBreakoutStrategy, chain, equity: float,
-    bars: pd.DataFrame,
+    bars: pd.DataFrame, entries_today: dict | None = None,
 ) -> dict | None:
-    """`bars` must be completed bars only (see tick_symbol)."""
+    """`bars` must be completed bars only (see tick_symbol). Enters on the
+    day's first breakout per direction, or on a re-entry when the trend
+    resumes after an earlier trade that direction has closed."""
     signal = strategy.generate_signal(symbol, bars)
     journal.log_signal(signal.symbol, signal.action, signal.underlying_price, signal.reason, source="run_orb_bot")
 
-    if signal.action not in ("BUY_CALL", "BUY_PUT"):
-        logger.info("%s: %s (%s)", symbol, signal.action, signal.reason)
-        return None
-
-    right = "C" if signal.action == "BUY_CALL" else "P"
+    if signal.action in ("BUY_CALL", "BUY_PUT"):
+        right = "C" if signal.action == "BUY_CALL" else "P"
+    else:
+        right = strategy.reentry_direction(bars, entries_today or {}, settings.options_max_reentries)
+        if right is None:
+            logger.info("%s: %s (%s)", symbol, signal.action, signal.reason)
+            return None
+        signal = type(signal)(
+            symbol, "BUY_CALL" if right == "C" else "BUY_PUT", signal.underlying_price, signal.timestamp,
+            f"re-entry: trend resumed to a new session {'high' if right == 'C' else 'low'}",
+        )
+        journal.log_signal(symbol, signal.action, signal.underlying_price, signal.reason, source="run_orb_bot")
     day_range = strategy.range_for_day(bars, bars.index[-1].date())
     if day_range is None:
         logger.warning("%s: breakout signal fired but opening range unavailable, skipping", symbol)
@@ -325,8 +334,10 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
     if latest_bar_ts != state["last_bar_ts"]:
         state["last_bar_ts"] = latest_bar_ts
         state["position"] = check_entry(
-            ib, journal, symbol, strategy, state["chain"], client.net_liquidation(), bars,
+            ib, journal, symbol, strategy, state["chain"], client.net_liquidation(), bars, state["entries_today"],
         )
+        if state["position"] is not None:
+            state["entries_today"][state["position"]["right"]] += 1
 
 
 def main() -> None:
@@ -348,6 +359,8 @@ def main() -> None:
                 states.append({
                     "symbol": symbol, "underlying": underlying, "chain": get_real_chain(ib, symbol),
                     "position": recover_open_position(ib, journal, symbol), "last_bar_ts": None,
+                    # From the journal so a mid-day restart keeps the re-entry count.
+                    "entries_today": journal.orb_entries_on(symbol, datetime.now(timezone.utc).date().isoformat()),
                 })
             except Exception:
                 logger.exception("%s: ORB setup failed — skipping this symbol today", symbol)

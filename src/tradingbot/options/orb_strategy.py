@@ -71,6 +71,29 @@ class OpeningRangeBreakoutStrategy:
             )
         return OptionSignal(symbol, "HOLD", price, timestamp, "inside or already-broken range")
 
+    def reentry_direction(self, bars: pd.DataFrame, entries_today: dict, max_reentries: int) -> str | None:
+        """Re-entry after an exit when the trend resumes: 'C' if the latest
+        completed bar closes at a new session high above the range and a
+        call was already traded (and closed) today, 'P' likewise for a new
+        session low below the range; at most `max_reentries` extra entries
+        per direction per day. `bars` may span several days — only the
+        latest bar's day is used. Shared by the backtest and the live bot."""
+        if not max_reentries:
+            return None
+        day = bars.index[-1].date()
+        today = bars[bars.index.date == day]
+        day_range = self.range_for_day(today, day)
+        if day_range is None or len(today) <= self._range_bar_count:
+            return None
+        range_low, range_high = day_range
+        close = float(today["close"].iloc[-1])
+        prior = today.iloc[:-1]
+        if 1 <= entries_today.get("C", 0) <= max_reentries and close > range_high and close > float(prior["high"].max()):
+            return "C"
+        if 1 <= entries_today.get("P", 0) <= max_reentries and close < range_low and close < float(prior["low"].min()):
+            return "P"
+        return None
+
     def range_for_day(self, bars: pd.DataFrame, day) -> tuple[float, float] | None:
         """(range_low, range_high) for a given calendar day, or None if that
         day doesn't yet have enough bars. Used by the backtest to check the

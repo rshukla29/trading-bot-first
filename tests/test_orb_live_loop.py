@@ -59,12 +59,13 @@ def harness(monkeypatch):
     monkeypatch.setattr(orb, "_now_et", lambda: datetime.fromisoformat(f"{DAY}T{clock['now']}").replace(tzinfo=ET))
     monkeypatch.setattr(orb, "fetch_intraday_bars", lambda ib, symbol, bm, **kw: ibkr_response_at(clock["now"]))
 
-    def fake_check_entry(ib, journal, symbol, strat, chain, equity, bars):
+    def fake_check_entry(ib, journal, symbol, strat, chain, equity, bars, entries_today=None):
         calls.append((clock["now"], bars.index[-1].strftime("%H:%M"), strat.generate_signal(symbol, bars).action))
         return None  # no order placed in tests
 
     monkeypatch.setattr(orb, "check_entry", fake_check_entry)
-    state = {"symbol": "SPY", "underlying": None, "chain": None, "position": None, "last_bar_ts": None}
+    state = {"symbol": "SPY", "underlying": None, "chain": None, "position": None, "last_bar_ts": None,
+             "entries_today": {"C": 0, "P": 0}}
     client = SimpleNamespace(net_liquidation=lambda: 100_000.0)
 
     def tick(now: str):
@@ -93,3 +94,29 @@ def test_each_completed_bar_is_judged_once(harness):
     for now in ("09:51:00", "09:52:00", "09:53:00", "09:54:00"):
         tick(now)
     assert [c[1] for c in calls] == ["09:45"]
+
+
+
+# --- re-entry rule (shared by backtest and live) -------------------------------
+
+def test_reentry_after_a_closed_call_on_new_session_high():
+    strategy = OpeningRangeBreakoutStrategy(opening_range_minutes=15, bar_minutes=5)
+    bars = _bars(COMPLETED + [("10:00", 102.0, 103.0, 101.5, 102.9)])  # new high of day above range
+    assert strategy.reentry_direction(bars, {"C": 1, "P": 0}, 2) == "C"
+    assert strategy.reentry_direction(bars, {"C": 0, "P": 0}, 2) is None   # no earlier call: that's a first entry
+    assert strategy.reentry_direction(bars, {"C": 3, "P": 0}, 2) is None   # used up (1 + 2 re-entries)
+    assert strategy.reentry_direction(bars, {"C": 1, "P": 0}, 0) is None   # disabled
+
+
+def test_no_reentry_below_the_session_high():
+    strategy = OpeningRangeBreakoutStrategy(opening_range_minutes=15, bar_minutes=5)
+    bars = _bars(COMPLETED + [("10:00", 101.5, 101.9, 101.0, 101.8)])  # 101.8 < 9:55 high 102.1
+    assert strategy.reentry_direction(bars, {"C": 1, "P": 0}, 2) is None
+
+
+def test_reentry_ignores_previous_days_bars():
+    strategy = OpeningRangeBreakoutStrategy(opening_range_minutes=15, bar_minutes=5)
+    yesterday = _bars([("15:55", 150.0, 150.0, 150.0, 150.0)])
+    yesterday.index = yesterday.index - pd.Timedelta(days=1)
+    bars = pd.concat([yesterday, _bars(COMPLETED + [("10:00", 102.0, 103.0, 101.5, 102.9)])])
+    assert strategy.reentry_direction(bars, {"C": 1, "P": 0}, 2) == "C"

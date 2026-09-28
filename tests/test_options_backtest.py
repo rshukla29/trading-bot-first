@@ -176,3 +176,38 @@ def test_max_contracts_caps_position_size():
     day = make_bars(RANGE + [105.0], start="2024-01-03 09:30")
     result = run(pd.concat([PADDING, day]), max_contracts=2)
     assert result.trades[0].contracts == 2
+
+
+# --- re-entry, daily loss limit, entry cutoff --------------------------------
+
+def test_reentry_after_exit_when_trend_makes_new_high():
+    # Breakout (105) -> VWAP exit (101) -> new high of day (107) = re-entry.
+    day = make_bars(RANGE + [105.0, 101.0, 107.0], start="2024-01-03 09:30")
+    bars = pd.concat([PADDING, day])
+    no_re = run(bars, vwap_exit=True, stop_loss_pct_of_premium=0.99)
+    with_re = run(bars, vwap_exit=True, stop_loss_pct_of_premium=0.99, max_reentries=1)
+    assert len(no_re.trades) == 1
+    assert len(with_re.trades) == 2 and with_re.trades[1].right == "C"
+
+
+def test_no_reentry_without_a_new_session_extreme():
+    day = make_bars(RANGE + [105.0, 101.0, 104.0], start="2024-01-03 09:30")  # 104 < prior high 105.5
+    result = run(pd.concat([PADDING, day]), vwap_exit=True, stop_loss_pct_of_premium=0.99, max_reentries=1)
+    assert len(result.trades) == 1
+
+
+def test_daily_loss_limit_blocks_further_entries():
+    # Weak breakout (101.2) fails back below VWAP (100.2) at a loss, then a
+    # new high (107) would normally be a re-entry.
+    day = make_bars(RANGE + [101.2, 100.2, 107.0], start="2024-01-03 09:30")
+    bars = pd.concat([PADDING, day])
+    kwargs = dict(vwap_exit=True, stop_loss_pct_of_premium=0.99, max_reentries=1)
+    assert run(bars, **kwargs).closed_trades[0].pnl < 0
+    assert len(run(bars, **kwargs).trades) == 2
+    assert len(run(bars, **kwargs, daily_loss_limit=1.0).trades) == 1
+
+
+def test_last_entry_time_blocks_late_entries():
+    day = make_bars(RANGE + [105.0], start="2024-01-03 09:30")  # breakout bar at 09:45
+    result = run(pd.concat([PADDING, day]), last_entry_time=time(9, 45))
+    assert result.trades == []

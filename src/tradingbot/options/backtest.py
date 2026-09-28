@@ -106,6 +106,9 @@ def run_options_backtest(
     lock_keep_pct: float = 0.0,
     partial_trigger_pct: float | None = None,
     partial_fraction: float = 0.5,
+    max_reentries: int = 0,
+    daily_loss_limit: float | None = None,
+    last_entry_time: time | None = None,
 ) -> OptionsBacktestResult:
     """Intraday-only long-options backtest: opening-range-breakout entries,
     Black-Scholes-simulated premiums (see options/pricing.py — no real
@@ -130,6 +133,15 @@ def run_options_backtest(
       - partial_trigger_pct / partial_fraction: the first time the premium
         is up partial_trigger_pct, sell that fraction of the contracts; the
         rest keeps running on the other exit rules.
+    Entry controls (all off by default):
+      - max_reentries: after a trade in a direction has closed, allow up to
+        this many more entries in that direction the same day, each when a
+        completed bar closes at a new session extreme (new high of day for
+        calls, new low for puts) beyond the opening range — "the trend
+        resumed". The strategy's own signal still only fires once.
+      - daily_loss_limit: no new entries once the day's realized P&L on
+        this symbol is at or below -daily_loss_limit.
+      - last_entry_time: no new entries at or after this time.
     Sizing: max_contracts mirrors the live cap; compound=False sizes every
     trade off starting_equity so variants are compared per trade rather
     than by how much an early lead snowballs.
@@ -154,6 +166,9 @@ def run_options_backtest(
     result = OptionsBacktestResult(starting_equity=starting_equity)
     equity = starting_equity
     open_trade: OptionTrade | None = None
+    current_day = None
+    entries_today = {"C": 0, "P": 0}
+    pnl_today = 0.0
 
     for i in range(max(warmup, strategy.min_history, vol_window + 1), len(bars)):
         window = bars.iloc[day_start[i]: i + 1]
@@ -161,6 +176,8 @@ def run_options_backtest(
         spot = float(window.iloc[-1]["close"])
         vol = vol_series.iloc[i]
         exited_this_bar = False
+        if now.date() != current_day:
+            current_day, entries_today, pnl_today = now.date(), {"C": 0, "P": 0}, 0.0
 
         if open_trade is not None:
             t_years = _time_to_expiry_years(now, open_trade.expiry)
@@ -218,14 +235,24 @@ def run_options_backtest(
                 open_trade.exit_premium = max(premium - slippage_per_share, 0.0)
                 open_trade.exit_reason = exit_reason
                 equity += open_trade.pnl or 0.0
+                pnl_today += open_trade.pnl or 0.0
                 result.trades.append(open_trade)
                 open_trade = None
                 exited_this_bar = True
 
-        if open_trade is None and not exited_this_bar and pd.notna(vol):
+        entries_allowed = (
+            (last_entry_time is None or now.time() < last_entry_time)
+            and (daily_loss_limit is None or pnl_today > -daily_loss_limit)
+        )
+        if open_trade is None and not exited_this_bar and pd.notna(vol) and entries_allowed:
+            right = None
             signal = strategy.generate_signal(symbol, window)
             if signal.action in ("BUY_CALL", "BUY_PUT"):
                 right = "C" if signal.action == "BUY_CALL" else "P"
+            elif max_reentries:
+                right = strategy.reentry_direction(window, entries_today, max_reentries)
+            if right is not None:
+                entries_today[right] += 1
                 direction = 1 if right == "C" else -1
                 raw_strike = spot * (1 + direction * otm_pct)
                 strike = round(raw_strike / strike_increment) * strike_increment

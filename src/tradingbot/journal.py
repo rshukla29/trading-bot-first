@@ -309,6 +309,19 @@ class Journal:
                 "SELECT * FROM orb_positions WHERE status='open' AND symbol=? ORDER BY id DESC LIMIT 1", (symbol,)
             ).fetchone()
 
+    def orb_entries_on(self, symbol: str, day: str) -> dict[str, int]:
+        """{'C': n, 'P': n} ORB entries for `symbol` on `day` (YYYY-MM-DD,
+        matched on the UTC entry timestamp — the US session never crosses
+        UTC midnight)."""
+        counts = {"C": 0, "P": 0}
+        with self._connect() as conn:
+            for right, n in conn.execute(
+                "SELECT right, COUNT(*) FROM orb_positions WHERE symbol=? AND entry_date LIKE ? GROUP BY right",
+                (symbol, f"{day}%"),
+            ):
+                counts[right] = n
+        return counts
+
     def record_orb_partial_exit(self, position_id: int, remaining_contracts: int, partial_pnl: float) -> None:
         """After a partly-filled close: persist what's left and the P&L
         already realized, so a restart doesn't try to sell the full size."""

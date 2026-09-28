@@ -123,6 +123,35 @@ def profit_booking_variants() -> list[Variant]:
     ]
 
 
+def improvement_variants() -> list[Variant]:
+    """Ideas after the 2026-09-28 losing day: stop loss + step-up profit
+    booking with re-entry when the trend resumes, a daily loss limit, and
+    an entry cutoff — each measured against what runs live."""
+    from datetime import time as _t
+    live = dict(use_stop_loss=False, profit_target_pct=None, exit_on_range_reentry=False, vwap_exit=True,
+                lock_trigger_pct=1.0, lock_keep_pct=0.5)
+    base = dict(use_stop_loss=False, profit_target_pct=None, exit_on_range_reentry=False, vwap_exit=True)
+    stop_step = dict(base, use_stop_loss=True, step_stop_pct=settings.step_stop_pct)
+    return [
+        Variant("live_now", "VWAP + keep half once up 100% (live today)", live),
+        Variant("stop_step", "VWAP + -30% stop + 10% step stop (no re-entry)", stop_step),
+        Variant("stop_step_re1", "... + re-enter once when trend resumes", dict(stop_step, max_reentries=1)),
+        Variant("stop_step_re2", "... + re-enter up to twice", dict(stop_step, max_reentries=2)),
+        Variant("step_re2", "VWAP + 10% step stop + re-enter x2 (no -30% stop)",
+                dict(base, step_stop_pct=settings.step_stop_pct, max_reentries=2)),
+        Variant("stop_re2", "VWAP + -30% stop + re-enter x2 (no step stop)",
+                dict(base, use_stop_loss=True, max_reentries=2)),
+        Variant("live_re2", "live + re-enter x2", dict(live, max_reentries=2)),
+        Variant("live_loss1k", "live + no new entries after -$1,000 day", dict(live, daily_loss_limit=1000.0)),
+        Variant("live_cut12", "live + no new entries after 12:00", dict(live, last_entry_time=_t(12, 0))),
+        Variant("live_cut13", "live + no new entries after 13:00", dict(live, last_entry_time=_t(13, 0))),
+        Variant("live_cut12_loss1k", "live + 12:00 cutoff + -$1,000 limit",
+                dict(live, last_entry_time=_t(12, 0), daily_loss_limit=1000.0)),
+        Variant("all_combined", "stop + step + re-enter x2 + 12:00 cutoff + -$1,000 limit",
+                dict(stop_step, max_reentries=2, last_entry_time=_t(12, 0), daily_loss_limit=1000.0)),
+    ]
+
+
 def max_drawdown(curve: list[tuple[pd.Timestamp, float]]) -> float:
     peak, worst = -math.inf, 0.0
     for _, eq in curve:
@@ -171,6 +200,8 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--profit-booking", action="store_true",
                         help="compare profit-booking rules on top of the VWAP exit instead")
+    parser.add_argument("--improve", action="store_true",
+                        help="compare stop/step/re-entry, daily loss limit and entry cutoff ideas")
     args = parser.parse_args()
 
     bars = fetch_history(args.symbol, args.years, args.refresh)
@@ -196,7 +227,9 @@ def main() -> None:
     )
 
     results, rows = {}, []
-    for v in (profit_booking_variants() if args.profit_booking else variants()):
+    chosen = improvement_variants() if args.improve else (
+        profit_booking_variants() if args.profit_booking else variants())
+    for v in chosen:
         result = run_options_backtest(**common, **v.kwargs)
         results[v.name] = result
         rows.append(summarize(v.name, result))

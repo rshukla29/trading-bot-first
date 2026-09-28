@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     # symbols can be open at the same time (so risk adds up: ~1% of equity
     # per open position). QQQ is excluded — this account lacks the Nasdaq
     # market data subscription its stock and option quotes need (10089/10091).
-    orb_symbols: str = "SPY,IWM"
+    orb_symbols: str = "SPY"
     options_bar_minutes: int = 5
     options_opening_range_minutes: int = 15
     options_risk_pct_per_trade: float = 0.01
@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     # 0 disables.
     options_lock_trigger_pct: float = 1.0
     options_lock_keep_pct: float = 0.5
+    # Re-entry when the trend resumes (since 2026-09-29): after a trade in
+    # a direction has closed, up to this many more entries that direction
+    # the same day, each on a completed 5-min close at a new session high
+    # (calls) / low (puts) beyond the opening range. Backtest (SPY, 4y,
+    # orb_exit_comparison.py --improve): PF 1.40 vs 1.27 without, max DD
+    # -9.6% vs -12.7%; PF 1.21 vs 1.08 at $0.05/share slippage. 0 disables.
+    options_max_reentries: int = 2
     options_use_stop_loss: bool = False
     options_step_stop_enabled: bool = False
     options_rate: float = 0.04

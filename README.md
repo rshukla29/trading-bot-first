@@ -1,7 +1,7 @@
 # trading-bot
 
 Automated trading bots for Interactive Brokers (via `ib_async`): five
-independent strategies covering stocks and SPY/IWM options, plus daily,
+independent strategies covering stocks and SPY options, plus daily,
 weekly and monthly P&L reports. **Paper trading only (account `DU…`) until
 you explicitly opt into live money.**
 
@@ -11,7 +11,7 @@ you explicitly opt into live money.**
 |---|---|---|---|---|---|
 | 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | 4:30pm, right after RSI(2) — `RSI2TradingBot` | `run_ibkr_bot` |
 | 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top movers + S&P 500 yfinance screen (scans not on Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
-| 3 | Opening Range Breakout (ORB) | SPY + IWM 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
+| 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 | — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Raises stops in 10% profit steps | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
@@ -24,7 +24,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 |---|---|---|
 | 9:00am | `SnapshotPremarketBot` | Premarket report |
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
-| 9:29am → 4:00pm | `ORBTradingBot` | SPY + IWM opening-range breakout, VWAP exit; flat by 3:55pm |
+| 9:29am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout, VWAP exit, re-entry; flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
 | 3:57pm | `ExpiryGuardBot` | Safety net: closes any option expiring today still open (normally nothing) |
@@ -95,20 +95,23 @@ Code: [strategy/rsi2_mean_reversion.py](src/tradingbot/strategy/rsi2_mean_revers
 notional per position (`MAX_POSITION_VALUE`), 10% broker-side **GTC** stop
 (cancelled automatically when the bot sells), max 5 positions each.
 
-### 3. Opening Range Breakout (SPY + IWM 0DTE options)
+### 3. Opening Range Breakout (SPY 0DTE options)
 
 Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
 [run_orb_bot.py](src/tradingbot/run_orb_bot.py)
 
-- **Symbols:** `ORB_SYMBOLS` (SPY, IWM), traded independently — each has
-  its own range, signal and position, and both can be open at once (~1%
-  of equity at risk per open position). QQQ is out: the account lacks the
-  Nasdaq market data subscription its quotes need.
+- **Symbols:** `ORB_SYMBOLS` = SPY (the bot supports several, each traded
+  independently). IWM was dropped 2026-09-29: no exit variant made it
+  profitable over 4 years (PF 0.94-0.99). QQQ needs a Nasdaq market data
+  subscription this account doesn't have.
 - **Opening range:** high/low of the first 15 minutes.
 - **Entry:** first *completed* 5-min bar closing above the range → buy
   ATM call; below → buy ATM put. At most one call and one put per symbol
-  per day; the bot keeps watching all day (a VWAP exit on the call doesn't
-  stop a later put). Each bar is judged once, right after it closes — the
+  per day, plus **re-entries**: after a trade has closed, up to 2 more
+  entries that direction the same day, each when a completed bar closes at
+  a new session high (calls) / low (puts) beyond the range — the trend
+  resumed (`OPTIONS_MAX_REENTRIES`). Backtest: PF 1.40 vs 1.27 without,
+  max drawdown −9.6% vs −12.7%. The bot keeps watching all day. Each bar is judged once, right after it closes — the
   same rule as the backtest (fixed 2026-09-28: live had been judging the
   still-forming bar and missed most breakouts).
 - **Exit (since 2026-09-28):** a completed 5-min bar closes back across
