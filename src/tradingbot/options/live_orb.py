@@ -88,13 +88,17 @@ def enter_orb_trade(ib: IB, contract: Option, contracts: int) -> tuple[Trade, fl
     return trade, mid
 
 
-def exit_orb_trade(ib: IB, contract: Option, contracts: int) -> tuple[Trade, float]:
-    """Sells to close at the live mid. Returns (Trade, mid_price_used)."""
-    _, _, mid = get_quote(ib, contract)
-    order = LimitOrder("SELL", contracts, round(mid, 2), tif="DAY")
+def exit_orb_trade(ib: IB, contract: Option, contracts: int, at_bid: bool = False) -> tuple[Trade, float]:
+    """Sells to close at the live mid, or at the bid on a retry (a cheap
+    same-day option can sit unfilled at the mid for minutes while it
+    decays). Returns (Trade, price_used). `contracts` must already be
+    clamped to what's actually held."""
+    bid, _, mid = get_quote(ib, contract)
+    price = bid if at_bid else mid
+    order = LimitOrder("SELL", contracts, round(price, 2), tif="DAY")
     trade = ib.placeOrder(contract, order)
-    logger.info("Closed ORB trade: %s x%d @ ~%.2f", contract.localSymbol, contracts, mid)
-    return trade, mid
+    logger.info("Closing ORB trade: %s x%d @ ~%.2f%s", contract.localSymbol, contracts, price, " (bid)" if at_bid else "")
+    return trade, price
 
 
 def wait_for_fill(ib: IB, trade: Trade, timeout: float = 45.0, poll_interval: float = 3.0) -> bool:

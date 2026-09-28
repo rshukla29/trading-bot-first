@@ -15,11 +15,16 @@ def _trade(symbol, action="SELL", order_type="STP", qty=10, aux=90.0, sec_type="
 class FakeIB:
     """Just enough of ib_async.IB to capture what the order helpers send."""
 
-    def __init__(self, open_trades=()):
+    def __init__(self, open_trades=(), held=None):
         self.placed = []
         self.cancelled = []
         self._open = list(open_trades)
+        self._held = held or {}  # symbol -> shares
         self.client = SimpleNamespace(getReqId=iter(range(1000, 2000)).__next__)
+
+    def positions(self):
+        return [SimpleNamespace(contract=SimpleNamespace(symbol=s, secType="STK", conId=0), position=q)
+                for s, q in self._held.items()]
 
     def qualifyContracts(self, *contracts):
         return list(contracts)
@@ -52,7 +57,7 @@ def test_bracket_stop_is_gtc_not_day():
 def test_market_sell_cancels_stop_first_and_sets_tif():
     stop = _trade("AAA")
     other = _trade("BBB")
-    ib = FakeIB(open_trades=[stop, other])
+    ib = FakeIB(open_trades=[stop, other], held={"AAA": 10})
     place_market_sell(ib, "AAA", 10)
     assert ib.cancelled == [stop.order]  # only AAA's stop
     (_, sell), = ib.placed
@@ -156,3 +161,16 @@ def test_stop_with_pending_bracket_buy_is_not_an_orphan():
     buy = _trade("NEW", action="BUY", order_type="MKT")
     stop = _trade("NEW", qty=10, aux=45.0)
     assert orphan_stops([buy, stop], held_symbols=set()) == []
+
+
+def test_market_sell_never_sells_more_than_held():
+    ib = FakeIB(held={"AAA": 4})
+    place_market_sell(ib, "AAA", 10)
+    (_, sell), = ib.placed
+    assert sell.totalQuantity == 4
+
+
+def test_market_sell_skips_when_nothing_held():
+    ib = FakeIB(held={})
+    assert place_market_sell(ib, "AAA", 10) is None
+    assert ib.placed == []

@@ -63,12 +63,17 @@ def cancel_stop_orders(ib: IB, symbol: str) -> int:
     return cancelled
 
 
-def place_market_sell(ib: IB, symbol: str, quantity: int) -> Trade:
+def place_market_sell(ib: IB, symbol: str, quantity: int) -> Trade | None:
     """Exit a position. Cancels its GTC protective stop first — left
     working, that stop could later fire on a flat position and open a
     short."""
     contract = Stock(symbol, "SMART", "USD")
     ib.qualifyContracts(contract)
+    held = next((p.position for p in ib.positions() if p.contract.symbol == symbol and p.contract.secType == "STK"), 0)
+    quantity = max(0, int(min(quantity, held)))  # never sell into a short
+    if quantity == 0:
+        logger.warning("Not selling %s: nothing held at IBKR", symbol)
+        return None
     cancel_stop_orders(ib, symbol)
     # Explicit tif: left unset, the account's order preset rewrites it to
     # DAY via error 10349 and a cancel/resubmit cycle (seen 2026-09-25).

@@ -61,6 +61,13 @@ from tradingbot.options.live_orb import (
     wait_for_fill,
 )
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
+from tradingbot.position_guard import (
+    buy_back,
+    clamp_sell_qty,
+    held_qty,
+    intended_short_conids,
+    unexpected_shorts,
+)
 from tradingbot.risk import profit_lock_floor, step_trailing_stop
 from tradingbot.strategy.trend_join import completed_bars
 
@@ -98,6 +105,7 @@ def recover_open_position(ib, journal: Journal, symbol: str) -> dict | None:
     return {
         "id": row["id"], "contract": contract, "right": row["right"],
         "entry_premium": row["entry_premium"], "contracts": row["contracts"],
+        "partial_pnl": row["realized_pnl"] or 0.0,
         "range_low": row["range_low"], "range_high": row["range_high"],
     }
 
@@ -166,22 +174,48 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         )
         return False
 
-    trade, _ = exit_orb_trade(ib, position["contract"], position["contracts"])
-    filled = wait_for_fill(ib, trade)
-    if not filled:
-        logger.warning(
-            "%s: ORB close order did not fill (status=%s) — will retry next tick",
-            symbol, trade.orderStatus.status,
+    # Never sell more than IBKR shows as held (see position_guard.py).
+    qty = clamp_sell_qty(position["contracts"], held_qty(ib, position["contract"].conId))
+    partial_pnl = position.get("partial_pnl", 0.0)
+    if qty == 0:
+        journal.close_orb_position(
+            position["id"], datetime.now(timezone.utc).isoformat(), 0.0, "already_flat", partial_pnl,
         )
+        logger.warning("%s: ORB position already flat at IBKR — marking closed", symbol)
+        return True
+
+    retry = position.get("exit_attempts", 0) > 0
+    trade, _ = exit_orb_trade(ib, position["contract"], qty, at_bid=retry)
+    if not wait_for_fill(ib, trade):
         ib.cancelOrder(trade.order)
+        ib.sleep(2)  # let a fill that raced the cancel arrive before reading it
+        done = int(trade.orderStatus.filled)
+        position["exit_attempts"] = position.get("exit_attempts", 0) + 1
+        if done:
+            # Partly filled: book it and only try to sell the rest next tick.
+            position["partial_pnl"] = partial_pnl + (
+                (trade.orderStatus.avgFillPrice - position["entry_premium"]) * done * CONTRACT_MULTIPLIER
+            )
+            position["contracts"] -= done
+            journal.record_orb_partial_exit(position["id"], position["contracts"], position["partial_pnl"])
+        logger.warning(
+            "%s: ORB close filled %d of %d before cancel — %d left, retrying at the bid next tick",
+            symbol, done, qty, position["contracts"],
+        )
+        if position["contracts"] <= 0:
+            journal.close_orb_position(
+                position["id"], datetime.now(timezone.utc).isoformat(), trade.orderStatus.avgFillPrice,
+                reason, position["partial_pnl"],
+            )
+            return True
         return False
 
     actual_exit = trade.orderStatus.avgFillPrice
-    realized_pnl = (actual_exit - position["entry_premium"]) * position["contracts"] * CONTRACT_MULTIPLIER
+    realized_pnl = partial_pnl + (actual_exit - position["entry_premium"]) * qty * CONTRACT_MULTIPLIER
     journal.close_orb_position(
         position["id"], datetime.now(timezone.utc).isoformat(), actual_exit, reason, realized_pnl,
     )
-    journal.log_order(symbol, "CLOSE_ORB", position["contracts"], "OPT", broker="IBKR", status="filled")
+    journal.log_order(symbol, "CLOSE_ORB", qty, "OPT", broker="IBKR", status="filled")
     logger.info(
         "%s: CLOSED ORB position (%s), actual exit premium=%.2f, pnl=%.2f",
         symbol, reason, actual_exit, realized_pnl,
@@ -228,9 +262,16 @@ def check_entry(
     trade, _ = enter_orb_trade(ib, contract, contracts)
     filled = wait_for_fill(ib, trade)
     if not filled:
-        logger.warning("%s: ORB open order did not fill (status=%s) — cancelling", symbol, trade.orderStatus.status)
         ib.cancelOrder(trade.order)
-        return None
+        ib.sleep(2)
+        done = int(trade.orderStatus.filled)
+        if not done:
+            logger.warning("%s: ORB open order did not fill (status=%s) — cancelled", symbol, trade.orderStatus.status)
+            return None
+        # Partly filled: those contracts are a real position — track them
+        # (untracked, they'd be left unmanaged until the expiry guard).
+        logger.warning("%s: ORB open order filled %d of %d before cancel — managing %d", symbol, done, contracts, done)
+        contracts = done
 
     actual_entry = trade.orderStatus.avgFillPrice
     position_id = journal.open_orb_position(
@@ -246,6 +287,20 @@ def check_entry(
         "id": position_id, "contract": contract, "right": right, "entry_premium": actual_entry,
         "contracts": contracts, "range_low": range_low, "range_high": range_high,
     }
+
+
+def repair_short_options(ib, journal: Journal, symbols: list[str]) -> None:
+    """ORB only ever buys options. Any short option on an ORB symbol that
+    isn't an iron condor leg is a mistake — buy it back immediately."""
+    allowed = intended_short_conids(journal)
+    for pos in unexpected_shorts(ib.positions(), allowed):
+        if pos.contract.secType == "OPT" and pos.contract.symbol in symbols:
+            trade = buy_back(ib, pos)
+            if wait_for_fill(ib, trade, timeout=60):
+                logger.error("%s: unintended short bought back @ %.2f",
+                             pos.contract.localSymbol, trade.orderStatus.avgFillPrice)
+                journal.log_order(pos.contract.symbol, "BUY_TO_CLOSE_SHORT", int(abs(pos.position)), "OPT",
+                                  broker="IBKR", status="filled")
 
 
 def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStrategy, state: dict) -> None:
@@ -305,6 +360,10 @@ def main() -> None:
 
         logger.info("ORB live loop starting for %s", [s["symbol"] for s in states])
         while _now_et().time() < MARKET_CLOSE:
+            try:
+                repair_short_options(ib, journal, symbols)
+            except Exception:
+                logger.exception("Short-position check failed")
             for state in states:
                 try:
                     tick_symbol(ib, client, journal, strategy, state)

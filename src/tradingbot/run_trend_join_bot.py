@@ -43,6 +43,7 @@ from tradingbot.ibkr.data import fetch_intraday_bars
 from tradingbot.journal import Journal
 from tradingbot.options.live_chain import get_quote
 from tradingbot.options.live_orb import wait_for_fill
+from tradingbot.position_guard import clamp_sell_qty, held_qty
 from tradingbot.sp500_scanner import download_daily_bars, fetch_sp500_constituents
 from tradingbot.strategy.trend_join import (
     GapCandidate,
@@ -188,6 +189,10 @@ def try_enter(
 # --------------------------------------------------------------------------
 
 def _sell(ib: IB, pos: LivePosition, qty: int) -> float | None:
+    qty = clamp_sell_qty(qty, held_qty(ib, pos.contract.conId))  # never sell into a short
+    if qty == 0:
+        logger.warning("%s: nothing held at IBKR to sell", pos.symbol)
+        return None
     trade = ib.placeOrder(pos.contract, MarketOrder("SELL", qty, tif="DAY"))
     if not wait_for_fill(ib, trade):
         logger.error("%s: market SELL %d did not fill (status=%s)", pos.symbol, qty, trade.orderStatus.status)

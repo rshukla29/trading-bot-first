@@ -309,6 +309,15 @@ class Journal:
                 "SELECT * FROM orb_positions WHERE status='open' AND symbol=? ORDER BY id DESC LIMIT 1", (symbol,)
             ).fetchone()
 
+    def record_orb_partial_exit(self, position_id: int, remaining_contracts: int, partial_pnl: float) -> None:
+        """After a partly-filled close: persist what's left and the P&L
+        already realized, so a restart doesn't try to sell the full size."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE orb_positions SET contracts=?, realized_pnl=? WHERE id=?",
+                (remaining_contracts, partial_pnl, position_id),
+            )
+
     def open_orb_positions_by_conid(self, conid: int) -> list[sqlite3.Row]:
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row

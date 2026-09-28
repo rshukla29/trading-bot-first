@@ -36,6 +36,7 @@ from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.journal import Journal
 from tradingbot.paths import dated_dir
+from tradingbot.position_guard import intended_short_conids, unexpected_shorts
 from tradingbot.protection import orphan_stops, working_stop_qty_by_symbol
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
@@ -236,6 +237,7 @@ def _render_closed_trades_section(trades: list[ClosedTrade], period_label: str) 
 
 def build_report(
     client: IBKRClient, label: str, closed_trades: list[ClosedTrade], owners: dict[str, str] | None = None,
+    allowed_short_conids: set[int] | None = None,
 ) -> str:
     ib = client.ib
     accounts = ib.managedAccounts()
@@ -278,6 +280,11 @@ def build_report(
     parts.extend(positions_parts)
 
     parts.extend(_render_stop_coverage_section(portfolio, orders, owners or {}))
+    shorts = unexpected_shorts(portfolio, allowed_short_conids or set())
+    if shorts:
+        names = ", ".join(f"{_describe_contract(p.contract)} {p.position:.0f}" for p in shorts)
+        parts.insert(2, f"<p class='warn'>WARNING: unintended short positions (only iron condor "
+                        f"sold legs should be negative): {escape(names)}</p>")
 
     closed_parts, _ = _render_closed_trades_section(closed_trades, "today")
     parts.extend(closed_parts)
@@ -443,7 +450,7 @@ def main() -> None:
         fills = get_closed_fills_today(client.ib, today)
         closed_trades_today = persist_closed_fills(journal, fills, today)
 
-        report = build_report(client, label, closed_trades_today, stock_owners(journal))
+        report = build_report(client, label, closed_trades_today, stock_owners(journal), intended_short_conids(journal))
         path = write_report_file(report, f"snapshot_{today.isoformat()}_{label}", today)
         print(f"Saved to {path}")
         commit_report(path, f"{label} {today.isoformat()}")

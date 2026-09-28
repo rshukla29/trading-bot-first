@@ -284,6 +284,13 @@ Each scheduled bot has a wrapper in [scripts/](scripts/)
   with an exit order already working, and leftover stops are cancelled
   automatically (every step-stop tick and every MA/RSI(2) run). Stops on
   new entries still waiting for the open are left alone.
+- **No unintended shorts:** the only negative positions should be the
+  iron condor's sold legs. Every sell is capped at the quantity IBKR shows
+  as held; a partly-filled close books the filled part and retries only
+  the remainder (at the bid); the ORB bot buys back any short option on
+  its symbols every tick; the snapshot flags any other short in red. See
+  [position_guard.py](src/tradingbot/position_guard.py). (2026-09-28: a
+  partial-fill retry oversold, leaving short 11 IWM and 2 SPY puts.)
 - **Expiry guard (3:57pm):** ORB options have no broker-side stop — the
   bot checks its VWAP exit every ~60s and flattens at 3:55pm. If the bot
   were down at the close, an in-the-money SPY/IWM option would be
