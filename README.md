@@ -51,9 +51,9 @@ keeps the new stop from sitting right at the current price).
   the stop order at IBKR, so an intraday spike that fades still locks in
   its step. Uses client ID 1 (the ID that placed the stops) — don't run
   the MA/RSI(2) bots by hand while it's running.
-- **Not on ORB:** the ORB exit comparison showed the step stop removes its
-  edge (profit factor 0.98 vs 1.34 for VWAP-only), so ORB exits on VWAP
-  instead. Available via `OPTIONS_STEP_STOP_ENABLED`, off.
+- **ORB uses its own, wider step-up** (starts at +50%, 25% steps — see #3):
+  the stocks' 10% steps were too tight for 0DTE option premiums in the
+  backtest (profit factor 0.98).
 - Not applied to Trend Join (its own breakeven + swing-low trail) or the
   iron condor (short premium; already closes at 50% of max profit).
 - Settings: `STEP_STOP_ENABLED`, `STEP_STOP_PCT`, `STEP_STOP_BUFFER_PCT`.
@@ -105,31 +105,31 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
   profitable over 4 years (PF 0.94-0.99). QQQ needs a Nasdaq market data
   subscription this account doesn't have.
 - **Opening range:** high/low of the first 15 minutes.
-- **Entry:** first *completed* 5-min bar closing above the range → buy
-  ATM call; below → buy ATM put. At most one call and one put per symbol
-  per day, plus **re-entries**: after a trade has closed, up to 2 more
-  entries that direction the same day, each when a completed bar closes at
-  a new session high (calls) / low (puts) beyond the range — the trend
-  resumed (`OPTIONS_MAX_REENTRIES`). Backtest: PF 1.40 vs 1.27 without,
-  max drawdown −9.6% vs −12.7%. The bot keeps watching all day. Each bar is judged once, right after it closes — the
-  same rule as the backtest (fixed 2026-09-28: live had been judging the
-  still-forming bar and missed most breakouts).
-- **Exit (since 2026-09-28):** a completed 5-min bar closes back across
-  today's VWAP (call: below, put: above), or the 3:55pm flatten. Max loss
-  per trade is the premium paid.
-- **Step-up profit lock (since 2026-09-29):** once the option is up 50%,
-  its stop moves to +25%, then follows 25% of entry behind each further
-  25% step — bought $1.00: $1.50 → stop $1.25, $1.75 → $1.50, $2.00 →
-  $1.75. Never moves down. Backtest (`--ladder`): PF 1.30, 44% of trades
-  win, max drawdown −10.4%. No fixed stop below entry: a −20% premium stop
-  was tested and rejected (PF 0.87, −83% drawdown) — 0DTE premiums
-  routinely dip 20% in noise, then recover. Settings: `OPTIONS_LADDER_*`.
-- **Why VWAP-only:** [scripts/orb_exit_comparison.py](scripts/orb_exit_comparison.py)
-  tested exits on 999 SPY sessions (Oct 2022–Sep 2026, with costs).
-  Profit factor: VWAP-only 1.34, old exits (−30% stop, +50% target, range
-  re-entry) 0.87, old exits + step stop 0.98. It wins only ~25% of trades —
-  a few large winners pay for many small losses, so judge it over 40–60
-  trades, not a week. The old exits are still in settings, switched off.
+- **Entry:** the first *completed* 5-min bar closing above the range buys
+  an ATM call; below it, an ATM put (0DTE). Each bar is judged once, right
+  after it closes — the same rule as the backtest.
+- **Re-entry:** after a trade has closed, up to 2 more entries in that
+  direction the same day, each when a completed bar closes at a new
+  session high (calls) / low (puts) beyond the range — the trend resumed
+  (`OPTIONS_MAX_REENTRIES`). At most 6 trades a day, one open at a time.
+- **Exits** (first one hit):
+  - **Step-up profit lock:** once the option is up 50%, its stop moves to
+    +25%, then follows 25% of entry behind each further 25% step —
+    bought $1.00: $1.50 → stop $1.25, $1.75 → $1.50, $2.00 → $1.75.
+    Never moves down (`OPTIONS_LADDER_*`).
+  - **VWAP:** a completed 5-min bar closes back across today's VWAP
+    (call: below, put: above).
+  - **3:55pm flatten**, with the 3:57pm expiry guard as backup.
+  - No stop below entry: max loss per trade is the premium paid.
+- **Backtest of this setup** ([scripts/orb_exit_comparison.py](scripts/orb_exit_comparison.py)
+  `--ladder`, 999 SPY sessions Oct 2022–Sep 2026, with costs): profit
+  factor 1.30, +$159k on $100k, 44% of trades win, max drawdown −10.4%.
+- **Rejected after testing:** fixed premium stops (−20%: PF 0.87, −83%
+  drawdown; −30%: PF 1.13 or worse — 0DTE premiums routinely dip that far
+  in noise, then recover), the stocks' 10% step stop (0.98), a +50%
+  profit target, re-entry on VWAP pullbacks (weaker than new highs/lows),
+  a daily loss limit (no effect) and entry cutoffs (miss afternoon
+  trends). All remain in settings, switched off.
 - One position per symbol at a time, max 10 contracts; exits checked
   every ~60s. Open positions are recovered from the journal if the
   process restarts.
