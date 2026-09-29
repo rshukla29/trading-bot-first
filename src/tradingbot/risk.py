@@ -44,6 +44,21 @@ def step_trailing_stop(entry: float, price: float, step_pct: float = 0.10, buffe
     return round(entry * (1 + steps * step_pct), 2)
 
 
+def ladder_stop(entry: float, peak: float, trigger_pct: float, step_pct: float, trail_pct: float) -> float | None:
+    """Step-up stop for options: once the peak has gained `trigger_pct`, the
+    stop sits `trail_pct` (of entry) below the highest completed step of
+    `step_pct`. ORB: trigger 50%, steps of 25%, trail 25% — bought at $1.00:
+    peak $1.50 -> stop $1.25, $1.75 -> $1.50, $2.00 -> $1.75, and so on.
+    None before the trigger (the initial stop applies). Never falls."""
+    if entry <= 0 or step_pct <= 0 or trigger_pct <= 0:
+        return None
+    gain = peak / entry - 1
+    if gain + 1e-9 < trigger_pct:
+        return None
+    steps = math.floor(gain / step_pct + 1e-9)
+    return round(entry * (1 + steps * step_pct - trail_pct), 2)
+
+
 def profit_lock_floor(entry: float, peak: float, trigger_pct: float, keep_pct: float) -> float | None:
     """Once the peak price has gained `trigger_pct` over entry, the exit
     floor is entry + keep_pct x (peak - entry); None before that. ORB uses

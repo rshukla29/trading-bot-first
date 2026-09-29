@@ -112,3 +112,41 @@ def test_profit_lock_exits_when_premium_gives_back_half_the_peak_gain():
                                                 use_stop_loss=False, profit_target_pct=None)) == "profit_lock"
     assert determine_exit_reason(**_base_kwargs(current_premium=1.71, lock_floor_premium=1.70,
                                                 use_stop_loss=False, profit_target_pct=None)) is None
+
+
+# --- step-up (ladder) stop: -20% initial, 50% trigger, 25% steps -------------
+
+from tradingbot.risk import ladder_stop  # noqa: E402
+
+
+def test_ladder_stop_matches_requested_examples():
+    # Bought at $1.00: nothing until +50%, then the stop follows 25c behind each 25% step.
+    assert ladder_stop(1.00, 1.49, 0.5, 0.25, 0.25) is None
+    assert ladder_stop(1.00, 1.50, 0.5, 0.25, 0.25) == 1.25
+    assert ladder_stop(1.00, 1.74, 0.5, 0.25, 0.25) == 1.25
+    assert ladder_stop(1.00, 1.75, 0.5, 0.25, 0.25) == 1.50
+    assert ladder_stop(1.00, 2.00, 0.5, 0.25, 0.25) == 1.75
+
+
+def test_ladder_stop_exit_and_initial_20pct_stop():
+    assert determine_exit_reason(**_base_kwargs(current_premium=1.25, ladder_stop_premium=1.25,
+                                                profit_target_pct=None)) == "ladder_stop"
+    assert determine_exit_reason(**_base_kwargs(current_premium=0.80, stop_loss_pct_of_premium=0.20,
+                                                profit_target_pct=None)) == "stop_loss"
+    assert determine_exit_reason(**_base_kwargs(current_premium=0.81, stop_loss_pct_of_premium=0.20,
+                                                profit_target_pct=None)) is None
+
+
+def test_vwap_pullback_reentry():
+    import pandas as pd
+    from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
+
+    s = OpeningRangeBreakoutStrategy(15, 5)
+    bar = lambda o, h, l, c: pd.DataFrame([{"open": o, "high": h, "low": l, "close": c}])  # noqa: E731
+    # call side: dips to VWAP 100 and closes back above as an up bar
+    assert s.vwap_reentry_direction(bar(100.1, 100.6, 99.9, 100.5), 100.0, {"C": 1, "P": 0}, 2) == "C"
+    assert s.vwap_reentry_direction(bar(100.4, 100.6, 100.2, 100.5), 100.0, {"C": 1, "P": 0}, 2) is None  # no touch
+    assert s.vwap_reentry_direction(bar(100.6, 100.7, 99.9, 100.2), 100.0, {"C": 1, "P": 0}, 2) is None  # down bar
+    assert s.vwap_reentry_direction(bar(100.1, 100.6, 99.9, 100.5), 100.0, {"C": 0, "P": 0}, 2) is None  # no prior call
+    # put side mirror
+    assert s.vwap_reentry_direction(bar(99.9, 100.1, 99.4, 99.5), 100.0, {"C": 0, "P": 1}, 2) == "P"

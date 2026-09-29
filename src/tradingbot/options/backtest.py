@@ -8,7 +8,7 @@ import pandas as pd
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
 from tradingbot.indicators import session_vwap
 from tradingbot.options.pricing import bs_price, realized_volatility
-from tradingbot.risk import profit_lock_floor, step_trailing_stop
+from tradingbot.risk import ladder_stop, profit_lock_floor, step_trailing_stop
 
 TRADING_MINUTES_PER_DAY = 390  # 9:30-16:00 ET
 TRADING_DAYS_PER_YEAR = 252
@@ -107,6 +107,10 @@ def run_options_backtest(
     partial_trigger_pct: float | None = None,
     partial_fraction: float = 0.5,
     max_reentries: int = 0,
+    reentry_mode: str = "new_extreme",
+    ladder_trigger_pct: float | None = None,
+    ladder_step_pct: float = 0.25,
+    ladder_trail_pct: float = 0.25,
     daily_loss_limit: float | None = None,
     last_entry_time: time | None = None,
 ) -> OptionsBacktestResult:
@@ -139,6 +143,10 @@ def run_options_backtest(
         completed bar closes at a new session extreme (new high of day for
         calls, new low for puts) beyond the opening range — "the trend
         resumed". The strategy's own signal still only fires once.
+      - reentry_mode: "new_extreme" (close at a new session high/low) or
+        "vwap" (pullback to VWAP that closes back on the trend side).
+      - ladder_*: step-up stop (risk.ladder_stop), e.g. 50% trigger, 25%
+        steps, 25% trail.
       - daily_loss_limit: no new entries once the day's realized P&L on
         this symbol is at or below -daily_loss_limit.
       - last_entry_time: no new entries at or after this time.
@@ -154,7 +162,7 @@ def run_options_backtest(
     # sharp drop looks like it "shouldn't" hurt a long call much, because
     # vol spiked enough (from that very drop) to prop the price back up.
     vol_series = (realized_volatility(bars["close"], vol_window, bars_per_year) * iv_premium_multiplier).shift(1)
-    vwap_series = session_vwap(bars) if vwap_exit else None
+    vwap_series = session_vwap(bars) if (vwap_exit or reentry_mode == "vwap") else None
     # The strategy only ever looks at the current session's bars, so pass
     # it just today's slice rather than all history up to bar i — identical
     # signals, but O(n) instead of O(n^2) over multi-year 5-min data.
@@ -187,7 +195,12 @@ def run_options_backtest(
                 step_trailing_stop(open_trade.entry_premium, open_trade.peak_premium, step_stop_pct, step_stop_buffer_pct)
                 if step_stop_pct else None
             )
-            vwap = float(vwap_series.iloc[i]) if vwap_series is not None else None
+            vwap = float(vwap_series.iloc[i]) if (vwap_series is not None and vwap_exit) else None
+            ladder = (
+                ladder_stop(open_trade.entry_premium, open_trade.peak_premium,
+                            ladder_trigger_pct, ladder_step_pct, ladder_trail_pct)
+                if ladder_trigger_pct is not None else None
+            )
 
             entry = open_trade.entry_premium
             if (partial_trigger_pct is not None and not open_trade.partial_done
@@ -209,6 +222,8 @@ def run_options_backtest(
                 exit_reason = "stop_loss"
             elif step_stop is not None and premium <= step_stop:
                 exit_reason = "step_stop"
+            elif ladder is not None and premium <= ladder:
+                exit_reason = "ladder_stop"
             elif lock_floor is not None and premium <= lock_floor:
                 exit_reason = "profit_lock"
             elif profit_target_pct is not None and premium >= open_trade.entry_premium * (1 + profit_target_pct):
@@ -250,7 +265,11 @@ def run_options_backtest(
             if signal.action in ("BUY_CALL", "BUY_PUT"):
                 right = "C" if signal.action == "BUY_CALL" else "P"
             elif max_reentries:
-                right = strategy.reentry_direction(window, entries_today, max_reentries)
+                if reentry_mode == "vwap":
+                    right = strategy.vwap_reentry_direction(
+                        window, float(vwap_series.iloc[i]), entries_today, max_reentries)
+                else:
+                    right = strategy.reentry_direction(window, entries_today, max_reentries)
             if right is not None:
                 entries_today[right] += 1
                 direction = 1 if right == "C" else -1

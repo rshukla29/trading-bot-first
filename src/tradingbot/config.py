@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     # vs 1.34 with no booking (gives up ~27% of long-run profit) but the
     # lowest drawdown (-12.7%) and 1 in 3 trades winning instead of 1 in 4.
     # 0 disables.
-    options_lock_trigger_pct: float = 1.0
+    options_lock_trigger_pct: float = 0.0  # replaced by the step-up ladder below (2026-09-29)
     options_lock_keep_pct: float = 0.5
     # Re-entry when the trend resumes (since 2026-09-29): after a trade in
     # a direction has closed, up to this many more entries that direction
@@ -124,6 +124,22 @@ class Settings(BaseSettings):
     # orb_exit_comparison.py --improve): PF 1.40 vs 1.27 without, max DD
     # -9.6% vs -12.7%; PF 1.21 vs 1.08 at $0.05/share slippage. 0 disables.
     options_max_reentries: int = 2
+    # "new_extreme": re-enter on a close at a new session high/low beyond
+    # the range. "vwap": re-enter on a pullback to VWAP that closes back on
+    # the trend side (bar touches VWAP, closes beyond it in the trend
+    # direction) — see OpeningRangeBreakoutStrategy.vwap_reentry_direction.
+    options_reentry_mode: str = "new_extreme"
+    # Step-up stop on option premium (risk.ladder_stop): once up
+    # options_ladder_trigger_pct, the stop trails options_ladder_trail_pct
+    # (of entry) below the highest completed options_ladder_step_pct step.
+    # 50/25/25: bought $1.00 -> $1.50 stop $1.25, $1.75 stop $1.50, ...
+    # 0 trigger disables. Live since 2026-09-29 in place of the keep-half
+    # lock: orb_exit_comparison.py --ladder (SPY, 4y) PF 1.30, +$159k, 44%
+    # win rate, -10.4% max DD vs 1.40 / 37% / -9.6% for keep-half. The same
+    # request's -20% premium stop was rejected: PF 0.87, -83% DD.
+    options_ladder_trigger_pct: float = 0.5
+    options_ladder_step_pct: float = 0.25
+    options_ladder_trail_pct: float = 0.25
     options_use_stop_loss: bool = False
     options_step_stop_enabled: bool = False
     options_rate: float = 0.04

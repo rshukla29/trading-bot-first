@@ -68,7 +68,7 @@ from tradingbot.position_guard import (
     intended_short_conids,
     unexpected_shorts,
 )
-from tradingbot.risk import profit_lock_floor, step_trailing_stop
+from tradingbot.risk import ladder_stop, profit_lock_floor, step_trailing_stop
 from tradingbot.strategy.trend_join import completed_bars
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -142,6 +142,11 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         position["entry_premium"], position["peak_premium"],
         settings.options_lock_trigger_pct, settings.options_lock_keep_pct,
     )
+    ladder = (
+        ladder_stop(position["entry_premium"], position["peak_premium"], settings.options_ladder_trigger_pct,
+                    settings.options_ladder_step_pct, settings.options_ladder_trail_pct)
+        if settings.options_ladder_trigger_pct > 0 else None
+    )
 
     bar_close = vwap = None
     if settings.options_vwap_exit:
@@ -163,13 +168,15 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         bar_close=bar_close,
         vwap=vwap,
         lock_floor_premium=lock_floor,
+        ladder_stop_premium=ladder,
     )
     if reason is None:
         logger.info(
-            "%s: ORB position holding (premium %.2f vs entry %.2f, peak %.2f, profit lock %s, spot %.2f, "
+            "%s: ORB position holding (premium %.2f vs entry %.2f, peak %.2f, locked-in stop %s, spot %.2f, "
             "last 5-min close %s vs VWAP %s)",
             symbol, premium_mid, position["entry_premium"], position["peak_premium"],
-            f"{lock_floor:.2f}" if lock_floor is not None else "not yet (needs +100%)", spot_mid,
+            (f"{ladder:.2f}" if ladder is not None else
+             f"{lock_floor:.2f}" if lock_floor is not None else "not yet"), spot_mid,
             f"{bar_close:.2f}" if bar_close is not None else "n/a", f"{vwap:.2f}" if vwap is not None else "n/a",
         )
         return False
@@ -236,13 +243,20 @@ def check_entry(
     if signal.action in ("BUY_CALL", "BUY_PUT"):
         right = "C" if signal.action == "BUY_CALL" else "P"
     else:
-        right = strategy.reentry_direction(bars, entries_today or {}, settings.options_max_reentries)
+        if settings.options_reentry_mode == "vwap":
+            today = bars[bars.index.date == bars.index[-1].date()]
+            right = strategy.vwap_reentry_direction(
+                today, float(session_vwap(today).iloc[-1]), entries_today or {}, settings.options_max_reentries,
+            )
+        else:
+            right = strategy.reentry_direction(bars, entries_today or {}, settings.options_max_reentries)
         if right is None:
             logger.info("%s: %s (%s)", symbol, signal.action, signal.reason)
             return None
         signal = type(signal)(
             symbol, "BUY_CALL" if right == "C" else "BUY_PUT", signal.underlying_price, signal.timestamp,
-            f"re-entry: trend resumed to a new session {'high' if right == 'C' else 'low'}",
+            ("re-entry: VWAP pullback held" if settings.options_reentry_mode == "vwap"
+             else f"re-entry: trend resumed to a new session {'high' if right == 'C' else 'low'}"),
         )
         journal.log_signal(symbol, signal.action, signal.underlying_price, signal.reason, source="run_orb_bot")
     day_range = strategy.range_for_day(bars, bars.index[-1].date())

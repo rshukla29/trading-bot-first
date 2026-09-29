@@ -94,6 +94,24 @@ class OpeningRangeBreakoutStrategy:
             return "P"
         return None
 
+    def vwap_reentry_direction(
+        self, bars: pd.DataFrame, vwap: float, entries_today: dict, max_reentries: int,
+    ) -> str | None:
+        """Re-entry on a good VWAP pullback: after a trade in a direction has
+        closed, 'C' when the latest completed bar dips to VWAP (low <= VWAP)
+        and closes back above it as an up bar; 'P' when it rallies to VWAP
+        (high >= VWAP) and closes back below it as a down bar. At most
+        `max_reentries` extra entries per direction per day."""
+        if not max_reentries or vwap is None:
+            return None
+        bar = bars.iloc[-1]
+        o, h, l, c = (float(bar[k]) for k in ("open", "high", "low", "close"))
+        if 1 <= entries_today.get("C", 0) <= max_reentries and l <= vwap < c and c > o:
+            return "C"
+        if 1 <= entries_today.get("P", 0) <= max_reentries and h >= vwap > c and c < o:
+            return "P"
+        return None
+
     def range_for_day(self, bars: pd.DataFrame, day) -> tuple[float, float] | None:
         """(range_low, range_high) for a given calendar day, or None if that
         day doesn't yet have enough bars. Used by the backtest to check the

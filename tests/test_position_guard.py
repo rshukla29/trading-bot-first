@@ -1,5 +1,7 @@
 """No unintended short positions — incl. a replay of the 2026-09-28 bug."""
+from datetime import datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import tradingbot.run_orb_bot as orb
 from tradingbot.position_guard import clamp_sell_qty, unexpected_shorts
@@ -51,8 +53,10 @@ def test_partial_fill_then_retry_never_oversells(monkeypatch):
         held["qty"] -= n
         return SimpleNamespace(order=None, orderStatus=SimpleNamespace(filled=n, avgFillPrice=0.10)), 0.10
 
+    # Fixed mid-session clock: at/after 15:55 the exit reason would be eod_flatten.
+    monkeypatch.setattr(orb, "_now_et", lambda: datetime(2026, 9, 28, 11, 0, tzinfo=ZoneInfo("America/New_York")))
     monkeypatch.setattr(orb, "get_quote", lambda ib, c: (0.09, 0.11, 0.10))
-    monkeypatch.setattr(orb, "latest_bar_vs_vwap", lambda ib, s: (100.0, 101.0))  # put, close < VWAP... call exits
+    monkeypatch.setattr(orb, "latest_bar_vs_vwap", lambda ib, s: (100.0, 101.0))  # call: close below VWAP
     monkeypatch.setattr(orb, "exit_orb_trade", fake_exit)
     monkeypatch.setattr(orb, "held_qty", lambda ib, con_id: held["qty"])
     monkeypatch.setattr(orb, "wait_for_fill", lambda ib, trade: trade.orderStatus.filled == sells[-1][0])

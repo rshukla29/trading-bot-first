@@ -117,12 +117,13 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
 - **Exit (since 2026-09-28):** a completed 5-min bar closes back across
   today's VWAP (call: below, put: above), or the 3:55pm flatten. Max loss
   per trade is the premium paid.
-- **Profit booking:** once an option has doubled (+100%), it also exits if
-  it falls back to entry + half its peak gain ($1.00 → peak $2.40 → exits
-  at $1.70 at worst). Backtest (`--profit-booking`): PF 1.27 vs 1.34 with
-  no booking — gives up ~27% of long-run profit for the lowest drawdown
-  (−12.7%) and 1 in 3 winning trades. Settings: `OPTIONS_LOCK_TRIGGER_PCT`,
-  `OPTIONS_LOCK_KEEP_PCT`.
+- **Step-up profit lock (since 2026-09-29):** once the option is up 50%,
+  its stop moves to +25%, then follows 25% of entry behind each further
+  25% step — bought $1.00: $1.50 → stop $1.25, $1.75 → $1.50, $2.00 →
+  $1.75. Never moves down. Backtest (`--ladder`): PF 1.30, 44% of trades
+  win, max drawdown −10.4%. No fixed stop below entry: a −20% premium stop
+  was tested and rejected (PF 0.87, −83% drawdown) — 0DTE premiums
+  routinely dip 20% in noise, then recover. Settings: `OPTIONS_LADDER_*`.
 - **Why VWAP-only:** [scripts/orb_exit_comparison.py](scripts/orb_exit_comparison.py)
   tested exits on 999 SPY sessions (Oct 2022–Sep 2026, with costs).
   Profit factor: VWAP-only 1.34, old exits (−30% stop, +50% target, range

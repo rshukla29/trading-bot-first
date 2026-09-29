@@ -152,6 +152,26 @@ def improvement_variants() -> list[Variant]:
     ]
 
 
+def ladder_variants() -> list[Variant]:
+    """The 2026-09-28 request: -20% stop, step-up stop (50% trigger, 25%
+    steps, 25% trail), re-entry on a good VWAP pullback — vs what is live."""
+    base = dict(profit_target_pct=None, exit_on_range_reentry=False, vwap_exit=True)
+    live = dict(base, use_stop_loss=False, lock_trigger_pct=1.0, lock_keep_pct=0.5, max_reentries=2)
+    ladder = dict(ladder_trigger_pct=0.5, ladder_step_pct=0.25, ladder_trail_pct=0.25)
+    requested = dict(base, use_stop_loss=True, stop_loss_pct_of_premium=0.20, **ladder,
+                     max_reentries=2, reentry_mode="vwap")
+    return [
+        Variant("live_tomorrow", "VWAP exit + keep half once doubled + re-enter on new high/low", live),
+        Variant("requested", "VWAP exit + -20% stop + step-up (50/25/25) + VWAP-pullback re-entry", requested),
+        Variant("req_no_stop", "requested without the -20% stop", dict(requested, use_stop_loss=False)),
+        Variant("req_newhigh_re", "requested, re-entry on new high/low instead",
+                dict(requested, reentry_mode="new_extreme")),
+        Variant("req_no_vwap_exit", "requested without the VWAP exit", dict(requested, vwap_exit=False)),
+        Variant("live_plus_ladder", "live, step-up instead of keep-half",
+                dict(live, lock_trigger_pct=None, **ladder)),
+    ]
+
+
 def max_drawdown(curve: list[tuple[pd.Timestamp, float]]) -> float:
     peak, worst = -math.inf, 0.0
     for _, eq in curve:
@@ -200,6 +220,8 @@ def main() -> None:
     parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--profit-booking", action="store_true",
                         help="compare profit-booking rules on top of the VWAP exit instead")
+    parser.add_argument("--ladder", action="store_true",
+                        help="compare the -20%% stop + step-up + VWAP re-entry request")
     parser.add_argument("--improve", action="store_true",
                         help="compare stop/step/re-entry, daily loss limit and entry cutoff ideas")
     args = parser.parse_args()
@@ -227,10 +249,10 @@ def main() -> None:
     )
 
     results, rows = {}, []
-    chosen = improvement_variants() if args.improve else (
+    chosen = ladder_variants() if args.ladder else improvement_variants() if args.improve else (
         profit_booking_variants() if args.profit_booking else variants())
     for v in chosen:
-        result = run_options_backtest(**common, **v.kwargs)
+        result = run_options_backtest(**{**common, **v.kwargs})
         results[v.name] = result
         rows.append(summarize(v.name, result))
         print(f"  {v.name:<16} {v.description}")
