@@ -211,3 +211,23 @@ def test_last_entry_time_blocks_late_entries():
     day = make_bars(RANGE + [105.0], start="2024-01-03 09:30")  # breakout bar at 09:45
     result = run(pd.concat([PADDING, day]), last_entry_time=time(9, 45))
     assert result.trades == []
+
+
+def test_max_trades_per_day_and_weekday_filter():
+    day = make_bars(RANGE + [105.0, 101.0, 95.0], start="2024-01-03 09:30")  # Wednesday: call then put
+    bars = pd.concat([PADDING, day])
+    assert len(run(bars, vwap_exit=True, stop_loss_pct_of_premium=0.99).trades) == 2
+    assert len(run(bars, vwap_exit=True, stop_loss_pct_of_premium=0.99, max_trades_per_day=1).trades) == 1
+    assert run(bars, trade_weekdays=(0, 4)).trades == []  # Mon/Fri only
+
+
+def test_two_bar_confirmation_enters_on_second_close():
+    day = make_bars(RANGE + [105.0, 105.5], start="2024-01-03 09:30")
+    result = run(pd.concat([PADDING, day]), confirm_bars=2)
+    assert len(result.trades) == 1 and result.trades[0].entry_time.strftime("%H:%M") == "09:50"
+
+
+def test_min_range_filter():
+    day = make_bars(RANGE + [105.0], start="2024-01-03 09:30")  # range ~1.5 on ~100 = 1.5%
+    assert run(pd.concat([PADDING, day]), min_range_pct=0.02).trades == []
+    assert len(run(pd.concat([PADDING, day]), min_range_pct=0.01).trades) == 1

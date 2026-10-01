@@ -87,3 +87,42 @@ def vol_percentile(vol_series: pd.Series, lookback: int) -> pd.Series:
     (vol is well known to be mean-reverting, so this is the standard
     volatility-selling timing heuristic even without real IV data)."""
     return vol_series.rolling(lookback).apply(lambda w: (w[-1] > w).mean(), raw=True)
+
+
+# 0DTE SPY implied vol ~ VIX x 1.07 with 60+ minutes left, ramping linearly
+# to ~2.9x that at the 4:00pm close. Calibrated on 14 real ORB fills
+# (analysis/2026-10-01_orb_loss_analysis). The realized-vol model above
+# underpriced those fills by a median 1.4x and 3-8x near the close.
+VIX_IV_MULTIPLIER = 1.07
+VIX_CLOSE_RAMP = 1.89
+
+
+def implied_vol(price: float, spot: float, strike: float, t_years: float, rate: float, right: str) -> float:
+    """Black-Scholes implied vol of an option price (bisection, 1%..500%)."""
+    lo, hi = 0.01, 5.0
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if bs_price(spot, strike, t_years, rate, mid, right) > price:
+            hi = mid
+        else:
+            lo = mid
+    return (lo + hi) / 2
+
+
+def vix_calibrated_vol(vix_level: float, minutes_left: float,
+                       multiplier: float = VIX_IV_MULTIPLIER, close_ramp: float = VIX_CLOSE_RAMP) -> float:
+    """Estimated 0DTE implied vol from the VIX level (e.g. 17.5) and the
+    minutes left to the close."""
+    ramp = 1 + close_ramp * max(0.0, (60 - minutes_left) / 60)
+    return vix_level / 100 * multiplier * ramp
+
+
+def vix_vol_series(bar_index: pd.DatetimeIndex, vix_close: pd.Series, bar_minutes: int = 5) -> pd.Series:
+    """vix_calibrated_vol for every bar (known at the bar's close) — the
+    backtest's realistic pricing input (run_options_backtest vol_override)."""
+    vix = vix_close.reindex(bar_index).ffill()
+    bar_close = bar_index + pd.Timedelta(minutes=bar_minutes)
+    mins = ((bar_close.normalize() + pd.Timedelta(hours=16)) - bar_close).total_seconds() / 60
+    mins = pd.Series(mins, index=bar_index).clip(lower=1)
+    ramp = 1 + VIX_CLOSE_RAMP * ((60 - mins).clip(lower=0) / 60)
+    return vix / 100 * VIX_IV_MULTIPLIER * ramp

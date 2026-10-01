@@ -128,6 +128,42 @@ CREATE TABLE IF NOT EXISTS stock_ownership (
     ts TEXT NOT NULL
 );
 
+-- run_credit_orb_bot.py: 0DTE ORB credit spreads (strategy #6). One row
+-- per spread; short_conid is an intended short (see position_guard).
+CREATE TABLE IF NOT EXISTS credit_orb_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    entry_ts TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    right TEXT NOT NULL,
+    short_strike REAL NOT NULL,
+    long_strike REAL NOT NULL,
+    short_conid INTEGER NOT NULL,
+    long_conid INTEGER NOT NULL,
+    contracts INTEGER NOT NULL,
+    credit REAL NOT NULL,
+    range_low REAL NOT NULL,
+    range_high REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    exit_ts TEXT,
+    exit_cost REAL,
+    exit_reason TEXT,
+    realized_pnl REAL
+);
+
+-- Real bid/ask snapshots of each open credit spread's legs (every ~5 min)
+-- — the option-smile data the Black-Scholes backtests lack.
+CREATE TABLE IF NOT EXISTS credit_orb_marks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id INTEGER NOT NULL,
+    ts TEXT NOT NULL,
+    spot REAL,
+    short_bid REAL, short_ask REAL,
+    long_bid REAL, long_ask REAL,
+    spread_mid REAL
+);
+
 -- One row per calendar date, recorded by the postmarket snapshot after
 -- that day's trading is done. Gives weekly/monthly reports a real
 -- baseline balance to compare against — IBKR's own API has no
@@ -308,6 +344,69 @@ class Journal:
             return conn.execute(
                 "SELECT * FROM orb_positions WHERE status='open' AND symbol=? ORDER BY id DESC LIMIT 1", (symbol,)
             ).fetchone()
+
+    def open_credit_orb(self, symbol: str, trade_date: str, direction: str, right: str, short_strike: float,
+                        long_strike: float, short_conid: int, long_conid: int, contracts: int, credit: float,
+                        range_low: float, range_high: float) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO credit_orb_positions
+                   (symbol, trade_date, entry_ts, direction, right, short_strike, long_strike, short_conid,
+                    long_conid, contracts, credit, range_low, range_high, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                (symbol, trade_date, datetime.now(timezone.utc).isoformat(), direction, right, short_strike,
+                 long_strike, short_conid, long_conid, contracts, credit, range_low, range_high),
+            )
+            return cur.lastrowid
+
+    def open_credit_orb_rows(self) -> list[sqlite3.Row]:
+        """Open AND pending spreads: a row is written as 'pending' before the
+        order is sent, so the short leg counts as intended from the moment
+        it can fill (ORB's short check runs every minute)."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                "SELECT * FROM credit_orb_positions WHERE status IN ('open', 'pending') ORDER BY id"
+            ).fetchall()
+
+    def confirm_credit_orb(self, position_id: int, contracts: int, credit: float) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE credit_orb_positions SET status='open', contracts=?, credit=? WHERE id=?",
+                         (contracts, credit, position_id))
+
+    def cancel_credit_orb(self, position_id: int, reason: str) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE credit_orb_positions SET status='cancelled', exit_reason=? WHERE id=?",
+                         (reason, position_id))
+
+    def credit_orb_traded_on(self, trade_date: str) -> bool:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT 1 FROM credit_orb_positions WHERE trade_date=? LIMIT 1", (trade_date,)
+            ).fetchone() is not None
+
+    def update_credit_orb_contracts(self, position_id: int, contracts: int) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE credit_orb_positions SET contracts=? WHERE id=?", (contracts, position_id))
+
+    def close_credit_orb(self, position_id: int, exit_cost: float, exit_reason: str, realized_pnl: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE credit_orb_positions SET status='closed', exit_ts=?, exit_cost=?, exit_reason=?,
+                   realized_pnl=? WHERE id=?""",
+                (datetime.now(timezone.utc).isoformat(), exit_cost, exit_reason, realized_pnl, position_id),
+            )
+
+    def record_credit_orb_mark(self, position_id: int, spot: float, short_bid: float, short_ask: float,
+                               long_bid: float, long_ask: float) -> None:
+        mid = (short_bid + short_ask) / 2 - (long_bid + long_ask) / 2
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO credit_orb_marks (position_id, ts, spot, short_bid, short_ask, long_bid, long_ask,
+                   spread_mid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (position_id, datetime.now(timezone.utc).isoformat(), spot, short_bid, short_ask, long_bid,
+                 long_ask, mid),
+            )
 
     def orb_entries_on(self, symbol: str, day: str) -> dict[str, int]:
         """{'C': n, 'P': n} ORB entries for `symbol` on `day` (YYYY-MM-DD,

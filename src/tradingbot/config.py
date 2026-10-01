@@ -245,6 +245,25 @@ class Settings(BaseSettings):
     # Prefilter (yfinance daily-bar gap scan) reruns at these ET times.
     trend_join_prefilter_times: str = "09:55,10:25,10:55,11:25,11:55,12:25,12:55"
 
+    # Strategy #6 — ORB credit spreads, 0DTE SPY (run_credit_orb_bot.py,
+    # rules in options/credit_orb.py). A paper experiment from 2026-10-02:
+    # published SPX results are strong (Option Alpha / Quantish, ~87-89% win,
+    # PF 1.3-1.44) but our Black-Scholes backtest can't judge it (no option
+    # smile), so it trades small and records real leg quotes.
+    credit_orb_enabled: bool = True
+    credit_orb_client_id: int = 95
+    credit_orb_symbol: str = "SPY"
+    credit_orb_range_minutes: int = 60
+    credit_orb_entry_end: str = "12:00"
+    credit_orb_min_range_pct: float = 0.002
+    credit_orb_width: float = 2.0
+    credit_orb_anchor: str = "range"
+    credit_orb_max_loss_dollars: float = 500.0
+    credit_orb_max_contracts: int = 10
+    credit_orb_min_credit: float = 0.10
+    credit_orb_close_time: str = "15:50"
+    credit_orb_skip_weekdays: str = ""  # e.g. "2,4" skips Wed/Fri (Quantish refinement)
+
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.
     live_trading: bool = False

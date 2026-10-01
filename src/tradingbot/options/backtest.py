@@ -73,6 +73,39 @@ class OptionsBacktestResult:
         return (self.ending_equity - self.starting_equity) / self.starting_equity
 
 
+def _nth_close_breakout(window: pd.DataFrame, strategy, n: int, entries_today: dict) -> str | None:
+    """'C'/'P' on the bar that completes the n-th consecutive close beyond
+    the range (first such run per direction per day)."""
+    day_range = strategy.range_for_day(window, window.index[-1].date())
+    if day_range is None:
+        return None
+    lo, hi = day_range
+    post = window["close"].iloc[strategy._range_bar_count:]
+    if len(post) < n:
+        return None
+    last, before = post.iloc[-n:], (post.iloc[-n - 1] if len(post) > n else None)
+    if entries_today["C"] == 0 and (last > hi).all() and (before is None or before <= hi):
+        return "C"
+    if entries_today["P"] == 0 and (last < lo).all() and (before is None or before >= lo):
+        return "P"
+    return None
+
+
+def _passes_entry_filters(window: pd.DataFrame, strategy, right: str, min_range_pct: float,
+                          vwap: float | None) -> bool:
+    day_range = strategy.range_for_day(window, window.index[-1].date())
+    if day_range is None:
+        return False
+    lo, hi = day_range
+    if min_range_pct and (hi - lo) < min_range_pct * float(window["open"].iloc[0]):
+        return False
+    if vwap is not None:
+        close = float(window["close"].iloc[-1])
+        if (right == "C" and close <= vwap) or (right == "P" and close >= vwap):
+            return False
+    return True
+
+
 def _time_to_expiry_years(now: pd.Timestamp, expiry: pd.Timestamp) -> float:
     return max(0.0, (expiry - now).total_seconds() / (365.25 * 24 * 3600))
 
@@ -113,6 +146,12 @@ def run_options_backtest(
     ladder_trail_pct: float = 0.25,
     daily_loss_limit: float | None = None,
     last_entry_time: time | None = None,
+    vol_override: pd.Series | None = None,
+    max_trades_per_day: int | None = None,
+    trade_weekdays: tuple[int, ...] | None = None,
+    min_range_pct: float = 0.0,
+    require_vwap_side: bool = False,
+    confirm_bars: int = 1,
 ) -> OptionsBacktestResult:
     """Intraday-only long-options backtest: opening-range-breakout entries,
     Black-Scholes-simulated premiums (see options/pricing.py — no real
@@ -150,6 +189,15 @@ def run_options_backtest(
       - daily_loss_limit: no new entries once the day's realized P&L on
         this symbol is at or below -daily_loss_limit.
       - last_entry_time: no new entries at or after this time.
+    Entry filters (off by default): max_trades_per_day; trade_weekdays
+    (0=Mon..4=Fri); min_range_pct (range width vs. the day's open);
+    require_vwap_side (calls only above session VWAP, puts below);
+    confirm_bars (that many consecutive closes beyond the range).
+    Pricing: by default options are priced at realized 5-min vol x
+    iv_premium_multiplier. vol_override (annualized vol per bar, aligned to
+    `bars`, known at each bar's close) replaces that — e.g. a VIX-based
+    estimate calibrated to real 0DTE fills, which the realized-vol model
+    underprices (median 1.4x, up to 6-8x in the last 30 minutes).
     Sizing: max_contracts mirrors the live cap; compound=False sizes every
     trade off starting_equity so variants are compared per trade rather
     than by how much an early lead snowballs.
@@ -162,7 +210,9 @@ def run_options_backtest(
     # sharp drop looks like it "shouldn't" hurt a long call much, because
     # vol spiked enough (from that very drop) to prop the price back up.
     vol_series = (realized_volatility(bars["close"], vol_window, bars_per_year) * iv_premium_multiplier).shift(1)
-    vwap_series = session_vwap(bars) if (vwap_exit or reentry_mode == "vwap") else None
+    if vol_override is not None:
+        vol_series = vol_override.reindex(bars.index)
+    vwap_series = session_vwap(bars) if (vwap_exit or reentry_mode == "vwap" or require_vwap_side) else None
     # The strategy only ever looks at the current session's bars, so pass
     # it just today's slice rather than all history up to bar i — identical
     # signals, but O(n) instead of O(n^2) over multi-year 5-min data.
@@ -258,13 +308,23 @@ def run_options_backtest(
         entries_allowed = (
             (last_entry_time is None or now.time() < last_entry_time)
             and (daily_loss_limit is None or pnl_today > -daily_loss_limit)
+            and (max_trades_per_day is None or sum(entries_today.values()) < max_trades_per_day)
+            and (trade_weekdays is None or now.weekday() in trade_weekdays)
         )
         if open_trade is None and not exited_this_bar and pd.notna(vol) and entries_allowed:
             right = None
-            signal = strategy.generate_signal(symbol, window)
-            if signal.action in ("BUY_CALL", "BUY_PUT"):
-                right = "C" if signal.action == "BUY_CALL" else "P"
-            elif max_reentries:
+            if confirm_bars > 1:
+                right = _nth_close_breakout(window, strategy, confirm_bars, entries_today)
+            else:
+                signal = strategy.generate_signal(symbol, window)
+                if signal.action in ("BUY_CALL", "BUY_PUT"):
+                    right = "C" if signal.action == "BUY_CALL" else "P"
+            if right is not None and not _passes_entry_filters(
+                window, strategy, right, min_range_pct,
+                float(vwap_series.iloc[i]) if (require_vwap_side and vwap_series is not None) else None,
+            ):
+                right = None
+            elif right is None and max_reentries:
                 if reentry_mode == "vwap":
                     right = strategy.vwap_reentry_direction(
                         window, float(vwap_series.iloc[i]), entries_today, max_reentries)

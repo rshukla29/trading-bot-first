@@ -269,6 +269,11 @@ def check_entry(
         ib, symbol, chain, signal.underlying_price, right,
         settings.options_otm_pct, settings.options_strike_increment, settings.options_dte_days,
     )
+    if held_qty(ib, contract.conId) != 0:
+        # IBKR nets positions per contract: buying one another strategy is
+        # short (e.g. a credit spread's short leg) would mix the two.
+        logger.warning("%s: %s already has a position (another strategy) — skipping", symbol, contract.localSymbol)
+        return None
     _, _, mid = get_quote(ib, contract)
     if mid <= 0.01:
         logger.warning("%s: quoted premium %.3f too small, skipping", symbol, mid)

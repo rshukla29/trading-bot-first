@@ -1,6 +1,6 @@
 # trading-bot
 
-Automated trading bots for Interactive Brokers (via `ib_async`): five
+Automated trading bots for Interactive Brokers (via `ib_async`): six
 independent strategies covering stocks and SPY options, plus daily,
 weekly and monthly P&L reports. **Paper trading only (account `DU…`) until
 you explicitly opt into live money.**
@@ -14,6 +14,7 @@ you explicitly opt into live money.**
 | 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
+| 6 | ORB credit spreads *(paper experiment)* | SPY 0DTE put/call credit spreads | Sells premium on the far side of the range | 10:20am–4:00pm — `CreditOrbTradingBot` | `run_credit_orb_bot` |
 | — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Raises stops in 10% profit steps | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
 
 Run any of them manually with `python -m tradingbot.<entrypoint>`.
@@ -26,6 +27,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
 | 9:29am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout, VWAP exit, re-entry; flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
+| 10:20am → 4:00pm | `CreditOrbTradingBot` | 60-min range; entry 10:30–12:00; spread bought back 3:50pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
 | 3:57pm | `ExpiryGuardBot` | Safety net: closes any option expiring today still open (normally nothing) |
 | 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
@@ -175,6 +177,32 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
 - No backtest — the article's own backtest doesn't transfer to live
   execution; paper-trade it for at least 2 weeks before judging it.
 
+### 6. ORB credit spreads (SPY 0DTE, paper experiment since 2026-10-02)
+
+Code: [options/credit_orb.py](src/tradingbot/options/credit_orb.py) (rules,
+shared with the backtest), [run_credit_orb_bot.py](src/tradingbot/run_credit_orb_bot.py).
+Source: Option Alpha and Quantish published SPX 0DTE ORB research
+(~87–89% win rate, PF 1.3–1.44) — see
+[analysis/2026-10-01_orb_loss_analysis](analysis/2026-10-01_orb_loss_analysis/).
+
+- **Opening range:** the first 60 minutes (9:30–10:30); must be at least
+  0.2% of the open.
+- **Entry:** the first completed 5-min close outside the range between
+  10:30 and 12:00, one trade a day. Breakout up → **sell a put spread**
+  with the short put at/below the range low; breakout down → **sell a
+  call spread** with the short call at/above the range high. $2 wide.
+- **Exit:** hold; bought back at 3:50pm (SPY options settle in shares, so
+  nothing is left to expire; the 3:57pm expiry guard is the backup).
+- **Size:** max loss (width − credit) ≤ $500 per trade
+  (`CREDIT_ORB_MAX_LOSS_DOLLARS`), ≤ 10 contracts.
+- **Why it's an experiment:** the idea is to earn time decay instead of
+  paying it (the long-option ORB's weakness). Our Black-Scholes backtest
+  can't judge it — it has no option smile, so it undercounts the premium
+  of out-of-the-money puts and shows a loss
+  ([scripts/credit_orb_backtest.py](scripts/credit_orb_backtest.py)). The
+  bot records both legs' real bid/ask every ~5 minutes
+  (`credit_orb_marks`) to build the data to judge it properly.
+
 ### How the strategies stay out of each other's way
 
 - MA-crossover and RSI(2) watchlists don't overlap; RSI(2)'s scanner
@@ -196,6 +224,7 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
   |---|---|
   | 1 | MA-crossover, RSI(2) (4:30pm), step-stop manager (9:30am–4:00pm) |
   | 90 | Expiry guard (3:57pm) |
+  | 95 | ORB credit spreads |
   | 96 | Iron condor |
   | 97 | Trend Join |
   | 98 | ORB |
@@ -289,7 +318,10 @@ Each scheduled bot has a wrapper in [scripts/](scripts/)
   automatically (every step-stop tick and every MA/RSI(2) run). Stops on
   new entries still waiting for the open are left alone.
 - **No unintended shorts:** the only negative positions should be the
-  iron condor's sold legs. Every sell is capped at the quantity IBKR shows
+  iron condor's and ORB credit spreads' sold legs (a credit spread is
+  recorded as pending *before* its order is sent, so its short leg is
+  never mistaken for a stray). No bot trades a contract another bot
+  already holds (IBKR nets positions per contract). Every sell is capped at the quantity IBKR shows
   as held; a partly-filled close books the filled part and retries only
   the remainder (at the bid); the ORB bot buys back any short option on
   its symbols every tick; the snapshot flags any other short in red. See
