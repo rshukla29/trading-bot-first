@@ -1,0 +1,44 @@
+calibration points:
+  mins_left  ratio
+     320.0   0.96
+       5.0   3.02
+     375.0   0.74
+     375.0   1.09
+     320.0   1.02
+     210.0   1.05
+     360.0   1.06
+     310.0   0.97
+     295.0   1.18
+     365.0   1.26
+     305.0   1.08
+      20.0   2.34
+     370.0   1.31
+     295.0   1.16
+
+implied vol = VIX x 1.07 (>=60 min left), ramping up by x2.89 at the close (b=1.89)
+                      variant   pricing  trades  win    net   pf    dd
+   live_now (vwap+ladder+re2) realistic    2361 42.1  86115 1.14 -14.3
+   live_now (vwap+ladder+re2) old model    2428 43.8 161389 1.30 -10.4
+                  no re-entry realistic    1424 38.9  24151 1.07 -21.2
+  no re-entry, entries <10:30 realistic     989 36.2  -3091 0.99 -25.5
+  no re-entry, entries <11:00 realistic    1121 37.9  14865 1.06 -18.8
+  no re-entry, entries <15:00 realistic    1389 38.9  23676 1.07 -20.0
+           <10:30 + -30% stop realistic     991 33.9  -3212 0.99 -29.4
+           <10:30 + -50% stop realistic     989 35.9  -3637 0.98 -25.7
+  <10:30, range exit not VWAP realistic     997 30.2  17697 1.09 -13.1
+    <10:30, ladder + EOD only realistic     908 61.6 102722 1.40  -6.0
+        vwap only (no ladder) realistic    1424 24.2 144170 1.35  -9.6
+ original (-30%, +50%, range) realistic    1436 30.6 -15253 0.94 -28.1
+              original <10:30 realistic     998 30.5 -14604 0.92 -24.8
+
+Net P&L by half-year (realistic pricing):
+         live_now (vwap+ladder+re2)  no re-entry  no re-entry, entries <10:30  no re-entry, entries <11:00  no re-entry, entries <15:00  <10:30 + -30% stop  <10:30 + -50% stop  <10:30, range exit not VWAP  <10:30, ladder + EOD only  vwap only (no ladder)  original (-30%, +50%, range)  original <10:30
+2022-H2                       23972         1770                        -1574                          807                         1139                -235               -1315                         1670                      12124                  25010                          3396             1397
+2023-H1                        7420         2268                        -6509                        -2311                         3391               -6821               -6390                         3554                      16763                  14246                         -6017            -4857
+2023-H2                        2203        -9784                        -7771                        -4864                        -9355              -10075               -7716                        -6487                      18305                  -4992                         -6972            -7076
+2024-H1                        8313         1008                        -1477                        -1762                          553               -4078               -2068                        -2941                       1407                  15882                         -4020             -413
+2024-H2                       11540         9493                         9424                        13987                        10993                9991                8914                        12674                      20799                  34721                           376              316
+2025-H1                       34799        14807                         5732                         5166                        15764                7452                5240                         7325                      17836                  45471                          2239             1398
+2025-H2                       -4219         1939                        -4787                          266                         1832               -4361               -4305                        -6007                      -6942                  14607                         -1069            -4230
+2026-H1                          51        -1440                          427                          573                        -2054                1663                 427                         1581                      14245                   2270                         -6450            -4035
+2026-H2                        2036         4091                         3444                         3003                         1413                3253                3575                         6328                       8185                  -3047                          3264             2898
