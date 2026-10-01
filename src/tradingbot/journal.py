@@ -205,6 +205,11 @@ class Journal:
         self.db_path = db_path
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            # Columns added after orb_positions was first created.
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(orb_positions)")}
+            for col in ("peak_premium", "entry_iv", "model_iv"):
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE orb_positions ADD COLUMN {col} REAL")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -407,6 +412,26 @@ class Journal:
                 (position_id, datetime.now(timezone.utc).isoformat(), spot, short_bid, short_ask, long_bid,
                  long_ask, mid),
             )
+
+    def update_orb_peak(self, position_id: int, peak_premium: float) -> None:
+        """Persist the highest premium seen, so a restart keeps the step-up
+        stop where it was (2026-09-28: a restart lost a +162% peak)."""
+        with self._connect() as conn:
+            conn.execute("UPDATE orb_positions SET peak_premium=? WHERE id=?", (peak_premium, position_id))
+
+    def set_orb_entry_iv(self, position_id: int, entry_iv: float, model_iv: float) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE orb_positions SET entry_iv=?, model_iv=? WHERE id=?",
+                         (entry_iv, model_iv, position_id))
+
+    def recent_orb_iv_ratios(self, n: int) -> list[float]:
+        """entry_iv / model_iv for the last n ORB entries that recorded both."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT entry_iv / model_iv FROM orb_positions WHERE entry_iv IS NOT NULL AND model_iv > 0 "
+                "ORDER BY id DESC LIMIT ?", (n,),
+            ).fetchall()
+            return [r[0] for r in rows]
 
     def orb_entries_on(self, symbol: str, day: str) -> dict[str, int]:
         """{'C': n, 'P': n} ORB entries for `symbol` on `day` (YYYY-MM-DD,

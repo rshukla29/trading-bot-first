@@ -107,7 +107,10 @@ class Settings(BaseSettings):
     # stop/target/range exits and 0.98 with the step stop added — every
     # rule that cut winners or losers early removed the edge. Max loss per
     # trade is the premium paid (1% of equity, <= 10 contracts).
-    options_vwap_exit: bool = True
+    # VWAP exit OFF since 2026-10-01: it caused all the live losses (8
+    # trades, -$4,630) and, with realistic option pricing, removing it lifts
+    # PF from 0.99 to ~1.40 (analysis/2026-10-01_orb_loss_analysis).
+    options_vwap_exit: bool = False
     # Profit booking on top of the VWAP exit (since 2026-09-28): once an
     # option has gained options_lock_trigger_pct (100% = doubled), exit if it
     # falls back to entry + options_lock_keep_pct of the peak gain. Chosen
@@ -123,7 +126,7 @@ class Settings(BaseSettings):
     # (calls) / low (puts) beyond the opening range. Backtest (SPY, 4y,
     # orb_exit_comparison.py --improve): PF 1.40 vs 1.27 without, max DD
     # -9.6% vs -12.7%; PF 1.21 vs 1.08 at $0.05/share slippage. 0 disables.
-    options_max_reentries: int = 2
+    options_max_reentries: int = 0  # off since 2026-10-01: no effect without the VWAP exit; -$2,010 live
     # "new_extreme": re-enter on a close at a new session high/low beyond
     # the range. "vwap": re-enter on a pullback to VWAP that closes back on
     # the trend side (bar touches VWAP, closes beyond it in the trend
@@ -140,6 +143,25 @@ class Settings(BaseSettings):
     options_ladder_trigger_pct: float = 0.5
     options_ladder_step_pct: float = 0.25
     options_ladder_trail_pct: float = 0.25
+    # No new ORB entries at/after this time (ET). Since 2026-10-01: live had
+    # no cutoff and entered at 3:55pm twice; backtests show no cost to a
+    # 12:00 cutoff and live entries after 10:15 lost money.
+    options_last_entry_time: str = "12:00"
+    # Practitioner entry filters (since 2026-10-02): opening range >= 0.2% of
+    # the open, breakout on VWAP's side (calls above, puts below), and two
+    # consecutive 5-min closes beyond the range. With the step-up/3:55 exits
+    # and noon cutoff: PF 1.51 (vs 1.40 without), and the only setup still
+    # positive with options 25% pricier than estimated (PF 1.16) —
+    # scripts/orb_research_tests.py.
+    options_min_range_pct: float = 0.002
+    options_require_vwap_side: bool = True
+    options_confirm_bars: int = 2
+    # Pause new ORB entries if recent fills are priced well above the
+    # VIX-calibrated estimate (median fill IV / model IV over the last
+    # orb_iv_check_trades entries, needing at least 5): the backtest edge
+    # disappears when options cost ~25% more than assumed.
+    orb_iv_pause_ratio: float = 1.25
+    orb_iv_check_trades: int = 10
     options_use_stop_loss: bool = False
     options_step_stop_enabled: bool = False
     options_rate: float = 0.04

@@ -120,3 +120,23 @@ def test_reentry_ignores_previous_days_bars():
     yesterday.index = yesterday.index - pd.Timedelta(days=1)
     bars = pd.concat([yesterday, _bars(COMPLETED + [("10:00", 102.0, 103.0, 101.5, 102.9)])])
     assert strategy.reentry_direction(bars, {"C": 1, "P": 0}, 2) == "C"
+
+
+# --- practitioner entry filters (shared by backtest and live) -----------------
+
+def test_two_close_confirmation_fires_on_the_second_close():
+    s = OpeningRangeBreakoutStrategy(15, 5)
+    one = _bars(COMPLETED[:3] + [("09:45", 100.4, 100.9, 100.3, 100.8)])  # 1st close above 100.5
+    two = _bars(COMPLETED[:3] + [("09:45", 100.4, 100.9, 100.3, 100.8), ("09:50", 100.8, 101.2, 100.7, 101.1)])
+    assert s.confirmed_breakout(one, 2, {"C": 0, "P": 0}) is None
+    assert s.confirmed_breakout(two, 2, {"C": 0, "P": 0}) == "C"
+    assert s.confirmed_breakout(two, 2, {"C": 1, "P": 0}) is None  # already traded calls today
+
+
+def test_entry_filters_min_range_and_vwap_side():
+    s = OpeningRangeBreakoutStrategy(15, 5)
+    bars = _bars(COMPLETED[:3] + [("09:45", 100.4, 100.9, 100.3, 100.8)])  # range 99.5-100.5 = 1% of 100
+    assert s.passes_entry_filters(bars, "C", 0.002, vwap=100.2)
+    assert not s.passes_entry_filters(bars, "C", 0.002, vwap=101.0)  # call below VWAP
+    assert not s.passes_entry_filters(bars, "C", 0.02, vwap=None)    # range < 2%
+    assert s.passes_entry_filters(bars, "P", 0.0, vwap=None)

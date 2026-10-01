@@ -53,6 +53,9 @@ def test_partial_fill_then_retry_never_oversells(monkeypatch):
         held["qty"] -= n
         return SimpleNamespace(order=None, orderStatus=SimpleNamespace(filled=n, avgFillPrice=0.10)), 0.10
 
+    # This test is about partial fills, so trigger the exit via the VWAP rule
+    # regardless of whether live ORB currently uses it.
+    monkeypatch.setattr(orb.settings, "options_vwap_exit", True)
     # Fixed mid-session clock: at/after 15:55 the exit reason would be eod_flatten.
     monkeypatch.setattr(orb, "_now_et", lambda: datetime(2026, 9, 28, 11, 0, tzinfo=ZoneInfo("America/New_York")))
     monkeypatch.setattr(orb, "get_quote", lambda ib, c: (0.09, 0.11, 0.10))

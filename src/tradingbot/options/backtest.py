@@ -73,39 +73,6 @@ class OptionsBacktestResult:
         return (self.ending_equity - self.starting_equity) / self.starting_equity
 
 
-def _nth_close_breakout(window: pd.DataFrame, strategy, n: int, entries_today: dict) -> str | None:
-    """'C'/'P' on the bar that completes the n-th consecutive close beyond
-    the range (first such run per direction per day)."""
-    day_range = strategy.range_for_day(window, window.index[-1].date())
-    if day_range is None:
-        return None
-    lo, hi = day_range
-    post = window["close"].iloc[strategy._range_bar_count:]
-    if len(post) < n:
-        return None
-    last, before = post.iloc[-n:], (post.iloc[-n - 1] if len(post) > n else None)
-    if entries_today["C"] == 0 and (last > hi).all() and (before is None or before <= hi):
-        return "C"
-    if entries_today["P"] == 0 and (last < lo).all() and (before is None or before >= lo):
-        return "P"
-    return None
-
-
-def _passes_entry_filters(window: pd.DataFrame, strategy, right: str, min_range_pct: float,
-                          vwap: float | None) -> bool:
-    day_range = strategy.range_for_day(window, window.index[-1].date())
-    if day_range is None:
-        return False
-    lo, hi = day_range
-    if min_range_pct and (hi - lo) < min_range_pct * float(window["open"].iloc[0]):
-        return False
-    if vwap is not None:
-        close = float(window["close"].iloc[-1])
-        if (right == "C" and close <= vwap) or (right == "P" and close >= vwap):
-            return False
-    return True
-
-
 def _time_to_expiry_years(now: pd.Timestamp, expiry: pd.Timestamp) -> float:
     return max(0.0, (expiry - now).total_seconds() / (365.25 * 24 * 3600))
 
@@ -314,13 +281,13 @@ def run_options_backtest(
         if open_trade is None and not exited_this_bar and pd.notna(vol) and entries_allowed:
             right = None
             if confirm_bars > 1:
-                right = _nth_close_breakout(window, strategy, confirm_bars, entries_today)
+                right = strategy.confirmed_breakout(window, confirm_bars, entries_today)
             else:
                 signal = strategy.generate_signal(symbol, window)
                 if signal.action in ("BUY_CALL", "BUY_PUT"):
                     right = "C" if signal.action == "BUY_CALL" else "P"
-            if right is not None and not _passes_entry_filters(
-                window, strategy, right, min_range_pct,
+            if right is not None and not strategy.passes_entry_filters(
+                window, right, min_range_pct,
                 float(vwap_series.iloc[i]) if (require_vwap_side and vwap_series is not None) else None,
             ):
                 right = None

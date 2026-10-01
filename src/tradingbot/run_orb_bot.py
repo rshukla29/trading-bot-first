@@ -61,6 +61,7 @@ from tradingbot.options.live_orb import (
     wait_for_fill,
 )
 from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
+from tradingbot.options.pricing import implied_vol, vix_calibrated_vol
 from tradingbot.position_guard import (
     buy_back,
     clamp_sell_qty,
@@ -107,6 +108,8 @@ def recover_open_position(ib, journal: Journal, symbol: str) -> dict | None:
         "entry_premium": row["entry_premium"], "contracts": row["contracts"],
         "partial_pnl": row["realized_pnl"] or 0.0,
         "range_low": row["range_low"], "range_high": row["range_high"],
+        # Persisted peak: the step-up stop survives a restart.
+        "peak_premium": row["peak_premium"] or row["entry_premium"],
     }
 
 
@@ -131,7 +134,10 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
     # Step stop is based on the highest premium seen, so a spike to +21%
     # that fades still exits at +20%. Peak is in-memory only: after a
     # restart it rebuilds from the current premium.
-    position["peak_premium"] = max(position.get("peak_premium", position["entry_premium"]), premium_mid)
+    prev_peak = position.get("peak_premium", position["entry_premium"])
+    position["peak_premium"] = max(prev_peak, premium_mid)
+    if position["peak_premium"] > prev_peak:
+        journal.update_orb_peak(position["id"], position["peak_premium"])
     step_stop = None
     if settings.options_step_stop_enabled:
         step_stop = step_trailing_stop(
@@ -240,8 +246,24 @@ def check_entry(
     signal = strategy.generate_signal(symbol, bars)
     journal.log_signal(signal.symbol, signal.action, signal.underlying_price, signal.reason, source="run_orb_bot")
 
-    if signal.action in ("BUY_CALL", "BUY_PUT"):
+    right = None
+    if settings.options_confirm_bars > 1:
+        right = strategy.confirmed_breakout(bars, settings.options_confirm_bars, entries_today or {})
+        if right is not None:
+            signal = type(signal)(
+                symbol, "BUY_CALL" if right == "C" else "BUY_PUT", signal.underlying_price, signal.timestamp,
+                f"{settings.options_confirm_bars} closes {'above' if right == 'C' else 'below'} the opening range",
+            )
+    elif signal.action in ("BUY_CALL", "BUY_PUT"):
         right = "C" if signal.action == "BUY_CALL" else "P"
+    if right is not None:
+        today_bars = bars[bars.index.date == bars.index[-1].date()]
+        vwap = float(session_vwap(today_bars).iloc[-1]) if settings.options_require_vwap_side else None
+        if not strategy.passes_entry_filters(bars, right, settings.options_min_range_pct, vwap):
+            logger.info("%s: %s breakout filtered out (range < %.1f%% of the open, or wrong side of VWAP %s)",
+                        symbol, "call" if right == "C" else "put", settings.options_min_range_pct * 100,
+                        f"{vwap:.2f}" if vwap is not None else "n/a")
+            return None
     else:
         if settings.options_reentry_mode == "vwap":
             today = bars[bars.index.date == bars.index[-1].date()]
@@ -307,6 +329,7 @@ def check_entry(
         contract.strike, right, contract.conId, actual_entry, contracts, range_low, range_high,
     )
     journal.log_order(symbol, "OPEN_ORB", contracts, "OPT", broker="IBKR", status="filled")
+    record_entry_iv(ib, journal, position_id, actual_entry, signal.underlying_price, contract.strike, right)
     logger.info(
         "%s: OPENED ORB %s %s%s x%d, actual entry premium=%.2f (%s)",
         symbol, contract.lastTradeDateOrContractMonth, contract.strike, right, contracts, actual_entry, signal.reason,
@@ -315,6 +338,57 @@ def check_entry(
         "id": position_id, "contract": contract, "right": right, "entry_premium": actual_entry,
         "contracts": contracts, "range_low": range_low, "range_high": range_high,
     }
+
+
+def _last_entry_time() -> time:
+    h, m = settings.options_last_entry_time.split(":")
+    return time(int(h), int(m))
+
+
+def iv_pause_active(journal: Journal) -> bool:
+    """True when the median fill-IV / VIX-model-IV ratio over the last
+    orb_iv_check_trades entries (at least 5) exceeds orb_iv_pause_ratio."""
+    if journal is None:
+        return False
+    ratios = journal.recent_orb_iv_ratios(settings.orb_iv_check_trades)
+    return len(ratios) >= 5 and float(pd.Series(ratios).median()) > settings.orb_iv_pause_ratio
+
+
+def latest_vix(ib) -> float | None:
+    """Last completed 5-min VIX close (IBKR historical data, which this
+    account has for the VIX index)."""
+    from ib_async import Index
+    try:
+        bars = fetch_intraday_bars_contract(ib, Index("VIX", "CBOE"))
+        return float(bars["close"].iloc[-1]) if not bars.empty else None
+    except Exception:
+        logger.exception("Could not fetch VIX")
+        return None
+
+
+def fetch_intraday_bars_contract(ib, contract) -> pd.DataFrame:
+    ib.qualifyContracts(contract)
+    from ib_async import util
+    df = util.df(ib.reqHistoricalData(contract, "", "1 D", "5 mins", "TRADES", True, formatDate=2))
+    return df if df is not None else pd.DataFrame()
+
+
+def record_entry_iv(ib, journal: Journal, position_id: int, fill: float, spot: float, strike: float, right: str) -> None:
+    """Store the fill's implied vol next to the VIX-calibrated estimate, so
+    drift between real option prices and the backtest's pricing is
+    visible (and can pause entries — see iv_pause_active)."""
+    vix = latest_vix(ib)
+    if vix is None:
+        return
+    now = _now_et()
+    close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    minutes_left = max(1.0, (close - now).total_seconds() / 60)
+    t_years = minutes_left / (365.25 * 24 * 60)
+    fill_iv = implied_vol(fill, spot, strike, t_years, settings.options_rate, right)
+    model_iv = vix_calibrated_vol(vix, minutes_left)
+    journal.set_orb_entry_iv(position_id, fill_iv, model_iv)
+    logger.info("Fill implied vol %.1f%% vs VIX-model %.1f%% (VIX %.2f) — ratio %.2f",
+                fill_iv * 100, model_iv * 100, vix, fill_iv / model_iv)
 
 
 def repair_short_options(ib, journal: Journal, symbols: list[str]) -> None:
@@ -352,6 +426,12 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
     latest_bar_ts = bars.index[-1]
     if latest_bar_ts != state["last_bar_ts"]:
         state["last_bar_ts"] = latest_bar_ts
+        if _now_et().time() >= _last_entry_time():
+            return  # no new entries after the cutoff; open positions are still managed above
+        if iv_pause_active(journal):
+            logger.warning("%s: ORB entries paused — recent fills priced >%.2fx the VIX-calibrated estimate",
+                           symbol, settings.orb_iv_pause_ratio)
+            return
         state["position"] = check_entry(
             ib, journal, symbol, strategy, state["chain"], client.net_liquidation(), bars, state["entries_today"],
         )

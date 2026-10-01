@@ -112,6 +112,45 @@ class OpeningRangeBreakoutStrategy:
             return "P"
         return None
 
+    def confirmed_breakout(self, bars: pd.DataFrame, n: int, entries_today: dict) -> str | None:
+        """'C'/'P' on the bar completing the n-th consecutive close beyond
+        the range (the first such run per direction per day; n=2 is the
+        practitioner "two closes outside" confirmation). `bars` may span
+        several days — only the latest bar's day is used."""
+        day = bars.index[-1].date()
+        today = bars[bars.index.date == day]
+        day_range = self.range_for_day(today, day)
+        if day_range is None:
+            return None
+        lo, hi = day_range
+        post = today["close"].iloc[self._range_bar_count:]
+        if len(post) < n:
+            return None
+        last, before = post.iloc[-n:], (post.iloc[-n - 1] if len(post) > n else None)
+        if entries_today.get("C", 0) == 0 and (last > hi).all() and (before is None or before <= hi):
+            return "C"
+        if entries_today.get("P", 0) == 0 and (last < lo).all() and (before is None or before >= lo):
+            return "P"
+        return None
+
+    def passes_entry_filters(self, bars: pd.DataFrame, right: str, min_range_pct: float, vwap: float | None) -> bool:
+        """Practitioner entry filters: the opening range must be at least
+        min_range_pct of the day's open, and (when `vwap` is given) a call
+        needs the close above session VWAP, a put below."""
+        day = bars.index[-1].date()
+        today = bars[bars.index.date == day]
+        day_range = self.range_for_day(today, day)
+        if day_range is None:
+            return False
+        lo, hi = day_range
+        if min_range_pct and (hi - lo) < min_range_pct * float(today["open"].iloc[0]):
+            return False
+        if vwap is not None:
+            close = float(today["close"].iloc[-1])
+            if (right == "C" and close <= vwap) or (right == "P" and close >= vwap):
+                return False
+        return True
+
     def range_for_day(self, bars: pd.DataFrame, day) -> tuple[float, float] | None:
         """(range_low, range_high) for a given calendar day, or None if that
         day doesn't yet have enough bars. Used by the backtest to check the
