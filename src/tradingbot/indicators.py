@@ -87,3 +87,38 @@ def session_vwap(bars: pd.DataFrame) -> pd.Series:
     pv = (typical_price * bars["volume"]).groupby(day).cumsum()
     vol = bars["volume"].groupby(day).cumsum()
     return pd.Series(pv.to_numpy() / vol.to_numpy(), index=bars.index)
+
+
+FIB_RETRACEMENTS = (0.236, 0.382, 0.5, 0.618, 0.786)
+FIB_EXTENSIONS = (1.272, 1.618)
+
+
+def fib_levels(swing_high: float, swing_low: float) -> dict[str, float]:
+    """Fibonacci levels for a swing — the same math as the Fibonacci tool on
+    IBKR/TradingView charts (the API can't read chart drawings, so the
+    levels are computed from price data). Retracements are measured down
+    from the high ("38.2%" = high - 0.382 x range); extensions project the
+    range beyond each end ("127.2% up" = low + 1.272 x range)."""
+    span = swing_high - swing_low
+    levels = {f"{r * 100:g}%": swing_high - r * span for r in FIB_RETRACEMENTS}
+    for e in FIB_EXTENSIONS:
+        levels[f"{e * 100:g}% up"] = swing_low + e * span
+        levels[f"{e * 100:g}% down"] = swing_high - e * span
+    return levels
+
+
+def fib_zone(price: float, swing_high: float, swing_low: float) -> str:
+    """Where `price` sits within the swing, in retracement terms."""
+    span = swing_high - swing_low
+    if span <= 0:
+        return "flat"
+    if price > swing_high:
+        return f"above high (ext {((price - swing_low) / span) * 100:.0f}%)"
+    if price < swing_low:
+        return f"below low (ext {((swing_high - price) / span) * 100:.0f}%)"
+    frac = (swing_high - price) / span
+    if frac < 0.382:
+        return f"shallow pullback ({frac * 100:.0f}%)"
+    if frac <= 0.618:
+        return f"golden zone 38.2-61.8% ({frac * 100:.0f}%)"
+    return f"deep retracement ({frac * 100:.0f}%)"

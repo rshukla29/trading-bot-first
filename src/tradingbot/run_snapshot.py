@@ -235,6 +235,49 @@ def _render_closed_trades_section(trades: list[ClosedTrade], period_label: str) 
     return parts, total_realized
 
 
+FIB_LOOKBACK_DAYS = 20
+
+
+def fib_rows(ib, symbols: list[str]) -> list[dict]:
+    """Swing high/low over the last FIB_LOOKBACK_DAYS daily bars (IBKR data)
+    and the Fibonacci levels for each symbol. A symbol whose data can't be
+    fetched is skipped, not fatal — this is an informational section."""
+    from tradingbot.ibkr.data import fetch_daily_bars
+    from tradingbot.indicators import fib_levels, fib_zone
+
+    rows = []
+    for sym in symbols:
+        try:
+            bars = fetch_daily_bars(ib, sym, duration="2 M").iloc[-FIB_LOOKBACK_DAYS:]
+        except Exception:
+            logger.warning("fib levels: no data for %s", sym)
+            continue
+        hi, lo, last = float(bars["high"].max()), float(bars["low"].min()), float(bars["close"].iloc[-1])
+        rows.append(dict(symbol=sym, high=hi, low=lo, last=last, zone=fib_zone(last, hi, lo), **fib_levels(hi, lo)))
+    return rows
+
+
+def _render_fib_section(rows: list[dict]) -> list[str]:
+    parts = [f"<h2>Fibonacci levels ({FIB_LOOKBACK_DAYS}-day swing)</h2>"]
+    if not rows:
+        parts.append("<p class='empty'>(no data)</p>")
+        return parts
+    cols = ["38.2%", "50%", "61.8%", "127.2% up", "161.8% up", "127.2% down"]
+    parts.append("<table><tr><th>Symbol</th><th>Last</th><th>Swing high</th><th>Swing low</th>"
+                 + "".join(f"<th>{escape(c)}</th>" for c in cols) + "<th>Where price sits</th></tr>")
+    for r in rows:
+        parts.append(
+            f"<tr><td>{escape(r['symbol'])}</td><td>{r['last']:.2f}</td><td>{r['high']:.2f}</td>"
+            f"<td>{r['low']:.2f}</td>" + "".join(f"<td>{r[c]:.2f}</td>" for c in cols)
+            + f"<td>{escape(r['zone'])}</td></tr>"
+        )
+    parts.append("</table>")
+    parts.append("<p class='empty'>Retracements are measured down from the swing high; extensions project the "
+                 "swing range beyond the high (up) or low (down). Computed from IBKR daily bars — IBKR's API "
+                 "can't read chart drawings.</p>")
+    return parts
+
+
 def build_report(
     client: IBKRClient, label: str, closed_trades: list[ClosedTrade], owners: dict[str, str] | None = None,
     allowed_short_conids: set[int] | None = None,
@@ -280,6 +323,8 @@ def build_report(
     parts.extend(positions_parts)
 
     parts.extend(_render_stop_coverage_section(portfolio, orders, owners or {}))
+    stock_syms = sorted({p.contract.symbol for p in portfolio if p.contract.secType == "STK"})
+    parts.extend(_render_fib_section(fib_rows(ib, ["SPY"] + [s for s in stock_syms if s != "SPY"])))
     shorts = unexpected_shorts(portfolio, allowed_short_conids or set())
     if shorts:
         names = ", ".join(f"{_describe_contract(p.contract)} {p.position:.0f}" for p in shorts)

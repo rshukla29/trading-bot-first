@@ -119,6 +119,8 @@ def run_options_backtest(
     min_range_pct: float = 0.0,
     require_vwap_side: bool = False,
     confirm_bars: int = 1,
+    fib_target_ext: float | None = None,
+    fib_lock_ext: float | None = None,
 ) -> OptionsBacktestResult:
     """Intraday-only long-options backtest: opening-range-breakout entries,
     Black-Scholes-simulated premiums (see options/pricing.py — no real
@@ -160,6 +162,11 @@ def run_options_backtest(
     (0=Mon..4=Fri); min_range_pct (range width vs. the day's open);
     require_vwap_side (calls only above session VWAP, puts below);
     confirm_bars (that many consecutive closes beyond the range).
+    Fibonacci exits on the underlying, measured from the opening range R
+    (calls: high + (ext - 1) x R; puts: low - (ext - 1) x R), off by default:
+    fib_target_ext exits when SPY reaches that extension (e.g. 1.618);
+    fib_lock_ext, once SPY has reached that extension, exits if it falls
+    back to the range edge it broke out of.
     Pricing: by default options are priced at realized 5-min vol x
     iv_premium_multiplier. vol_override (annualized vol per bar, aligned to
     `bars`, known at each bar's close) replaces that — e.g. a VIX-based
@@ -232,6 +239,24 @@ def run_options_backtest(
                 if lock_trigger_pct is not None else None
             )
 
+            fib_hit = fib_back = False
+            if fib_target_ext is not None or fib_lock_ext is not None:
+                fr = strategy.range_for_day(window, now.date())
+                if fr is not None:
+                    flo, fhi = fr
+                    span = fhi - flo
+                    up = open_trade.right == "C"
+                    def _beyond(ext):
+                        lvl = fhi + (ext - 1) * span if up else flo - (ext - 1) * span
+                        return spot >= lvl if up else spot <= lvl
+                    if fib_target_ext is not None and _beyond(fib_target_ext):
+                        fib_hit = True
+                    if fib_lock_ext is not None:
+                        if _beyond(fib_lock_ext):
+                            open_trade.fib_armed = True
+                        if getattr(open_trade, "fib_armed", False) and (spot <= fhi if up else spot >= flo):
+                            fib_back = True
+
             exit_reason = None
             if now.time() >= eod_flatten_time:
                 exit_reason = "eod_flatten"
@@ -243,6 +268,10 @@ def run_options_backtest(
                 exit_reason = "ladder_stop"
             elif lock_floor is not None and premium <= lock_floor:
                 exit_reason = "profit_lock"
+            elif fib_back:
+                exit_reason = "fib_lock"
+            elif fib_hit:
+                exit_reason = "fib_target"
             elif profit_target_pct is not None and premium >= open_trade.entry_premium * (1 + profit_target_pct):
                 exit_reason = "profit_target"
             elif vwap is not None and (

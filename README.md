@@ -252,7 +252,11 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
   total balance, YTD P&L (vs. `ACCOUNT_STARTING_BALANCE`), and a
   **stop-loss coverage** table (each stock's owner and working stop, with
   an UNPROTECTED warning for any bot position missing one, plus a warning
-  for any stop order left on a position that no longer exists).
+  for any stop order left on a position that no longer exists). Also a
+  **Fibonacci levels** table for SPY and each held stock: 20-day swing
+  high/low, 38.2/50/61.8% retracements, 127.2/161.8% extensions, and where
+  price sits (computed from IBKR daily bars — the API can't read chart
+  drawings).
 - **Weekly** — Fridays after the close (Mon–Fri).
 - **Monthly** — last trading day of the month after the close.
 

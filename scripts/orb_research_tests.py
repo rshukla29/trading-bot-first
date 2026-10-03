@@ -41,7 +41,21 @@ def main() -> None:
     live = dict(strategy=s15, vwap_exit=True, max_reentries=2, **ladder)
     rec = dict(strategy=s15, last_entry_time=time(12, 0), **ladder)
     filt = dict(min_range_pct=0.002, require_vwap_side=True, confirm_bars=2)
-    V = {
+    if "--fib" in sys.argv:
+        best = dict(rec, **filt)
+        V = {
+            "current live (step-up + 3:55, <12:00, 3 filters)": best,
+            "  + exit at 127.2% ext": dict(best, fib_target_ext=1.272),
+            "  + exit at 161.8% ext": dict(best, fib_target_ext=1.618),
+            "  + exit at 200% ext": dict(best, fib_target_ext=2.0),
+            "  + exit at 261.8% ext": dict(best, fib_target_ext=2.618),
+            "  + lock: hit 127.2% then back to range edge": dict(best, fib_lock_ext=1.272),
+            "  + lock: hit 161.8% then back to range edge": dict(best, fib_lock_ext=1.618),
+            "  fib 161.8% target instead of step-up": dict(best, ladder_trigger_pct=None, fib_target_ext=1.618),
+            "  fib 261.8% target instead of step-up": dict(best, ladder_trigger_pct=None, fib_target_ext=2.618),
+        }
+    else:
+      V = {
         "options.cafe: 5m range, +100%/-50%/3:30, 1/day, Mon-Wed-Fri": dict(strategy=s5, **cafe, trade_weekdays=(0, 2, 4)),
         "options.cafe rules, all weekdays": dict(strategy=s5, **cafe),
         "options.cafe exits, 15m range": dict(strategy=s15, **cafe),

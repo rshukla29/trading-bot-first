@@ -174,3 +174,17 @@ def test_session_vwap_resets_each_day():
     assert vwap.iloc[0] == 10.0
     assert vwap.iloc[1] == pytest.approx((10 * 100 + 20 * 300) / 400)  # 17.5
     assert vwap.iloc[2] == 50.0  # new day: previous day's volume doesn't carry over
+
+
+def test_fib_levels_match_chart_tool_math():
+    from tradingbot.indicators import fib_levels, fib_zone
+
+    lv = fib_levels(110.0, 100.0)
+    assert lv["38.2%"] == pytest.approx(106.18)
+    assert lv["50%"] == pytest.approx(105.0)
+    assert lv["61.8%"] == pytest.approx(103.82)
+    assert lv["127.2% up"] == pytest.approx(112.72)
+    assert lv["161.8% down"] == pytest.approx(93.82)
+    assert fib_zone(105.0, 110.0, 100.0).startswith("golden zone")
+    assert fib_zone(109.0, 110.0, 100.0).startswith("shallow")
+    assert fib_zone(111.0, 110.0, 100.0).startswith("above high")
