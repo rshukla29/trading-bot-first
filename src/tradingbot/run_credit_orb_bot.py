@@ -39,7 +39,14 @@ from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
 from tradingbot.journal import Journal
-from tradingbot.options.credit_orb import CONTRACT_MULTIPLIER, CreditOrbConfig, contracts_for, find_breakout, spread_strikes
+from tradingbot.options.credit_orb import (
+    CONTRACT_MULTIPLIER,
+    CreditOrbConfig,
+    contracts_for,
+    credit_limit_ladder,
+    find_breakout,
+    spread_strikes,
+)
 from tradingbot.options.live_chain import get_quote, get_real_chain, nearest_expiry, qualify_option
 from tradingbot.options.live_condor import _combo_contract, wait_for_fill
 from tradingbot.position_guard import held_qty
@@ -115,13 +122,22 @@ def open_spread(ib, journal: Journal, cfg: CreditOrbConfig, sig, chain, symbol: 
                        f"ORB {sig.direction} breakout, range {sig.range_low:.2f}-{sig.range_high:.2f}", SOURCE)
     combo = _combo_contract(symbol, [(short, "SELL"), (long, "BUY")])
     filled_qty, credit_fill = 0, 0.0
-    for attempt, concession in enumerate((0.0, 0.02)):
+    # Step down from the mid toward the natural price, re-quoting before
+    # each attempt (credit_limit_ladder) — the mid alone didn't fill on
+    # 2026-10-02.
+    for attempt in range(3):
+        if attempt:
+            sb, sa, lb, la = _leg_quotes(ib, short, long)
+        ladder = credit_limit_ladder(sb, sa, lb, la, settings.credit_orb_min_fill_credit)
+        if not ladder:
+            logger.info("%s: credit fell below %.2f — stop trying", symbol, settings.credit_orb_min_fill_credit)
+            break
+        limit = ladder[min(attempt, len(ladder) - 1)]
         want = n - filled_qty
-        limit = round(mid_credit - concession, 2)
         trade = ib.placeOrder(combo, LimitOrder("BUY", want, -limit, tif="DAY"))  # negative = net credit
-        logger.info("%s: SELL %s%s/%s%s x%d for credit %.2f (attempt %d)",
-                    symbol, short_k, right, long_k, right, want, limit, attempt + 1)
-        done = wait_for_fill(ib, trade, timeout=60)
+        logger.info("%s: SELL %s%s/%s%s x%d for credit %.2f (attempt %d; short %.2f/%.2f, long %.2f/%.2f)",
+                    symbol, short_k, right, long_k, right, want, limit, attempt + 1, sb, sa, lb, la)
+        done = wait_for_fill(ib, trade, timeout=45)
         if not done:
             ib.cancelOrder(trade.order)
             ib.sleep(2)

@@ -81,3 +81,12 @@ def test_pending_credit_spread_short_leg_is_an_intended_short(journal):
     journal.close_credit_orb(pid, 0.05, "close_1550", 52.0)
     assert 111 not in intended_short_conids(journal)
     assert journal.credit_orb_traded_on("2026-10-02")
+
+
+def test_credit_limit_ladder_steps_from_mid_to_natural():
+    from tradingbot.options.credit_orb import credit_limit_ladder
+    # short 0.20/0.26 (mid .23), long 0.08/0.12 (mid .10): mid .13, natural .08
+    assert credit_limit_ladder(0.20, 0.26, 0.08, 0.12, floor=0.05) == [0.13, 0.11, 0.08]
+    assert credit_limit_ladder(0.20, 0.26, 0.08, 0.12, floor=0.10) == [0.13, 0.11]   # natural below the floor
+    assert credit_limit_ladder(0.20, 0.20, 0.10, 0.10, floor=0.05) == [0.10]          # tight market: one price
+    assert credit_limit_ladder(0.05, 0.07, 0.03, 0.05, floor=0.05) == []              # nothing worth selling

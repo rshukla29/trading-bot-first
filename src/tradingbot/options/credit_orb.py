@@ -106,6 +106,23 @@ def spread_value(spot: float, right: str, short: float, long: float, minutes_lef
     return max(0.0, bs_price(spot, short, t, rate, vol, right) - bs_price(spot, long, t, rate, vol, right))
 
 
+def credit_limit_ladder(short_bid: float, short_ask: float, long_bid: float, long_ask: float,
+                        floor: float) -> list[float]:
+    """Asking credits to try, best first: the mid, halfway to the natural
+    price, then the natural price (short leg at its bid, long leg at its
+    ask) — never below `floor`. 2026-10-02: asking only the mid (0.13, then
+    0.11) on a cheap SPY call spread didn't fill. Duplicates (a tight
+    market where mid == natural) collapse to one attempt."""
+    mid = (short_bid + short_ask) / 2 - (long_bid + long_ask) / 2
+    natural = short_bid - long_ask
+    ladder = []
+    for price in (mid, (mid + natural) / 2, natural):
+        p = round(price, 2)
+        if p >= floor and p not in ladder:
+            ladder.append(p)
+    return ladder
+
+
 def contracts_for(credit: float, cfg: CreditOrbConfig) -> int:
     max_loss_per = (cfg.width - credit) * CONTRACT_MULTIPLIER
     if max_loss_per <= 0:

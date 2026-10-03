@@ -282,7 +282,8 @@ class Settings(BaseSettings):
     credit_orb_anchor: str = "range"
     credit_orb_max_loss_dollars: float = 500.0
     credit_orb_max_contracts: int = 10
-    credit_orb_min_credit: float = 0.10
+    credit_orb_min_credit: float = 0.10       # mid credit needed to attempt a trade
+    credit_orb_min_fill_credit: float = 0.05  # never accept less than this when stepping down to fill
     credit_orb_close_time: str = "15:50"
     credit_orb_skip_weekdays: str = ""  # e.g. "2,4" skips Wed/Fri (Quantish refinement)
 
