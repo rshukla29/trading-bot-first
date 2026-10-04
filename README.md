@@ -121,13 +121,20 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
     bought $1.00: $1.50 → stop $1.25, $1.75 → $1.50, $2.00 → $1.75.
     Never moves down; the peak is saved in the journal, so a restart
     keeps it.
+  - **Fibonacci target (since 2026-10-05):** sell when SPY reaches the
+    **200% extension** of the opening range (calls: range high + 1×
+    range; puts: range low − 1× range) — `OPTIONS_FIB_TARGET_EXT`.
   - **3:55pm flatten**, with the 3:57pm expiry guard as backup.
   - No stop below entry and no VWAP exit: max loss = premium paid.
 - **Backtest of this setup** ([scripts/orb_research_tests.py](scripts/orb_research_tests.py),
   999 SPY sessions Oct 2022–Oct 2026, option prices calibrated to real
-  fills via the VIX): profit factor **1.51**, +$87k on $100k, 64% of
-  trades win, max drawdown −7.2%. Still positive at $0.05/share slippage
-  (1.35) and with options 25% pricier than estimated (1.16).
+  fills via the VIX): profit factor **1.56**, +$81k on $100k, 70% of
+  trades win, max drawdown **−3.8%**. Still positive at $0.05/share
+  slippage (1.34) and with options 25% pricier than estimated (1.14).
+  Without the 200% target: PF 1.51, max drawdown −7.2%. Nearer Fibonacci
+  targets hurt (127.2%: PF 0.95; 161.8%: 1.25); a 261.8% target in place of
+  the step-up lock scored highest (PF 1.65) but gives up the profit lock
+  (`--fib` in [scripts/orb_research_tests.py](scripts/orb_research_tests.py)).
 - **Why these rules:** see the
   [2026-10-01 ORB loss analysis](analysis/2026-10-01_orb_loss_analysis/).
   Live 9/14–10/1 lost −$1,796; the VWAP exit caused all of it, and the

@@ -1,3 +1,4 @@
+import pytest
 from datetime import time
 
 from tradingbot.options.live_orb import determine_exit_reason
@@ -150,3 +151,18 @@ def test_vwap_pullback_reentry():
     assert s.vwap_reentry_direction(bar(100.1, 100.6, 99.9, 100.5), 100.0, {"C": 0, "P": 0}, 2) is None  # no prior call
     # put side mirror
     assert s.vwap_reentry_direction(bar(99.9, 100.1, 99.4, 99.5), 100.0, {"C": 0, "P": 1}, 2) == "P"
+
+
+# --- 200% Fibonacci extension target ------------------------------------------
+
+def test_fib_extension_levels_and_exit():
+    from tradingbot.options.orb_strategy import fib_extension_level, fib_extension_reached
+
+    # range 769.49-771.65 (2026-10-02): span 2.16
+    assert fib_extension_level("C", 769.49, 771.65, 2.0) == pytest.approx(773.81)
+    assert fib_extension_level("P", 769.49, 771.65, 2.0) == pytest.approx(767.33)
+    assert fib_extension_reached("C", 773.81, 769.49, 771.65, 2.0)
+    assert not fib_extension_reached("C", 773.70, 769.49, 771.65, 2.0)
+    assert fib_extension_reached("P", 767.30, 769.49, 771.65, 2.0)
+    assert determine_exit_reason(**_base_kwargs(fib_target_hit=True, profit_target_pct=None)) == "fib_target"
+    assert determine_exit_reason(**_base_kwargs(fib_target_hit=False, profit_target_pct=None)) is None

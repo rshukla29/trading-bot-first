@@ -5,7 +5,7 @@ from datetime import time, timedelta
 
 import pandas as pd
 
-from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
+from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy, fib_extension_reached
 from tradingbot.indicators import session_vwap
 from tradingbot.options.pricing import bs_price, realized_volatility
 from tradingbot.risk import ladder_stop, profit_lock_floor, step_trailing_stop
@@ -244,11 +244,10 @@ def run_options_backtest(
                 fr = strategy.range_for_day(window, now.date())
                 if fr is not None:
                     flo, fhi = fr
-                    span = fhi - flo
                     up = open_trade.right == "C"
+
                     def _beyond(ext):
-                        lvl = fhi + (ext - 1) * span if up else flo - (ext - 1) * span
-                        return spot >= lvl if up else spot <= lvl
+                        return fib_extension_reached(open_trade.right, spot, flo, fhi, ext)
                     if fib_target_ext is not None and _beyond(fib_target_ext):
                         fib_hit = True
                     if fib_lock_ext is not None:

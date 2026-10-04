@@ -77,6 +77,8 @@ def test_partial_fill_then_retry_never_oversells(monkeypatch):
 
 
 def test_exit_when_already_flat_sells_nothing(monkeypatch):
+    monkeypatch.setattr(orb.settings, "options_vwap_exit", True)  # exit trigger, independent of live config
+    monkeypatch.setattr(orb, "_now_et", lambda: datetime(2026, 9, 28, 11, 0, tzinfo=ZoneInfo("America/New_York")))
     monkeypatch.setattr(orb, "get_quote", lambda ib, c: (0.09, 0.11, 0.10))
     monkeypatch.setattr(orb, "latest_bar_vs_vwap", lambda ib, s: (100.0, 101.0))
     monkeypatch.setattr(orb, "held_qty", lambda ib, con_id: 0)

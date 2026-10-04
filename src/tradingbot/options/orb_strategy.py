@@ -17,6 +17,19 @@ class OptionSignal:
     reason: str
 
 
+def fib_extension_level(right: str, range_low: float, range_high: float, ext: float) -> float:
+    """Underlying price at a Fibonacci extension of the opening range in
+    the trade's direction: calls range_high + (ext - 1) x range, puts
+    range_low - (ext - 1) x range. ext=2.0 is the 200% extension."""
+    span = range_high - range_low
+    return range_high + (ext - 1) * span if right == "C" else range_low - (ext - 1) * span
+
+
+def fib_extension_reached(right: str, spot: float, range_low: float, range_high: float, ext: float) -> bool:
+    level = fib_extension_level(right, range_low, range_high, ext)
+    return spot >= level if right == "C" else spot <= level
+
+
 class OpeningRangeBreakoutStrategy:
     """Classic intraday setup: the high/low of the first `opening_range_minutes`
     of the session defines a range; the first bar to close outside it in

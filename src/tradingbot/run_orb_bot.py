@@ -60,7 +60,7 @@ from tradingbot.options.live_orb import (
     select_orb_contract,
     wait_for_fill,
 )
-from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
+from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy, fib_extension_level, fib_extension_reached
 from tradingbot.options.pricing import implied_vol, vix_calibrated_vol
 from tradingbot.position_guard import (
     buy_back,
@@ -175,6 +175,11 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         vwap=vwap,
         lock_floor_premium=lock_floor,
         ladder_stop_premium=ladder,
+        fib_target_hit=(
+            settings.options_fib_target_ext > 0
+            and fib_extension_reached(position["right"], spot_mid, position["range_low"], position["range_high"],
+                                      settings.options_fib_target_ext)
+        ),
     )
     if reason is None:
         logger.info(

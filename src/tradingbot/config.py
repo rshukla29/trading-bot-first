@@ -143,6 +143,13 @@ class Settings(BaseSettings):
     options_ladder_trigger_pct: float = 0.5
     options_ladder_step_pct: float = 0.25
     options_ladder_trail_pct: float = 0.25
+    # Take profit when SPY reaches this Fibonacci extension of the opening
+    # range (2.0 = 200%: calls at range_high + 1x range, puts at range_low -
+    # 1x range). 0 disables. Since 2026-10-05: with the step-up lock, PF 1.56
+    # vs 1.51, max DD -3.8% vs -7.2%, robust to $0.05 slippage (1.34) and
+    # options 25% pricier (1.14). Nearer targets hurt (127.2%: PF 0.95) —
+    # scripts/orb_research_tests.py --fib.
+    options_fib_target_ext: float = 2.0
     # No new ORB entries at/after this time (ET). Since 2026-10-01: live had
     # no cutoff and entered at 3:55pm twice; backtests show no cost to a
     # 12:00 cutoff and live entries after 10:15 lost money.
