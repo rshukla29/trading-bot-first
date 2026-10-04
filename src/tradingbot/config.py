@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # the ORB/step-stop/condor processes are still connected.
     expiry_guard_client_id: int = 90
 
+    # run_daily_review.py (after the close): read-only facts for the daily
+    # Claude review. Own ID so it never collides with a running bot.
+    daily_review_client_id: int = 89
+
     # Risk management
     risk_pct_per_trade: float = 0.01
     stop_loss_pct: float = 0.10

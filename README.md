@@ -32,6 +32,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 | 3:57pm | `ExpiryGuardBot` | Safety net: closes any option expiring today still open (normally nothing) |
 | 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
 | 4:30pm | `SnapshotPostmarketBot` | Postmarket report (+ weekly on Fridays, monthly on the last trading day) |
+| 4:50pm | `DailyReviewBot` | Daily review: facts script + Claude Code (read-only) writes recommendations to `analysis/daily/YYYY/MM/DD/` |
 
 ### Profit-locking step stop (MA-crossover, RSI(2))
 
@@ -266,6 +267,26 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
   drawings).
 - **Weekly** — Fridays after the close (Mon–Fri).
 - **Monthly** — last trading day of the month after the close.
+
+## Daily review (4:50pm)
+
+`DailyReviewBot` runs [scripts/run_daily_review_scheduled.ps1](scripts/run_daily_review_scheduled.ps1):
+
+1. [run_daily_review.py](src/tradingbot/run_daily_review.py) gathers the
+   day's facts (read-only): account and closed fills, every ORB trade with
+   its fill price vs the model and a model replay of the day, the credit
+   spread attempts and quote marks, stock-strategy signals and orders,
+   open positions/orders, and warnings/errors from every log →
+   `analysis/daily/YYYY/MM/DD/facts_<date>.md`.
+2. Claude Code runs headless with **read-only tools** (no writing, shell or
+   web), reads the facts, the README, the last 5 reviews and the ORB loss
+   analysis, and replies with a review — summary, per-strategy table,
+   problems found, recommendations labelled **Fix now / Consider / Watch**,
+   and what to watch tomorrow. The script saves it as
+   `review_<date>.md` and commits both files locally (no push).
+
+Nothing is changed automatically; recommendations are for you to approve.
+The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
 
 ## Tools
 
