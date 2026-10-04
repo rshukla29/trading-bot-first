@@ -29,6 +29,16 @@ Prefer "no rule changes" when the evidence is thin. Never propose loosening a sa
 ## Watch tomorrow
 Up to 3 bullets.
 
+Known log patterns (not problems by themselves):
+- `Error 202 ... Order Canceled - reason:` (blank reason) right after a "did not fill" / timeout line is the bot
+  cancelling its own unfilled limit order before retrying — not an IBKR rejection. It only matters if orders
+  repeatedly fail to fill (then the pricing is too passive).
+- `errorCode=399 ... will not be placed at the exchange until <next open>` / `ValidationError` on orders placed
+  after the close (RSI(2), MA-crossover at 4:30pm) is IBKR's notice that the order is queued for the next open.
+  Check the next day's facts to confirm it filled.
+- yfinance `possibly delisted; no price data found` for S&P 500 members is usually a transient Yahoo data gap.
+  Only a problem if the same names fail on several days.
+
 Rules for you:
 - You can only read files (Read, Glob, Grep). You cannot write or run anything; your reply is the review.
 - Be concise and concrete: numbers, times, symbols. Plain language; define any trading term the first time.
