@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Snapshot premarket 2026-10-05</title><style>
+body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 24px; color: #1a1a1a; }
+h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 28px; }
+table { border-collapse: collapse; width: 100%; max-width: 800px; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; font-size: 13px; }
+th { background: #f4f4f4; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+.pos { color: #0a7a2f; } .neg { color: #b3261e; }
+.empty { color: #888; font-style: italic; }
+.warn { color: #b3261e; font-weight: bold; }
+</style></head><body>
+<h1>Trading bot snapshot: premarket — 2026-10-05 (account DUT090413)</h1>
+<h2>Open orders</h2>
+<table><tr><th>Symbol</th><th>Action</th><th>Qty</th><th>Type</th><th>Price</th><th>Status</th></tr>
+<tr><td>XLF</td><td>SELL</td><td>36</td><td>STP</td><td>49.32</td><td>PreSubmitted</td></tr>
+<tr><td>CB</td><td>SELL</td><td>6</td><td>STP</td><td>298.23</td><td>PreSubmitted</td></tr>
+<tr><td>ADM</td><td>SELL</td><td>24</td><td>MKT</td><td>0.00</td><td>PreSubmitted</td></tr>
+<tr><td>ELV</td><td>SELL</td><td>5</td><td>STP</td><td>355.13</td><td>PreSubmitted</td></tr>
+</table>
+<h2>Open positions &amp; unrealized P&amp;L</h2>
+<table><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>
+<tr><td>ADM</td><td>24</td><td>79.32</td><td>81.35</td><td>1952.40</td><td class='pos'>48.68</td></tr>
+<tr><td>ASTX</td><td>1000</td><td>10.42</td><td>9.42</td><td>9420.34</td><td class='neg'>-994.67</td></tr>
+<tr><td>CB</td><td>6</td><td>330.17</td><td>331.51</td><td>1989.06</td><td class='pos'>8.06</td></tr>
+<tr><td>ELV</td><td>5</td><td>393.51</td><td>386.62</td><td>1933.12</td><td class='neg'>-34.43</td></tr>
+<tr><td>SPY 20261023 741.0P</td><td>1</td><td>632.62</td><td>2.07</td><td>206.55</td><td class='neg'>-426.06</td></tr>
+<tr><td>SPY 20261023 746.0P</td><td>-1</td><td>719.36</td><td>2.59</td><td>-259.32</td><td class='pos'>460.05</td></tr>
+<tr><td>SPY 20261023 799.0C</td><td>-1</td><td>274.37</td><td>0.56</td><td>-55.96</td><td class='pos'>218.41</td></tr>
+<tr><td>SPY 20261023 804.0C</td><td>1</td><td>198.62</td><td>0.31</td><td>30.93</td><td class='neg'>-167.69</td></tr>
+<tr><td>XLF</td><td>36</td><td>54.63</td><td>53.54</td><td>1927.33</td><td class='neg'>-39.27</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='neg'><b>-926.92</b></td></tr>
+</table>
+<h2>Stop-loss coverage (stocks)</h2>
+<p class='warn'>WARNING: bot positions without a working stop: ADM. The next MA/RSI(2) run will re-place the stop (or sell if already below it).</p>
+<table><tr><th>Symbol</th><th>Owner</th><th>Qty</th><th>Stop Qty</th><th>Stop Price</th><th>Status</th></tr>
+<tr><td>ADM</td><td>rsi2</td><td>24</td><td>0</td><td>—</td><td><span class='warn'>UNPROTECTED</span></td></tr>
+<tr><td>ASTX</td><td>manual</td><td>1000</td><td>0</td><td>—</td><td>manual — not managed by bots</td></tr>
+<tr><td>CB</td><td>rsi2</td><td>6</td><td>6</td><td>298.23</td><td>protected</td></tr>
+<tr><td>ELV</td><td>rsi2</td><td>5</td><td>5</td><td>355.13</td><td>protected</td></tr>
+<tr><td>XLF</td><td>rsi2</td><td>36</td><td>36</td><td>49.32</td><td>protected</td></tr>
+</table>
+<h2>Fibonacci levels (20-day swing)</h2>
+<table><tr><th>Symbol</th><th>Last</th><th>Swing high</th><th>Swing low</th><th>38.2%</th><th>50%</th><th>61.8%</th><th>127.2% up</th><th>161.8% up</th><th>127.2% down</th><th>Where price sits</th></tr>
+<tr><td>SPY</td><td>769.64</td><td>775.14</td><td>749.60</td><td>765.38</td><td>762.37</td><td>759.36</td><td>782.09</td><td>790.92</td><td>742.65</td><td>shallow pullback (22%)</td></tr>
+<tr><td>ADM</td><td>80.45</td><td>88.75</td><td>78.10</td><td>84.68</td><td>83.42</td><td>82.17</td><td>91.65</td><td>95.33</td><td>75.20</td><td>deep retracement (78%)</td></tr>
+<tr><td>ASTX</td><td>9.42</td><td>12.88</td><td>8.48</td><td>11.20</td><td>10.68</td><td>10.16</td><td>14.08</td><td>15.60</td><td>7.28</td><td>deep retracement (79%)</td></tr>
+<tr><td>CB</td><td>330.89</td><td>347.68</td><td>325.00</td><td>339.02</td><td>336.34</td><td>333.66</td><td>353.85</td><td>361.70</td><td>318.83</td><td>deep retracement (74%)</td></tr>
+<tr><td>ELV</td><td>386.43</td><td>427.17</td><td>375.74</td><td>407.52</td><td>401.46</td><td>395.39</td><td>441.16</td><td>458.95</td><td>361.75</td><td>deep retracement (79%)</td></tr>
+<tr><td>XLF</td><td>53.49</td><td>58.38</td><td>52.81</td><td>56.25</td><td>55.59</td><td>54.94</td><td>59.90</td><td>61.82</td><td>51.29</td><td>deep retracement (88%)</td></tr>
+</table>
+<p class='empty'>Retracements are measured down from the swing high; extensions project the swing range beyond the high (up) or low (down). Computed from IBKR daily bars — IBKR's API can't read chart drawings.</p>
+<h2>Closed positions P&amp;L (today)</h2>
+<p class='empty'>(none)</p>
+<h2>Account P&amp;L (today)</h2>
+<table><tr><td>Realized P&amp;L</td><td class='pos'>0.00</td></tr><tr><td>Unrealized P&amp;L</td><td class='neg'>-911.62</td></tr><tr><td>Daily P&amp;L</td><td class='pos'>41.08</td></tr></table>
+<h2>Overall</h2>
+<table><tr><td>Total Balance (Net Liquidation)</td><td>996,833.69</td></tr><tr><td>YTD P&amp;L (vs 1,000,000 baseline)</td><td class='neg'>-3,166.31 (-0.32%)</td></tr></table>
+</body></html>
