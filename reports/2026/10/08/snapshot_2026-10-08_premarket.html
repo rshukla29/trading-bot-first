@@ -1,0 +1,53 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Snapshot premarket 2026-10-08</title><style>
+body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 24px; color: #1a1a1a; }
+h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 28px; }
+table { border-collapse: collapse; width: 100%; max-width: 800px; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; font-size: 13px; }
+th { background: #f4f4f4; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+.pos { color: #0a7a2f; } .neg { color: #b3261e; }
+.empty { color: #888; font-style: italic; }
+.warn { color: #b3261e; font-weight: bold; }
+</style></head><body>
+<h1>Trading bot snapshot: premarket — 2026-10-08 (account DUT090413)</h1>
+<h2>Open orders</h2>
+<table><tr><th>Symbol</th><th>Action</th><th>Qty</th><th>Type</th><th>Price</th><th>Status</th></tr>
+<tr><td>PFG</td><td>SELL</td><td>18</td><td>STP</td><td>97.86</td><td>PreSubmitted</td></tr>
+<tr><td>INCY</td><td>SELL</td><td>17</td><td>STP</td><td>101.46</td><td>PreSubmitted</td></tr>
+<tr><td>PFG</td><td>BUY</td><td>18</td><td>MKT</td><td>0.00</td><td>PreSubmitted</td></tr>
+<tr><td>VRTX</td><td>SELL</td><td>3</td><td>STP</td><td>452.08</td><td>PreSubmitted</td></tr>
+<tr><td>JNJ</td><td>SELL</td><td>7</td><td>MKT</td><td>0.00</td><td>PreSubmitted</td></tr>
+</table>
+<h2>Open positions &amp; unrealized P&amp;L</h2>
+<table><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>
+<tr><td>INCY</td><td>17</td><td>112.97</td><td>113.30</td><td>1926.10</td><td class='pos'>5.63</td></tr>
+<tr><td>JNJ</td><td>7</td><td>253.91</td><td>258.07</td><td>1806.49</td><td class='pos'>29.10</td></tr>
+<tr><td>SPY 20261023 741.0P</td><td>1</td><td>632.62</td><td>0.98</td><td>98.46</td><td class='neg'>-534.16</td></tr>
+<tr><td>SPY 20261023 746.0P</td><td>-1</td><td>719.36</td><td>1.26</td><td>-126.36</td><td class='pos'>593.01</td></tr>
+<tr><td>SPY 20261023 799.0C</td><td>-1</td><td>274.37</td><td>0.50</td><td>-49.90</td><td class='pos'>224.47</td></tr>
+<tr><td>SPY 20261023 804.0C</td><td>1</td><td>198.62</td><td>0.23</td><td>23.29</td><td class='neg'>-175.33</td></tr>
+<tr><td>VRTX</td><td>3</td><td>506.02</td><td>505.95</td><td>1517.85</td><td class='neg'>-0.22</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='pos'><b>142.50</b></td></tr>
+</table>
+<h2>Stop-loss coverage (stocks)</h2>
+<p class='warn'>WARNING: bot positions without a working stop: JNJ. The next MA/RSI(2) run will re-place the stop (or sell if already below it).</p>
+<table><tr><th>Symbol</th><th>Owner</th><th>Qty</th><th>Stop Qty</th><th>Stop Price</th><th>Status</th></tr>
+<tr><td>INCY</td><td>rsi2</td><td>17</td><td>17</td><td>101.46</td><td>protected</td></tr>
+<tr><td>JNJ</td><td>rsi2</td><td>7</td><td>0</td><td>—</td><td><span class='warn'>UNPROTECTED</span></td></tr>
+<tr><td>VRTX</td><td>rsi2</td><td>3</td><td>3</td><td>452.08</td><td>protected</td></tr>
+</table>
+<h2>Fibonacci levels (20-day swing)</h2>
+<table><tr><th>Symbol</th><th>Last</th><th>Swing high</th><th>Swing low</th><th>38.2%</th><th>50%</th><th>61.8%</th><th>127.2% up</th><th>161.8% up</th><th>127.2% down</th><th>Where price sits</th></tr>
+<tr><td>SPY</td><td>777.22</td><td>781.62</td><td>749.60</td><td>769.39</td><td>765.61</td><td>761.83</td><td>790.33</td><td>801.41</td><td>740.89</td><td>shallow pullback (14%)</td></tr>
+<tr><td>INCY</td><td>113.44</td><td>128.72</td><td>111.67</td><td>122.21</td><td>120.19</td><td>118.18</td><td>133.36</td><td>139.26</td><td>107.03</td><td>deep retracement (90%)</td></tr>
+<tr><td>JNJ</td><td>258.45</td><td>275.23</td><td>251.17</td><td>266.04</td><td>263.20</td><td>260.36</td><td>281.77</td><td>290.10</td><td>244.63</td><td>deep retracement (70%)</td></tr>
+<tr><td>VRTX</td><td>505.64</td><td>529.89</td><td>496.15</td><td>517.00</td><td>513.02</td><td>509.04</td><td>539.07</td><td>550.74</td><td>486.97</td><td>deep retracement (72%)</td></tr>
+</table>
+<p class='empty'>Retracements are measured down from the swing high; extensions project the swing range beyond the high (up) or low (down). Computed from IBKR daily bars — IBKR's API can't read chart drawings.</p>
+<h2>Closed positions P&amp;L (today)</h2>
+<p class='empty'>(none)</p>
+<h2>Account P&amp;L (today)</h2>
+<table><tr><td>Realized P&amp;L</td><td class='pos'>0.00</td></tr><tr><td>Unrealized P&amp;L</td><td class='pos'>126.98</td></tr><tr><td>Daily P&amp;L</td><td class='neg'>-15.89</td></tr></table>
+<h2>Overall</h2>
+<table><tr><td>Total Balance (Net Liquidation)</td><td>997,385.22</td></tr><tr><td>YTD P&amp;L (vs 1,000,000 baseline)</td><td class='neg'>-2,614.78 (-0.26%)</td></tr></table>
+</body></html>
