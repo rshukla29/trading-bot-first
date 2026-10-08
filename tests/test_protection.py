@@ -21,6 +21,7 @@ class FakeIB:
         self._open = list(open_trades)
         self._held = held or {}  # symbol -> shares
         self.client = SimpleNamespace(getReqId=iter(range(1000, 2000)).__next__)
+        self.ack_status = "PreSubmitted"
 
     def positions(self):
         return [SimpleNamespace(contract=SimpleNamespace(symbol=s, secType="STK", conId=0), position=q)
@@ -31,7 +32,7 @@ class FakeIB:
 
     def placeOrder(self, contract, order):
         self.placed.append((contract, order))
-        return SimpleNamespace(contract=contract, order=order)
+        return SimpleNamespace(contract=contract, order=order, orderStatus=SimpleNamespace(status=self.ack_status))
 
     def reqOpenOrders(self):
         return self._open
@@ -174,3 +175,14 @@ def test_market_sell_skips_when_nothing_held():
     ib = FakeIB(held={})
     assert place_market_sell(ib, "AAA", 10) is None
     assert ib.placed == []
+
+
+
+def test_bracket_waits_for_ibkr_acknowledgement_and_flags_a_lost_order():
+    from tradingbot.ibkr.orders import await_ack
+    ib = FakeIB()
+    ib.ack_status = "PendingSubmit"   # IBKR never acknowledges (the 2026-10-08 INTC case)
+    trades = place_bracket_buy(ib, "INTC", 18, 107.08, 0.10)
+    assert await_ack(ib, trades, timeout=1.0) is False
+    ib.ack_status = "PreSubmitted"
+    assert await_ack(ib, place_bracket_buy(ib, "GRMN", 7, 268.44, 0.10), timeout=1.0) is True

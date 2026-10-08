@@ -7,6 +7,25 @@ from ib_async import IB, MarketOrder, Stock, StopOrder, Trade
 logger = logging.getLogger(__name__)
 
 
+def await_ack(ib: IB, trades: list, timeout: float = 5.0) -> bool:
+    """Wait until IBKR has acknowledged every order (status no longer
+    PendingSubmit). 2026-10-08: RSI(2) placed an INTC bracket and
+    disconnected 0.2s later, before IBKR acknowledged it — the order was
+    lost. Returns False (and logs an error) if any order is still
+    unacknowledged after `timeout` seconds."""
+    waited = 0.0
+    while waited < timeout:
+        if all(t.orderStatus.status not in ("PendingSubmit", "") for t in trades):
+            return True
+        ib.sleep(0.5)
+        waited += 0.5
+    for t in trades:
+        if t.orderStatus.status in ("PendingSubmit", ""):
+            logger.error("Order not acknowledged by IBKR after %.0fs: %s %s x%s %s", timeout,
+                         t.order.action, t.contract.symbol, t.order.totalQuantity, t.order.orderType)
+    return False
+
+
 def place_bracket_buy(
     ib: IB,
     symbol: str,
@@ -43,7 +62,9 @@ def place_bracket_buy(
     parent_trade = ib.placeOrder(contract, parent)
     stop_trade = ib.placeOrder(contract, stop_loss)
 
-    logger.info("Placed bracket BUY %s x%d, stop @ %.2f", symbol, quantity, stop_price)
+    acked = await_ack(ib, [parent_trade, stop_trade])
+    logger.info("Placed bracket BUY %s x%d, stop @ %.2f%s", symbol, quantity, stop_price,
+                "" if acked else " — NOT ACKNOWLEDGED, check manually")
     return [parent_trade, stop_trade]
 
 
@@ -79,5 +100,6 @@ def place_market_sell(ib: IB, symbol: str, quantity: int) -> Trade | None:
     # DAY via error 10349 and a cancel/resubmit cycle (seen 2026-09-25).
     order = MarketOrder("SELL", quantity, tif="DAY")
     trade = ib.placeOrder(contract, order)
-    logger.info("Placed market SELL %s x%d", symbol, quantity)
+    acked = await_ack(ib, [trade])
+    logger.info("Placed market SELL %s x%d%s", symbol, quantity, "" if acked else " — NOT ACKNOWLEDGED, check manually")
     return trade
