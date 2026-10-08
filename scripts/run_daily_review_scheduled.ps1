@@ -1,8 +1,11 @@
+param([string]$ReviewDate = "")
+
 Set-Location "c:\Users\rshuk\.vscode\Projects\trading-bot"
 
 $logDir = "logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
-$date = Get-Date -Format "yyyy-MM-dd"
+# Optional: re-run a past day with -ReviewDate 2026-10-05
+$date = if ($ReviewDate) { $ReviewDate } else { Get-Date -Format "yyyy-MM-dd" }
 $logFile = Join-Path $logDir ("daily_review_{0}.log" -f $date)
 
 # No $ErrorActionPreference = "Stop" here: PowerShell 5.1 wraps every stderr
@@ -27,7 +30,7 @@ $review = & claude -p $prompt --allowedTools "Read" "Glob" "Grep" `
     --disallowedTools "Bash" "PowerShell" "Edit" "Write" "NotebookEdit" "WebFetch" "WebSearch" 2>> $logFile
 if ($LASTEXITCODE -eq 0 -and $review) {
     New-Item -ItemType Directory -Force -Path $reviewDir | Out-Null
-    ($review -join "`n") | Out-File -FilePath "$reviewDireview_$date.md" -Encoding utf8
+    ($review -join "`n") | Out-File -FilePath (Join-Path $reviewDir "review_$date.md") -Encoding utf8
 } else {
     "Claude review failed (exit $LASTEXITCODE)" | Out-File -Append -FilePath $logFile
 }
