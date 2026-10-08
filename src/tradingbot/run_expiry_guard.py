@@ -63,11 +63,30 @@ def _current_position(ib: IB, con_id: int) -> float:
     return next((p.position for p in ib.positions() if p.contract.conId == con_id), 0.0)
 
 
+def long_is_worthless(ib: IB, contract) -> bool:
+    """A long option nobody bids for can't be sold and expires worthless —
+    no exercise risk (an in-the-money option always has a bid)."""
+    from tradingbot.options.live_chain import get_quote_lenient
+    contract.exchange = contract.exchange or "SMART"
+    try:
+        bid, _, _ = get_quote_lenient(ib, contract)
+    except ValueError:
+        return False  # no quote at all: don't assume, try to close
+    return bid == 0
+
+
 def _close_journal_rows(journal: Journal, con_id: int, fill_price: float) -> None:
     for row in journal.open_orb_positions_by_conid(con_id):
         pnl = (fill_price - row["entry_premium"]) * row["contracts"] * CONTRACT_MULTIPLIER
         journal.close_orb_position(row["id"], datetime.now(timezone.utc).isoformat(), fill_price, "expiry_guard", pnl)
         logger.warning("Journal: closed ORB position id=%s (expiry_guard), pnl=%.2f", row["id"], pnl)
+    # Short leg of an ORB credit spread bought back by the guard: record the
+    # spread's result (long leg assumed worthless — it's left to expire).
+    for row in journal.open_credit_orb_rows():
+        if row["short_conid"] == con_id:
+            pnl = (row["credit"] - fill_price) * row["contracts"] * CONTRACT_MULTIPLIER
+            journal.close_credit_orb(row["id"], fill_price, "expiry_guard", pnl)
+            logger.warning("Journal: closed credit spread id=%s (expiry_guard), pnl=%.2f", row["id"], pnl)
 
 
 def main() -> None:
@@ -80,7 +99,8 @@ def main() -> None:
             logger.info("No option positions expiring today — nothing to do")
             return
 
-        for pos in targets:
+        # Shorts first: they carry the assignment risk.
+        for pos in sorted(targets, key=lambda p: p.position):
             c = pos.contract
             if _working_orders_for(ib, c.conId):
                 logger.info("%s: order already working (bot exit in progress) — waiting up to %ds",
@@ -100,6 +120,9 @@ def main() -> None:
                 continue
 
             pos_now = next(p for p in ib.positions() if p.contract.conId == c.conId)
+            if pos_now.position > 0 and long_is_worthless(ib, c):
+                logger.info("%s: long option with no bid — worthless, left to expire", c.localSymbol)
+                continue
             order = closing_order(pos_now)
             logger.warning("%s: STILL OPEN at %s with expiry today — %s %d at market",
                            c.localSymbol, datetime.now(ET).strftime("%H:%M:%S"), order.action, order.totalQuantity)

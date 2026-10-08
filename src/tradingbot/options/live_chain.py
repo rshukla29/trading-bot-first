@@ -56,6 +56,39 @@ def get_quote(ib: IB, contract, wait_seconds: float = 3.0) -> tuple[float, float
     return bid, ask, (bid + ask) / 2
 
 
+def no_bid_quote(bid, ask) -> tuple[float, float, float] | None:
+    """A near-worthless option often has no bid at all (IBKR bid = -1) but a
+    valid ask (e.g. 0.01). Treat that as bid 0, not as a missing quote —
+    on 2026-10-08 the strict check made a credit spread unclosable. None if
+    the ask isn't valid either."""
+    if ask is None or ask != ask or ask <= 0:
+        return None
+    b = bid if (bid is not None and bid == bid and bid > 0) else 0.0
+    return b, ask, (b + ask) / 2
+
+
+def get_quote_lenient(ib: IB, contract, wait_seconds: float = 3.0) -> tuple[float, float, float]:
+    """(bid, ask, mid) like get_quote, but a missing bid counts as 0 when
+    the ask is valid. Raises only if the ask is missing too. For valuing and
+    closing positions, not for opening new ones."""
+    ticker: Ticker = ib.reqMktData(contract, genericTickList="", snapshot=False)
+    ib.sleep(wait_seconds)
+    bid, ask = ticker.bid, ticker.ask
+    ib.cancelMktData(contract)
+    q = no_bid_quote(bid, ask)
+    if q is None:
+        raise ValueError(f"No valid live quote for {contract.localSymbol or contract}: bid={bid} ask={ask}")
+    return q
+
+
+def listed_strikes(ib: IB, symbol: str, expiry: str, right: str) -> list[float]:
+    """Strikes actually listed for one expiry and right (chain.strikes is a
+    union across all expiries, so probing it raises IBKR error 200 for
+    strikes that don't exist on the requested date)."""
+    details = ib.reqContractDetails(Option(symbol, expiry, 0.0, right, "SMART", tradingClass=symbol))
+    return sorted({d.contract.strike for d in details})
+
+
 def qualify_option(ib: IB, symbol: str, expiry: str, strike: float, right: str) -> Option:
     opt = Option(symbol, expiry, strike, right, "SMART", tradingClass=symbol)
     # A contract that fails to resolve comes back as a `None` entry in the

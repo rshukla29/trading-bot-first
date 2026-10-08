@@ -47,7 +47,7 @@ from tradingbot.options.credit_orb import (
     find_breakout,
     spread_strikes,
 )
-from tradingbot.options.live_chain import get_quote, get_real_chain, nearest_expiry, qualify_option
+from tradingbot.options.live_chain import get_quote, get_quote_lenient, get_real_chain, nearest_expiry, qualify_option
 from tradingbot.options.live_condor import _combo_contract, wait_for_fill
 from tradingbot.position_guard import held_qty
 from tradingbot.strategy.trend_join import completed_bars
@@ -82,10 +82,19 @@ def config_from_settings() -> CreditOrbConfig:
     )
 
 
-def _leg_quotes(ib, short, long) -> tuple[float, float, float, float]:
-    sb, sa, _ = get_quote(ib, short)
-    lb, la, _ = get_quote(ib, long)
+def _leg_quotes(ib, short, long, lenient: bool = False) -> tuple[float, float, float, float]:
+    """lenient: a leg with no bid but a valid ask counts as bid 0 (normal for
+    a near-worthless option late in the day) — used for marks and closing."""
+    quote = get_quote_lenient if lenient else get_quote
+    sb, sa, _ = quote(ib, short)
+    lb, la, _ = quote(ib, long)
     return sb, sa, lb, la
+
+
+def _buy_back_short_leg(ib, pos: dict, qty: int, ask: float):
+    """Close just the short leg (the long leg is worthless and expires)."""
+    limit = round(ask + 0.01 * pos["close_attempts"], 2)
+    return ib.placeOrder(pos["short"], LimitOrder("BUY", qty, limit, tif="DAY"))
 
 
 def open_spread(ib, journal: Journal, cfg: CreditOrbConfig, sig, chain, symbol: str) -> dict | None:
@@ -169,11 +178,18 @@ def close_spread(ib, journal: Journal, pos: dict, symbol: str, reason: str) -> b
         journal.close_credit_orb(pos["id"], 0.0, "already_flat", pos.get("realized", 0.0))
         logger.warning("%s: credit spread already flat at IBKR — marking closed", symbol)
         return True
-    sb, sa, lb, la = _leg_quotes(ib, pos["short"], pos["long"])
-    value = max(0.01, (sb + sa) / 2 - (lb + la) / 2)
-    limit = round(value + 0.02 * (1 + pos["close_attempts"]), 2)  # more aggressive on each retry
-    combo = _combo_contract(symbol, [(pos["short"], "BUY"), (pos["long"], "SELL")])
-    trade = ib.placeOrder(combo, LimitOrder("BUY", qty, limit, tif="DAY"))  # positive = net debit
+    sb, sa, lb, la = _leg_quotes(ib, pos["short"], pos["long"], lenient=True)
+    if lb == 0:
+        # The long leg has no bid — it's worthless and can't be sold. Buy back
+        # only the short leg (that removes all the risk) and let the long
+        # leg expire. 2026-10-08: the combo close kept failing on this.
+        trade = _buy_back_short_leg(ib, pos, qty, sa)
+        logger.info("%s: long leg has no bid — buying back the short leg only (ask %.2f)", symbol, sa)
+    else:
+        value = max(0.01, (sb + sa) / 2 - (lb + la) / 2)
+        limit = round(value + 0.02 * (1 + pos["close_attempts"]), 2)  # more aggressive on each retry
+        combo = _combo_contract(symbol, [(pos["short"], "BUY"), (pos["long"], "SELL")])
+        trade = ib.placeOrder(combo, LimitOrder("BUY", qty, limit, tif="DAY"))  # positive = net debit
     done = wait_for_fill(ib, trade, timeout=45)
     if not done:
         ib.cancelOrder(trade.order)
@@ -198,7 +214,7 @@ def close_spread(ib, journal: Journal, pos: dict, symbol: str, reason: str) -> b
 
 def record_mark(ib, journal: Journal, pos: dict, underlying) -> None:
     try:
-        sb, sa, lb, la = _leg_quotes(ib, pos["short"], pos["long"])
+        sb, sa, lb, la = _leg_quotes(ib, pos["short"], pos["long"], lenient=True)
         _, _, spot = get_quote(ib, underlying)
         journal.record_credit_orb_mark(pos["id"], spot, sb, sa, lb, la)
         logger.info("Spread mark: short %.2f/%.2f long %.2f/%.2f (value %.2f vs credit %.2f), spot %.2f",

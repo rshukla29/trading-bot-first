@@ -49,6 +49,8 @@ from tradingbot.options.live_chain import get_real_chain
 from tradingbot.options.live_condor import (
     CondorLegs,
     close_condor,
+    condor_close_ladder,
+    condor_open_ladder,
     net_credit_estimate,
     open_condor,
     select_condor_legs,
@@ -96,15 +98,28 @@ def manage_open_positions(ib, journal: Journal, symbol: str) -> None:
                         symbol, pos["id"], cost, credit, days_to_expiry)
             continue
 
-        trade, _ = close_condor(ib, symbol, legs, pos["contracts"])
-        filled = wait_for_fill(ib, trade)
-        if not filled:
-            logger.warning("%s: close order for position %d did not fill (status=%s) — will retry next run",
-                            symbol, pos["id"], trade.orderStatus.status)
-            ib.cancelOrder(trade.order)
+        # Step from the mid toward the natural price, re-quoting each attempt
+        # (mid-only pricing left a condor unclosed for days).
+        remaining, cost_sum = pos["contracts"], 0.0
+        for attempt in range(3):
+            ladder = condor_close_ladder(ib, legs)
+            limit = ladder[min(attempt, len(ladder) - 1)]
+            trade, _ = close_condor(ib, symbol, legs, remaining, limit)
+            if not wait_for_fill(ib, trade, timeout=60):
+                ib.cancelOrder(trade.order)
+                ib.sleep(2)
+            got = int(trade.orderStatus.filled)
+            if got:
+                cost_sum += abs(trade.orderStatus.avgFillPrice) * got
+                remaining -= got
+            if remaining == 0:
+                break
+        if remaining:
+            logger.warning("%s: close for position %d: %d of %d contracts still open after 3 attempts "
+                           "(%s) — will retry next run", symbol, pos["id"], remaining, pos["contracts"], exit_reason)
             continue
 
-        actual_cost = trade.orderStatus.avgFillPrice
+        actual_cost = cost_sum / pos["contracts"]
         realized_pnl = (credit - actual_cost) * pos["contracts"] * CONTRACT_MULTIPLIER
         journal.close_condor_position(
             pos["id"], datetime.now(timezone.utc).isoformat(), actual_cost, exit_reason, realized_pnl,
@@ -153,15 +168,23 @@ def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) ->
         logger.info("%s: computed 0 contracts, skipping", symbol)
         return
 
-    trade, _ = open_condor(ib, symbol, legs, contracts)
-    filled = wait_for_fill(ib, trade)
-    if not filled:
-        logger.warning("%s: open order did not fill (status=%s) — cancelling, will retry next run",
-                        symbol, trade.orderStatus.status)
-        ib.cancelOrder(trade.order)
+    filled_n, credit_sum = 0, 0.0
+    for limit in condor_open_ladder(ib, legs):
+        trade, _ = open_condor(ib, symbol, legs, contracts - filled_n, limit)
+        if not wait_for_fill(ib, trade, timeout=60):
+            ib.cancelOrder(trade.order)
+            ib.sleep(2)
+        got = int(trade.orderStatus.filled)
+        if got:
+            credit_sum += abs(trade.orderStatus.avgFillPrice) * got
+            filled_n += got
+        if filled_n == contracts:
+            break
+    if filled_n == 0:
+        logger.warning("%s: open order did not fill at mid or halfway to natural — will retry next run", symbol)
         return
-
-    actual_credit = trade.orderStatus.avgFillPrice
+    contracts = filled_n
+    actual_credit = credit_sum / filled_n
     journal.open_condor_position(
         symbol, datetime.now(timezone.utc).isoformat(), legs.expiry,
         legs.call_short.strike, legs.call_long.strike, legs.put_short.strike, legs.put_long.strike,

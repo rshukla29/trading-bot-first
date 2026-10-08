@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from ib_async import IB, ComboLeg, Contract, LimitOrder, Option, Trade
 
-from tradingbot.options.live_chain import get_quote, nearest_expiry, qualify_nearest_available
+from tradingbot.options.live_chain import get_quote, get_quote_lenient, listed_strikes, nearest_expiry, qualify_option
 from tradingbot.options.pricing import find_strike_for_delta
 
 logger = logging.getLogger(__name__)
@@ -37,13 +37,23 @@ def select_condor_legs(
     raw_call_short = find_strike_for_delta(spot, t_years, rate, vol, "C", target_delta)
     raw_put_short = find_strike_for_delta(spot, t_years, rate, vol, "P", target_delta)
 
-    # Each leg falls back independently to the nearest strike that actually
-    # exists for this expiry (see qualify_nearest_available) — chain.strikes
-    # is a union across all expirations, not a per-expiry list.
-    call_short = qualify_nearest_available(ib, symbol, expiry, raw_call_short, "C", chain)
-    put_short = qualify_nearest_available(ib, symbol, expiry, raw_put_short, "P", chain)
-    call_long = qualify_nearest_available(ib, symbol, expiry, call_short.strike + wing_width, "C", chain)
-    put_long = qualify_nearest_available(ib, symbol, expiry, put_short.strike - wing_width, "P", chain)
+    # Strikes come from what's actually listed for this expiry (listed_strikes):
+    # chain.strikes is a union across all expirations, and probing it for
+    # strikes that don't exist raised IBKR error 200 on every run.
+    calls = listed_strikes(ib, symbol, expiry, "C")
+    puts = listed_strikes(ib, symbol, expiry, "P")
+    if not calls or not puts:
+        raise ValueError(f"{symbol}: no listed strikes for {expiry}")
+
+    def nearest(strikes, target):
+        return min(strikes, key=lambda k: abs(k - target))
+
+    cs = nearest(calls, raw_call_short)
+    ps = nearest(puts, raw_put_short)
+    call_short = qualify_option(ib, symbol, expiry, cs, "C")
+    put_short = qualify_option(ib, symbol, expiry, ps, "P")
+    call_long = qualify_option(ib, symbol, expiry, nearest(calls, cs + wing_width), "C")
+    put_long = qualify_option(ib, symbol, expiry, nearest(puts, ps - wing_width), "P")
 
     # On a sparse strike ladder, the fallback above could in principle land
     # the "long" leg no farther out than the "short" leg — refuse rather
@@ -97,9 +107,10 @@ def wait_for_fill(ib: IB, trade: Trade, timeout: float = 90.0, poll_interval: fl
     return trade.orderStatus.status == "Filled"
 
 
-def open_condor(ib: IB, symbol: str, legs: CondorLegs, contracts: int) -> tuple[Trade, float]:
-    """Sells the condor for a net credit. Returns (Trade, credit_used_as_limit)."""
-    credit = net_credit_estimate(ib, legs)
+def open_condor(ib: IB, symbol: str, legs: CondorLegs, contracts: int, limit: float | None = None) -> tuple[Trade, float]:
+    """Sells the condor for a net credit at `limit` (or the mid). Returns
+    (Trade, credit_used_as_limit)."""
+    credit = limit if limit is not None else net_credit_estimate(ib, legs)
     if credit <= 0.01:
         raise ValueError(f"{symbol}: computed credit {credit:.3f} too small/negative, refusing to open")
 
@@ -119,14 +130,51 @@ def open_condor(ib: IB, symbol: str, legs: CondorLegs, contracts: int) -> tuple[
     return trade, credit
 
 
-def close_condor(ib: IB, symbol: str, legs: CondorLegs, contracts: int) -> tuple[Trade, float]:
-    """Buys back the condor (a debit). Returns (Trade, cost_used_as_limit)."""
-    cost = net_credit_estimate(ib, legs)  # same math; "cost to buy back" = current mid value
+def close_condor(ib: IB, symbol: str, legs: CondorLegs, contracts: int, limit: float | None = None) -> tuple[Trade, float]:
+    """Buys back the condor (a debit) at `limit`, or the mid if not given.
+    Returns (Trade, limit_used)."""
+    cost = limit if limit is not None else net_credit_estimate(ib, legs)
     combo = _combo_contract(symbol, [
         (legs.call_short, "BUY"), (legs.call_long, "SELL"),
         (legs.put_short, "BUY"), (legs.put_long, "SELL"),
     ])
-    order = LimitOrder("BUY", contracts, round(cost, 2), tif="DAY")  # positive lmtPrice = net debit to close
+    order = LimitOrder("BUY", contracts, round(max(cost, 0.01), 2), tif="DAY")  # positive lmtPrice = net debit to close
     trade = ib.placeOrder(combo, order)
-    logger.info("%s: closed condor combo order, %d contracts, cost ~%.2f", symbol, contracts, cost)
+    logger.info("%s: close condor combo order, %d contracts, limit %.2f", symbol, contracts, cost)
     return trade, cost
+
+
+def condor_close_ladder(ib: IB, legs: CondorLegs) -> list[float]:
+    """Debits to try when buying a condor back, best first: the mid, halfway
+    to the natural price, then the natural price (short legs at their ask,
+    long legs at their bid; a long leg with no bid counts as 0). Mid-only
+    pricing left a condor unclosed for days (2026-10-02 .. 10-08)."""
+    q = {name: get_quote_lenient(ib, getattr(legs, name))
+         for name in ("call_short", "call_long", "put_short", "put_long")}
+    mid = sum(q[n][2] for n in ("call_short", "put_short")) - sum(q[n][2] for n in ("call_long", "put_long"))
+    natural = (q["call_short"][1] + q["put_short"][1]) - (q["call_long"][0] + q["put_long"][0])
+    return debit_ladder(mid, natural)
+
+
+def debit_ladder(mid: float, natural: float) -> list[float]:
+    """mid -> halfway -> natural, rounded, increasing, de-duplicated."""
+    out = []
+    for p in (mid, (mid + natural) / 2, natural):
+        p = round(max(p, 0.01), 2)
+        if not out or p > out[-1]:
+            out.append(p)
+    return out
+
+
+def condor_open_ladder(ib: IB, legs: CondorLegs) -> list[float]:
+    """Credits to ask when opening, best first: the mid, then halfway to the
+    natural credit. Never the full natural — opening isn't urgent."""
+    q = {name: get_quote(ib, getattr(legs, name)) for name in ("call_short", "call_long", "put_short", "put_long")}
+    mid = sum(q[n][2] for n in ("call_short", "put_short")) - sum(q[n][2] for n in ("call_long", "put_long"))
+    natural = (q["call_short"][0] + q["put_short"][0]) - (q["call_long"][1] + q["put_long"][1])
+    out = []
+    for p in (mid, (mid + natural) / 2):
+        p = round(p, 2)
+        if p > 0.01 and (not out or p < out[-1]):
+            out.append(p)
+    return out

@@ -159,6 +159,9 @@ Code: [options/iron_condor.py](src/tradingbot/options/iron_condor.py),
 - **Entry:** sell ~16-delta call and put, buy $5-wide wings, ~45 DTE. At
   most one new condor every 7 days, max 3 open.
 - **Exit (first hit):** 50% of credit captured, loss = 2× credit, or 21 DTE.
+  Closing orders step from the mid toward the natural price (3 attempts,
+  re-quoted); opening orders try the mid, then halfway to the natural
+  credit. Strikes come from those actually listed for the expiry.
 - Max 10 contracts per trade. SPY only (`CREDIT_SPREAD_SYMBOLS`). QQQ is
   blocked (no Nasdaq market data subscription). IWM option quotes were
   confirmed live on 2026-09-28, but IWM condors haven't been re-tested
@@ -207,7 +210,9 @@ Source: Option Alpha and Quantish published SPX 0DTE ORB research
   with the short put at/below the range low; breakout down → **sell a
   call spread** with the short call at/above the range high. $2 wide.
 - **Exit:** hold; bought back at 3:50pm (SPY options settle in shares, so
-  nothing is left to expire; the 3:57pm expiry guard is the backup).
+  nothing is left to expire; the 3:57pm expiry guard is the backup). If the
+  long leg has no bid (worthless, common near the close), only the short
+  leg is bought back and the long leg is left to expire worthless.
 - **Size:** max loss (width − credit) ≤ $500 per trade
   (`CREDIT_ORB_MAX_LOSS_DOLLARS`), ≤ 10 contracts.
 - **Why it's an experiment:** the idea is to earn time decay instead of
