@@ -90,7 +90,9 @@ def section_account(day: date, ib) -> str:
         bal["change"] = bal["net_liquidation"].diff(-1)
         out.append("Net liquidation (recorded by the 4:30pm snapshot):\n\n" + md_table(bal))
     ct = q("SELECT symbol, side, quantity, price, realized_pnl FROM closed_trades WHERE date=?", (day.isoformat(),))
-    out.append(f"\nClosed fills today (realized P&L total: {ct['realized_pnl'].sum():.2f}):\n\n" + md_table(ct))
+    out.append(f"\nClosed fills today (IBKR fills; realized P&L total {ct['realized_pnl'].sum():.2f} — options that "
+               f"expired worthless have no fill, so their cost is missing here):\n\n" + md_table(ct))
+    out.append("\n" + strategy_pnl(day))
     if ib is not None:
         pos = [dict(symbol=p.contract.localSymbol or p.contract.symbol, type=p.contract.secType, qty=p.position,
                     avg_cost=round(p.avgCost, 2)) for p in ib.positions() if p.position != 0]
@@ -100,6 +102,30 @@ def section_account(day: date, ib) -> str:
                        lmt=t.order.lmtPrice, status=t.orderStatus.status) for t in ib.reqAllOpenOrders()]
         out.append("\nOpen orders now:\n\n" + md_table(pd.DataFrame(orders)))
     return "\n".join(out)
+
+
+def strategy_pnl(day: date) -> str:
+    """Realized P&L by strategy from the bots' own journals — complete trade
+    results (e.g. a credit spread's long leg that expired worthless is
+    included, unlike in IBKR's fill list), plus stock fills from IBKR."""
+    d = day.isoformat()
+    rows = []
+    for name, sql in (
+        ("ORB", "SELECT COALESCE(SUM(realized_pnl),0) FROM orb_positions WHERE status='closed' AND exit_date LIKE ?"),
+        ("ORB credit spreads", "SELECT COALESCE(SUM(realized_pnl),0) FROM credit_orb_positions WHERE status='closed' "
+                               "AND exit_ts LIKE ?"),
+        ("Iron condor", "SELECT COALESCE(SUM(realized_pnl),0) FROM condor_positions WHERE status='closed' "
+                        "AND exit_date LIKE ?"),
+        ("Trend Join", "SELECT COALESCE(SUM(realized_pnl),0) FROM trend_join_positions WHERE status='closed' "
+                       "AND exit_ts LIKE ?"),
+    ):
+        rows.append(dict(strategy=name, realized=float(q(sql, (d + "%",)).iloc[0, 0])))
+    stocks = q("SELECT symbol, realized_pnl FROM closed_trades WHERE date=? AND symbol NOT LIKE '% %'", (d,))
+    rows.append(dict(strategy="Stocks (RSI(2), MA, manual — IBKR fills)", realized=float(stocks["realized_pnl"].sum())))
+    df = pd.DataFrame(rows)
+    total = df["realized"].sum()
+    return (f"Realized P&L by strategy (journals; complete trades) — total {total:.2f}:\n\n" + md_table(df)
+            + "\nNote: journal exit times are UTC; a trade closed after 8pm ET would land on the next UTC date.\n")
 
 
 def section_orb(day: date, model_trades: pd.DataFrame | None) -> str:
@@ -127,21 +153,37 @@ def section_orb(day: date, model_trades: pd.DataFrame | None) -> str:
         out.append("\nModel replay of today with the live rules (VIX-calibrated pricing; sized off a $100k account "
                    "like the backtest, so contracts and $ P&L differ from live — compare prices, timing and exit "
                    "reasons):\n\n" + md_table(model_trades))
-    roll = q("""SELECT entry_date, realized_pnl, entry_iv, model_iv FROM orb_positions
-                WHERE status='closed' AND symbol='SPY' ORDER BY id DESC LIMIT 20""")
-    if not roll.empty:
-        pn = roll["realized_pnl"].fillna(0)
-        wins, losses = pn[pn > 0], pn[pn <= 0]
-        pf = wins.sum() / -losses.sum() if losses.sum() else float("inf")
-        ratios = (roll["entry_iv"] / roll["model_iv"]).dropna()
-        out.append(
-            f"\nRolling last {len(pn)} SPY ORB trades: win {100 * len(wins) / len(pn):.0f}%, PF {pf:.2f}, "
-            f"net {pn.sum():.0f}, avg win {wins.mean() if len(wins) else 0:.0f}, avg loss "
-            f"{losses.mean() if len(losses) else 0:.0f}. Backtest expectation for the current rules: PF "
-            f"{BACKTEST_EXPECT['pf']}, win {BACKTEST_EXPECT['win_pct']:.0f}%. Fill IV / model IV median "
-            f"(last {len(ratios)}): {ratios.median() if len(ratios) else float('nan'):.2f} "
-            f"(pause threshold {settings.orb_iv_pause_ratio}). NOTE: trades before 2026-10-02 ran older rules.\n")
+    out.append(orb_rule_stats(day))
     return "\n".join(out)
+
+
+def _stats_line(label: str, df: pd.DataFrame) -> str:
+    if df.empty:
+        return f"- {label}: no closed trades yet"
+    pn = df["realized_pnl"].fillna(0)
+    wins, losses = pn[pn > 0], pn[pn <= 0]
+    pf = wins.sum() / -losses.sum() if losses.sum() else float("inf")
+    return (f"- {label}: {len(pn)} trades, win {100 * len(wins) / len(pn):.0f}%, PF {pf:.2f}, net {pn.sum():.0f}, "
+            f"avg win {wins.mean() if len(wins) else 0:.0f}, avg loss {losses.mean() if len(losses) else 0:.0f}")
+
+
+def orb_rule_stats(day: date) -> str:
+    """ORB stats split by rule version: only trades since
+    OPTIONS_RULES_SINCE are comparable with the current backtest (earlier
+    trades ran older rules and would make the comparison meaningless)."""
+    since = settings.options_rules_since
+    cur = q("""SELECT realized_pnl, entry_iv, model_iv FROM orb_positions WHERE status='closed' AND symbol='SPY'
+               AND entry_date >= ? AND entry_date < ?""", (since, (day + pd.Timedelta(days=1)).isoformat()))
+    old = q("SELECT realized_pnl FROM orb_positions WHERE status='closed' AND symbol='SPY' AND entry_date < ?", (since,))
+    ratios = (cur["entry_iv"] / cur["model_iv"]).dropna() if not cur.empty else pd.Series(dtype=float)
+    return "\n".join([
+        "\nORB results by rule version:",
+        _stats_line(f"Current rules (since {since}) — compare with the backtest: PF {BACKTEST_EXPECT['pf']}, "
+                    f"win {BACKTEST_EXPECT['win_pct']:.0f}%", cur),
+        _stats_line(f"Older rules (before {since}) — not comparable", old),
+        f"- Fill IV / model IV median (current rules, {len(ratios)} fills): "
+        f"{ratios.median() if len(ratios) else float('nan'):.2f} (pause threshold {settings.orb_iv_pause_ratio})\n",
+    ])
 
 
 def section_credit_orb(day: date) -> str:

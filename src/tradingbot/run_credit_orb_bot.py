@@ -201,7 +201,9 @@ def close_spread(ib, journal: Journal, pos: dict, symbol: str, reason: str) -> b
         pos["realized"] = pos.get("realized", 0.0) + (pos["credit"] - cost) * got * CONTRACT_MULTIPLIER
         pos["contracts"] -= got
         pos["last_cost"] = cost
-        journal.update_credit_orb_contracts(pos["id"], pos["contracts"])
+        # The journal keeps the original size (contracts traded); what's left
+        # to close lives in memory, and a restart re-reads it from IBKR
+        # (close_spread clamps to the short leg actually held).
     if pos["contracts"] > 0:
         logger.warning("%s: close filled %d of %d — %d left, retrying", symbol, got, qty, pos["contracts"])
         return False

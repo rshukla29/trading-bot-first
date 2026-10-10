@@ -53,3 +53,9 @@ def test_credit_close_buys_back_only_the_short_leg_when_long_has_no_bid(monkeypa
     (contract, order), = placed
     assert contract is short and order.action == "BUY" and order.totalQuantity == 2   # single leg, not the combo
     assert j.closed == [("close_1550", 0.02, 18.0)]                                    # (0.11 - 0.02) * 2 * 100
+
+
+def test_condor_open_ladder_adds_natural_only_in_a_tight_market():
+    from tradingbot.options.live_condor import credit_ladder_for_open
+    assert credit_ladder_for_open(1.25, 1.23) == [1.25, 1.24, 1.23]   # the 2026-10-09 market: natural within 10%
+    assert credit_ladder_for_open(1.25, 0.90) == [1.25, 1.07]         # wide market: never give away 28%

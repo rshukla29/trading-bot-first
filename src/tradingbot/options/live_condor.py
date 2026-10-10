@@ -166,14 +166,28 @@ def debit_ladder(mid: float, natural: float) -> list[float]:
     return out
 
 
+OPEN_NATURAL_MIN_SHARE = 0.90
+
+
 def condor_open_ladder(ib: IB, legs: CondorLegs) -> list[float]:
-    """Credits to ask when opening, best first: the mid, then halfway to the
-    natural credit. Never the full natural — opening isn't urgent."""
+    """Credits to ask when opening, best first. See credit_ladder_for_open."""
     q = {name: get_quote(ib, getattr(legs, name)) for name in ("call_short", "call_long", "put_short", "put_long")}
     mid = sum(q[n][2] for n in ("call_short", "put_short")) - sum(q[n][2] for n in ("call_long", "put_long"))
     natural = (q["call_short"][0] + q["put_short"][0]) - (q["call_long"][1] + q["put_long"][1])
+    return credit_ladder_for_open(mid, natural)
+
+
+def credit_ladder_for_open(mid: float, natural: float, min_share: float = OPEN_NATURAL_MIN_SHARE) -> list[float]:
+    """mid -> halfway -> natural credit, but the natural rung only when it
+    is at least `min_share` of the mid (a tight market). 2026-10-09: mid
+    1.25 and halfway 1.24 didn't fill on the paper account while the
+    natural was ~1.23; on a wide market the natural rung is skipped so an
+    open never gives away much of the credit."""
+    rungs = [mid, (mid + natural) / 2]
+    if mid > 0 and natural >= min_share * mid:
+        rungs.append(natural)
     out = []
-    for p in (mid, (mid + natural) / 2):
+    for p in rungs:
         p = round(p, 2)
         if p > 0.01 and (not out or p < out[-1]):
             out.append(p)

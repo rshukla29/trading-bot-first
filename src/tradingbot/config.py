@@ -154,6 +154,10 @@ class Settings(BaseSettings):
     # options 25% pricier (1.14). Nearer targets hurt (127.2%: PF 0.95) —
     # scripts/orb_research_tests.py --fib.
     options_fib_target_ext: float = 2.0
+    # First day of the current ORB rule set (entry filters, step-up/3:55
+    # exits; the fib target was added 2026-10-05). The daily review reports
+    # stats for trades since this date separately from all-time stats.
+    options_rules_since: str = "2026-10-02"
     # No new ORB entries at/after this time (ET). Since 2026-10-01: live had
     # no cutoff and entered at 3:55pm twice; backtests show no cost to a
     # 12:00 cutoff and live entries after 10:15 lost money.

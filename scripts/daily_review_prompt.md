@@ -29,6 +29,11 @@ Prefer "no rule changes" when the evidence is thin. Never propose loosening a sa
 ## Watch tomorrow
 Up to 3 bullets.
 
+Which numbers to use:
+- For P&L, use the "Realized P&L by strategy (journals; complete trades)" table. The IBKR "Closed fills" total
+  leaves out options that expired worthless (no fill), so it overstates credit-spread days.
+- For ORB vs the backtest, use only the "Current rules" line; older-rule trades are not comparable.
+
 Known log patterns (not problems by themselves):
 - `Error 202 ... Order Canceled - reason:` (blank reason) right after a "did not fill" / timeout line is the bot
   cancelling its own unfilled limit order before retrying — not an IBKR rejection. It only matters if orders
