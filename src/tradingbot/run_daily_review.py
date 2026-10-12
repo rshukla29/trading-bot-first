@@ -229,7 +229,12 @@ def section_health(day: date) -> str:
     for name in names:
         lines = read_log(name, day)
         bad = [ln for ln in lines if " ERROR " in ln or "Traceback" in ln or " WARNING " in ln]
-        if not lines:
+        log_file = Path("logs") / f"{name}_{day.isoformat()}.log"
+        if not lines and log_file.exists() and log_file.stat().st_size > 0:
+            # e.g. the snapshots only log at WARNING level, so a clean run
+            # leaves just the report path — no timestamped lines.
+            out.append(f"- {name}: ran, no warnings or errors")
+        elif not lines:
             out.append(f"- {name}: no log today")
         elif bad:
             out.append(f"- {name}: {len(bad)} warning/error lines, e.g.:\n```\n" + "\n".join(bad[:6]) + "\n```")

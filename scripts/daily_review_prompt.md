@@ -41,6 +41,11 @@ Known log patterns (not problems by themselves):
 - `errorCode=399 ... will not be placed at the exchange until <next open>` / `ValidationError` on orders placed
   after the close (RSI(2), MA-crossover at 4:30pm) is IBKR's notice that the order is queued for the next open.
   Check the next day's facts to confirm it filled.
+- `Error 162 ... API scanner subscription cancelled` in the RSI(2) log is IBKR confirming the bot closed its
+  top-movers scanner after reading the results — normal, nothing failed. (A different Error 162, "TWS session is
+  connected from a different IP address", IS a problem: a competing login cutting the bots' data.)
+- `only N bars, strategy needs 201 — skipping` for scanner-discovered symbols means the stock is too newly listed
+  for the 200-day average; skipping it is correct.
 - yfinance `possibly delisted; no price data found` for S&P 500 members is usually a transient Yahoo data gap.
   Only a problem if the same names fail on several days.
 
