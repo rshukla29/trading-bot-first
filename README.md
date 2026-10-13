@@ -32,6 +32,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 | 3:57pm | `ExpiryGuardBot` | Safety net: closes any option expiring today still open (normally nothing) |
 | 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
 | 4:30pm | `SnapshotPostmarketBot` | Postmarket report (+ weekly on Fridays, monthly on the last trading day) |
+| 4:15pm | `SP500ScanBot` | Saves the S&P 500 scan (movers, unusual volume, strategy buy signals) to `scans/YYYY/MM/DD/` |
 | 4:50pm | `DailyReviewBot` | Daily review: facts script + Claude Code (read-only) writes recommendations to `analysis/daily/YYYY/MM/DD/` |
 
 ### Profit-locking step stop (MA-crossover, RSI(2))
