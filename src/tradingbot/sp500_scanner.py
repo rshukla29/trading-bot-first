@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -92,21 +93,51 @@ def fetch_sp500_constituents(cache_path: Path = CONSTITUENTS_CACHE, refresh: boo
     return df
 
 
-def download_daily_bars(symbols: list[str], period: str = "2y") -> dict[str, pd.DataFrame]:
-    """Batch-download daily bars; returns {symbol: DataFrame[open..volume]}
-    in the same shape ibkr.data.fetch_daily_bars returns, so the existing
-    strategies run on it unchanged. Symbols with no data are dropped."""
-    raw = yf.download(
-        symbols, period=period, interval="1d", group_by="ticker",
-        auto_adjust=True, threads=True, progress=False,
-    )
+def _parse_download(raw: pd.DataFrame, symbols: list[str]) -> dict[str, pd.DataFrame]:
     out: dict[str, pd.DataFrame] = {}
+    if raw is None or raw.empty:
+        return out
     for symbol in symbols:
         if symbol not in raw.columns.get_level_values(0):
             continue
         df = raw[symbol].rename(columns=str.lower)[BAR_COLUMNS].dropna()
         if not df.empty:
             out[symbol] = df
+    return out
+
+
+def download_daily_bars(symbols: list[str], period: str = "2y", retries: int = 2,
+                        retry_pause: float = 2.0) -> dict[str, pd.DataFrame]:
+    """Batch-download daily bars; returns {symbol: DataFrame[open..volume]}
+    in the same shape ibkr.data.fetch_daily_bars returns, so the existing
+    strategies run on it unchanged. Symbols with no data are dropped.
+
+    Yahoo's threaded batch download drops a handful of random, perfectly
+    live names per run ("possibly delisted": FAST, IQV, VEEV... on
+    2026-10-13, a different set each day), so the missing ones are
+    re-requested — unthreaded, after a short pause — up to `retries` times."""
+    raw = yf.download(
+        symbols, period=period, interval="1d", group_by="ticker",
+        auto_adjust=True, threads=True, progress=False,
+    )
+    out = _parse_download(raw, symbols)
+    for attempt in range(1, retries + 1):
+        missing = [s for s in symbols if s not in out]
+        if not missing:
+            break
+        time.sleep(retry_pause)
+        log.info("Retrying %d symbols Yahoo returned no data for (attempt %d): %s",
+                 len(missing), attempt, ", ".join(missing))
+        # Always a list, so a single symbol still comes back grouped by ticker.
+        raw = yf.download(
+            missing, period=period, interval="1d", group_by="ticker",
+            auto_adjust=True, threads=False, progress=False,
+        )
+        out.update(_parse_download(raw, missing))
+    still_missing = [s for s in symbols if s not in out]
+    if still_missing:
+        log.warning("No Yahoo data after %d retries for %d symbols: %s",
+                    retries, len(still_missing), ", ".join(still_missing))
     return out
 
 

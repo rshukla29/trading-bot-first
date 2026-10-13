@@ -55,3 +55,42 @@ def test_scan_computes_change_and_signals():
     assert row["volume_ratio"] == 5.0
     assert row["buyer"] == "test buy"
     assert row["holder"] == ""
+
+
+# --- Yahoo batch download: retry symbols it silently drops -------------------
+
+def _yahoo_frame(symbols):
+    idx = pd.date_range("2026-10-01", periods=3, freq="B")
+    cols = pd.MultiIndex.from_product([symbols, ["Open", "High", "Low", "Close", "Volume"]])
+    return pd.DataFrame(1.0, index=idx, columns=cols)
+
+
+def test_download_retries_symbols_yahoo_dropped(monkeypatch):
+    import tradingbot.sp500_scanner as sc
+    calls = []
+
+    def fake_download(symbols, **kw):
+        calls.append((list(symbols), kw["threads"]))
+        if len(calls) == 1:   # threaded batch drops FAST and IQV ("possibly delisted")
+            return _yahoo_frame([s for s in symbols if s not in ("FAST", "IQV")])
+        return _yahoo_frame(list(symbols))
+
+    monkeypatch.setattr(sc.yf, "download", fake_download)
+    bars = sc.download_daily_bars(["AAPL", "FAST", "IQV", "MSFT"], retry_pause=0)
+    assert sorted(bars) == ["AAPL", "FAST", "IQV", "MSFT"]
+    assert calls[1] == (["FAST", "IQV"], False)   # only the missing ones, unthreaded
+    assert len(calls) == 2
+
+
+def test_download_gives_up_after_retries(monkeypatch):
+    import tradingbot.sp500_scanner as sc
+    calls = []
+
+    def fake_download(symbols, **kw):
+        calls.append(list(symbols))
+        return _yahoo_frame([s for s in symbols if s != "GONE"])
+
+    monkeypatch.setattr(sc.yf, "download", fake_download)
+    bars = sc.download_daily_bars(["AAPL", "GONE"], retries=2, retry_pause=0)
+    assert sorted(bars) == ["AAPL"]
+    assert calls == [["AAPL", "GONE"], ["GONE"], ["GONE"]]
