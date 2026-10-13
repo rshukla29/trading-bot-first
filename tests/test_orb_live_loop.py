@@ -140,3 +140,40 @@ def test_entry_filters_min_range_and_vwap_side():
     assert not s.passes_entry_filters(bars, "C", 0.002, vwap=101.0)  # call below VWAP
     assert not s.passes_entry_filters(bars, "C", 0.02, vwap=None)    # range < 2%
     assert s.passes_entry_filters(bars, "P", 0.0, vwap=None)
+
+
+# --- 5-second checks: bars fetched once per bar, quotes streamed ----------------
+
+def test_bars_fetched_once_per_5min_bar_even_with_5s_ticks(harness, monkeypatch):
+    tick, calls = harness
+    fetches = []
+    monkeypatch.setattr(orb, "fetch_intraday_bars",
+                        lambda ib, symbol, bm, **kw: fetches.append(1) or ibkr_response_at(clock_now[0]))
+    clock_now = [None]
+    for now in ("09:50:02", "09:50:06", "09:50:11", "09:51:00", "09:54:55", "09:55:06"):
+        clock_now[0] = now
+        tick(now)
+    # 09:50:02 is too soon after the boundary; 09:50:06 fetches; the rest of
+    # that bar is skipped; 09:55:06 fetches the next completed bar.
+    assert len(fetches) == 2
+
+
+def test_quote_waits_on_the_stream_and_never_cancels_it(monkeypatch):
+    from types import SimpleNamespace as NS
+    ticker = NS(bid=float("nan"), ask=float("nan"))
+    cancelled = []
+    sleeps = []
+
+    def fake_sleep(sec):
+        sleeps.append(sec)
+        ticker.bid, ticker.ask = 0.90, 0.92   # prices arrive while waiting
+
+    ib = NS(reqMktData=lambda c, genericTickList="", snapshot=False: ticker,
+            cancelMktData=lambda c: cancelled.append(c), sleep=fake_sleep)
+    monkeypatch.setattr(orb, "get_quote", lambda ib_, c: (_ for _ in ()).throw(AssertionError("must not cancel stream")))
+    c = NS(conId=777)
+    assert orb._quote(ib, c) == (0.90, 0.92, 0.91)     # first use waits on the stream
+    assert orb._quote(ib, c) == (0.90, 0.92, 0.91)     # then instant
+    assert cancelled == [] and len(sleeps) == 1
+    orb.stop_streams(ib, c)
+    assert cancelled == [c] and 777 not in orb._streams

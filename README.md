@@ -149,7 +149,9 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
   rules (+100%/−50%/3:30pm: PF 1.11–1.16, fragile). All remain in
   settings, switched off.
 - One position per symbol at a time, max 10 contracts; exits checked
-  every ~60s. Open positions are recovered from the journal if the
+  **every 5s** using streaming quotes (was 60s until 2026-10-13, when an
+  option fell through its $0.99 lock to $0.91 between checks). Entry bars
+  are fetched once per completed 5-min bar, inside IBKR's pacing limit. Open positions are recovered from the journal if the
   process restarts.
 
 ### 4. Iron condor (SPY)

@@ -79,7 +79,45 @@ logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 0)
-TICK_SECONDS = 60.0
+# Exit checks every 5s (was 60s until 2026-10-13: the 777P's step-up lock
+# was $0.99 but the option fell from $1.13 to $0.91 between two 60s checks).
+# Quotes are streamed (see _quote) so a check doesn't wait 3s per quote, and
+# 5-min bars are fetched once per completed bar (see tick_symbol) to stay
+# well inside IBKR's historical-data pacing (~60 requests / 10 min).
+TICK_SECONDS = 5.0
+HOLDING_LOG_EVERY = 60.0  # seconds between "holding" log lines
+BAR_FETCH_DELAY = 5.0     # seconds after a 5-min boundary before fetching the completed bar
+
+_streams: dict[int, object] = {}
+
+
+def _quote(ib, contract) -> tuple[float, float, float]:
+    """(bid, ask, mid) from a streaming market-data subscription, opened on
+    first use and kept until stop_streams(). Falls back to a one-off
+    get_quote while the stream has no valid bid/ask yet."""
+    con_id = getattr(contract, "conId", None)
+    if not (con_id and hasattr(ib, "reqMktData")):
+        return get_quote(ib, contract)
+    t = _streams.get(con_id)
+    if t is None:
+        t = _streams[con_id] = ib.reqMktData(contract, genericTickList="", snapshot=False)
+    # Wait on the stream itself (up to ~3s on first use). Never fall back to
+    # get_quote here: it subscribes and then cancels the same contract, which
+    # cancels this stream too and leaves it frozen (found 2026-10-13).
+    for _ in range(7):
+        bid, ask = t.bid, t.ask
+        if bid is not None and ask is not None and bid == bid and ask == ask and bid > 0 and ask > 0:
+            return bid, ask, (bid + ask) / 2
+        ib.sleep(0.5)
+    raise ValueError(f"No valid streaming quote for {getattr(contract, 'localSymbol', '') or contract}: "
+                     f"bid={t.bid} ask={t.ask}")
+
+
+def stop_streams(ib, *contracts) -> None:
+    for c in contracts:
+        t = _streams.pop(getattr(c, "conId", None), None)
+        if t is not None:
+            ib.cancelMktData(c)
 
 
 def _now_et() -> datetime:
@@ -128,8 +166,8 @@ def latest_bar_vs_vwap(ib, symbol: str) -> tuple[float | None, float | None]:
 
 def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: dict) -> bool:
     """Returns True if the position was closed this call."""
-    _, _, spot_mid = get_quote(ib, underlying)
-    _, _, premium_mid = get_quote(ib, position["contract"])
+    _, _, spot_mid = _quote(ib, underlying)
+    _, _, premium_mid = _quote(ib, position["contract"])
 
     # Step stop is based on the highest premium seen, so a spike to +21%
     # that fades still exits at +20%. Peak is in-memory only: after a
@@ -182,6 +220,10 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         ),
     )
     if reason is None:
+        now_s = _now_et().timestamp()
+        if now_s - position.get("last_hold_log", 0.0) < HOLDING_LOG_EVERY:
+            return False
+        position["last_hold_log"] = now_s
         logger.info(
             "%s: ORB position holding (premium %.2f vs entry %.2f, peak %.2f, locked-in stop %s, spot %.2f, "
             "last 5-min close %s vs VWAP %s)",
@@ -416,8 +458,17 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
     symbol = state["symbol"]
     if state["position"] is not None:
         if check_exit(ib, journal, symbol, state["underlying"], state["position"]):
+            if hasattr(ib, "cancelMktData"):
+                stop_streams(ib, state["position"]["contract"])
             state["position"] = None
         return
+    # Entries are judged on completed 5-min bars, so fetch bars only once per
+    # bar — a few seconds after each 5-min boundary — not every 5s tick.
+    now_ts = pd.Timestamp(_now_et())
+    boundary = now_ts.floor(f"{settings.options_bar_minutes}min")
+    if state.get("fetched_boundary") == boundary or (now_ts - boundary).total_seconds() < BAR_FETCH_DELAY:
+        return
+    state["fetched_boundary"] = boundary
     # Completed bars only. IBKR returns the still-forming bar last; judging
     # it seconds after it opened (fix 2026-09-28) meant its "close" was
     # still inside the range, and by the next check the real breakout bar
