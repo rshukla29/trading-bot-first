@@ -177,3 +177,25 @@ def test_quote_waits_on_the_stream_and_never_cancels_it(monkeypatch):
     assert cancelled == [] and len(sleeps) == 1
     orb.stop_streams(ib, c)
     assert cancelled == [c] and 777 not in orb._streams
+
+
+def test_position_checked_every_60s_until_lock_then_every_tick(monkeypatch):
+    from types import SimpleNamespace as NS
+    base = 1_760_000_000.0             # a realistic epoch timestamp
+    t = {"now": base}
+    checks = []
+    monkeypatch.setattr(orb, "_now_et", lambda: NS(timestamp=lambda: t["now"]))
+
+    def fake_check_exit(ib, journal, symbol, underlying, position):
+        checks.append(t["now"] - base)
+        if t["now"] - base >= 120:            # lock becomes active on the check at 120s
+            position["lock_active"] = True
+        return False
+
+    monkeypatch.setattr(orb, "check_exit", fake_check_exit)
+    state = {"symbol": "SPY", "underlying": None, "position": {"contract": None}}
+    for sec in range(0, 150, 5):       # 5s loop ticks for 2.5 minutes
+        t["now"] = base + sec
+        orb.tick_symbol(None, None, None, None, state)
+    # every 60s before the lock (0, 60, 120), then every 5s (125..145)
+    assert checks == [0, 60, 120, 125, 130, 135, 140, 145]

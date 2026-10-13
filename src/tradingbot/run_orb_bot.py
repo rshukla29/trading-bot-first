@@ -79,12 +79,15 @@ logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 0)
-# Exit checks every 5s (was 60s until 2026-10-13: the 777P's step-up lock
-# was $0.99 but the option fell from $1.13 to $0.91 between two 60s checks).
+# The loop ticks every 5s. An open position is checked every 60s until its
+# profit lock is active, then every 5s (since 2026-10-13: the 777P's lock was
+# $0.99 but the option fell from $1.13 to $0.91 between two 60s checks).
+# Before the lock, 60s keeps the peak tracking close to what was backtested.
 # Quotes are streamed (see _quote) so a check doesn't wait 3s per quote, and
 # 5-min bars are fetched once per completed bar (see tick_symbol) to stay
 # well inside IBKR's historical-data pacing (~60 requests / 10 min).
 TICK_SECONDS = 5.0
+CHECK_SECONDS_NO_LOCK = 60.0
 HOLDING_LOG_EVERY = 60.0  # seconds between "holding" log lines
 BAR_FETCH_DELAY = 5.0     # seconds after a 5-min boundary before fetching the completed bar
 
@@ -146,7 +149,8 @@ def recover_open_position(ib, journal: Journal, symbol: str) -> dict | None:
         "entry_premium": row["entry_premium"], "contracts": row["contracts"],
         "partial_pnl": row["realized_pnl"] or 0.0,
         "range_low": row["range_low"], "range_high": row["range_high"],
-        # Persisted peak: the step-up stop survives a restart.
+        # Persisted peak: the step-up stop survives a restart (and with it,
+        # whether the lock is active — check_exit re-derives that on its first call).
         "peak_premium": row["peak_premium"] or row["entry_premium"],
     }
 
@@ -191,6 +195,9 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
                     settings.options_ladder_step_pct, settings.options_ladder_trail_pct)
         if settings.options_ladder_trigger_pct > 0 else None
     )
+    if (ladder is not None or lock_floor is not None) and not position.get("lock_active"):
+        position["lock_active"] = True
+        logger.info("%s: profit lock active — checking every %.0fs", symbol, TICK_SECONDS)
 
     bar_close = vwap = None
     if settings.options_vwap_exit:
@@ -457,6 +464,12 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
     look for an entry on each newly-completed bar."""
     symbol = state["symbol"]
     if state["position"] is not None:
+        pos = state["position"]
+        now_s = _now_et().timestamp()
+        # Every 60s until the profit lock is active, then every tick (5s).
+        if not pos.get("lock_active") and now_s - pos.get("last_check", 0.0) < CHECK_SECONDS_NO_LOCK:
+            return
+        pos["last_check"] = now_s
         if check_exit(ib, journal, symbol, state["underlying"], state["position"]):
             if hasattr(ib, "cancelMktData"):
                 stop_streams(ib, state["position"]["contract"])
