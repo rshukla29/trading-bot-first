@@ -12,30 +12,32 @@ th:first-child, td:first-child { text-align: left; }
 <h1>Trading bot snapshot: postmarket — 2026-10-13 (account DUT090413)</h1>
 <h2>Open orders</h2>
 <table><tr><th>Symbol</th><th>Action</th><th>Qty</th><th>Type</th><th>Price</th><th>Status</th></tr>
+<tr><td>GRMN</td><td>SELL</td><td>7</td><td>MKT</td><td>0.00</td><td>PreSubmitted</td></tr>
 <tr><td>PFG</td><td>SELL</td><td>18</td><td>STP</td><td>97.86</td><td>PreSubmitted</td></tr>
 <tr><td>FRNM</td><td>SELL</td><td>151</td><td>STP</td><td>11.90</td><td>PreSubmitted</td></tr>
 <tr><td>INCY</td><td>SELL</td><td>17</td><td>STP</td><td>101.46</td><td>PreSubmitted</td></tr>
-<tr><td>GRMN</td><td>SELL</td><td>7</td><td>STP</td><td>241.60</td><td>PreSubmitted</td></tr>
 <tr><td>VRTX</td><td>SELL</td><td>3</td><td>STP</td><td>452.08</td><td>PreSubmitted</td></tr>
 </table>
 <h2>Open positions &amp; unrealized P&amp;L</h2>
-<table><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>
-<tr><td>FRNM</td><td>151</td><td>13.17</td><td>12.61</td><td>1904.10</td><td class='neg'>-84.06</td></tr>
+<table><tr><th>Symbol</th><th>Qty</th><th>Avg Price</th><th>Mkt Price</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>
+<tr><td>FRNM</td><td>151</td><td>13.17</td><td>12.70</td><td>1917.70</td><td class='neg'>-70.46</td></tr>
 <tr><td>GRMN</td><td>7</td><td>269.92</td><td>277.00</td><td>1939.00</td><td class='pos'>49.54</td></tr>
 <tr><td>INCY</td><td>17</td><td>112.97</td><td>108.58</td><td>1845.78</td><td class='neg'>-74.69</td></tr>
 <tr><td>PFG</td><td>18</td><td>109.62</td><td>107.62</td><td>1937.22</td><td class='neg'>-35.86</td></tr>
-<tr><td>SPY 20261013 781.0C</td><td>2</td><td>4.30</td><td>0.00</td><td>0.00</td><td class='neg'>-8.59</td></tr>
-<tr><td>SPY 20261127 746.0P</td><td>10</td><td>507.67</td><td>4.97</td><td>4973.89</td><td class='neg'>-102.82</td></tr>
-<tr><td>SPY 20261127 751.0P</td><td>-10</td><td>572.32</td><td>5.65</td><td>-5646.42</td><td class='pos'>76.75</td></tr>
-<tr><td>SPY 20261127 815.0C</td><td>-10</td><td>207.32</td><td>1.92</td><td>-1916.75</td><td class='pos'>156.50</td></tr>
-<tr><td>SPY 20261127 820.0C</td><td>10</td><td>146.67</td><td>1.31</td><td>1308.28</td><td class='neg'>-158.43</td></tr>
-<tr><td>VRTX</td><td>3</td><td>506.02</td><td>485.21</td><td>1455.63</td><td class='neg'>-62.44</td></tr>
-<tr><td colspan='5'><b>TOTAL</b></td><td class='neg'><b>-244.10</b></td></tr>
+<tr><td>SPY 20261013 781.0C</td><td>2</td><td>0.04</td><td>0.00</td><td>0.00</td><td class='neg'>-8.59</td></tr>
+<tr><td>SPY 20261127 746.0P</td><td>10</td><td>5.08</td><td>5.02</td><td>5017.39</td><td class='neg'>-59.32</td></tr>
+<tr><td>SPY 20261127 751.0P</td><td>-10</td><td>5.72</td><td>5.70</td><td>-5696.53</td><td class='pos'>26.64</td></tr>
+<tr><td>SPY 20261127 815.0C</td><td>-10</td><td>2.07</td><td>1.89</td><td>-1891.85</td><td class='pos'>181.39</td></tr>
+<tr><td>SPY 20261127 820.0C</td><td>10</td><td>1.47</td><td>1.29</td><td>1290.18</td><td class='neg'>-176.53</td></tr>
+<tr><td>VRTX</td><td>3</td><td>506.02</td><td>486.45</td><td>1459.35</td><td class='neg'>-58.72</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='neg'><b>-226.60</b></td></tr>
 </table>
+<p class='empty'>Avg Price = average price paid per share (for options, per share of the contract — x100 per contract), the same unit as Mkt Price.</p>
 <h2>Stop-loss coverage (stocks)</h2>
+<p class='warn'>WARNING: bot positions without a working stop: GRMN. The next MA/RSI(2) run will re-place the stop (or sell if already below it).</p>
 <table><tr><th>Symbol</th><th>Owner</th><th>Qty</th><th>Stop Qty</th><th>Stop Price</th><th>Status</th></tr>
 <tr><td>FRNM</td><td>rsi2</td><td>151</td><td>151</td><td>11.90</td><td>protected</td></tr>
-<tr><td>GRMN</td><td>rsi2</td><td>7</td><td>7</td><td>241.60</td><td>protected</td></tr>
+<tr><td>GRMN</td><td>rsi2</td><td>7</td><td>0</td><td>—</td><td><span class='warn'>UNPROTECTED</span></td></tr>
 <tr><td>INCY</td><td>rsi2</td><td>17</td><td>17</td><td>101.46</td><td>protected</td></tr>
 <tr><td>PFG</td><td>rsi2</td><td>18</td><td>18</td><td>97.86</td><td>protected</td></tr>
 <tr><td>VRTX</td><td>rsi2</td><td>3</td><td>3</td><td>452.08</td><td>protected</td></tr>
@@ -51,13 +53,14 @@ th:first-child, td:first-child { text-align: left; }
 </table>
 <p class='empty'>Retracements are measured down from the swing high; extensions project the swing range beyond the high (up) or low (down). Computed from IBKR daily bars — IBKR's API can't read chart drawings.</p>
 <h2>Closed positions P&amp;L (today)</h2>
-<table><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Fill Price</th><th>Realized P&amp;L</th></tr>
-<tr><td>SPY 20261013 777.0P</td><td>SLD</td><td>10</td><td>0.91</td><td class='pos'>110.85</td></tr>
-<tr><td>SPY 20261013 779.0C</td><td>BOT</td><td>2</td><td>0.08</td><td class='pos'>6.57</td></tr>
-<tr><td colspan='4'><b>TOTAL</b></td><td class='pos'><b>117.43</b></td></tr>
+<table><tr><th>Symbol</th><th>Position</th><th>Qty</th><th>Avg Bought @</th><th>Avg Sold @</th><th>Net P&amp;L</th></tr>
+<tr><td>SPY 20261013 777.0P</td><td>long</td><td>10</td><td>0.79</td><td>0.91</td><td class='pos'>110.85</td></tr>
+<tr><td>SPY 20261013 779.0C</td><td>short</td><td>2</td><td>0.08</td><td>0.12</td><td class='pos'>6.57</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='pos'><b>117.43</b></td></tr>
 </table>
+<p class='empty'>Prices are per share (options: per share of the contract, x100 per contract). The closing price is IBKR's fill; the opening average is worked out from IBKR's realized P&amp;L, so it includes the opening commission. Net P&amp;L is after all commissions.</p>
 <h2>Account P&amp;L (today)</h2>
-<table><tr><td>Realized P&amp;L</td><td class='pos'>117.43</td></tr><tr><td>Unrealized P&amp;L</td><td class='neg'>-223.34</td></tr><tr><td>Daily P&amp;L</td><td class='pos'>35.51</td></tr></table>
+<table><tr><td>Realized P&amp;L</td><td class='pos'>117.43</td></tr><tr><td>Unrealized P&amp;L</td><td class='neg'>-228.95</td></tr><tr><td>Daily P&amp;L</td><td class='pos'>77.87</td></tr></table>
 <h2>Overall</h2>
-<table><tr><td>Total Balance (Net Liquidation)</td><td>997,771.32</td></tr><tr><td>YTD P&amp;L (vs 1,000,000 baseline)</td><td class='neg'>-2,228.68 (-0.22%)</td></tr></table>
+<table><tr><td>Total Balance (Net Liquidation)</td><td>997,775.34</td></tr><tr><td>YTD P&amp;L (vs 1,000,000 baseline)</td><td class='neg'>-2,224.66 (-0.22%)</td></tr></table>
 </body></html>
