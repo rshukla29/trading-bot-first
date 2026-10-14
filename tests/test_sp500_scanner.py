@@ -94,3 +94,24 @@ def test_download_gives_up_after_retries(monkeypatch):
     bars = sc.download_daily_bars(["AAPL", "GONE"], retries=2, retry_pause=0)
     assert sorted(bars) == ["AAPL"]
     assert calls == [["AAPL", "GONE"], ["GONE"], ["GONE"]]
+
+
+def test_yfinance_first_pass_errors_are_muted_then_restored(monkeypatch, caplog):
+    import logging
+    import tradingbot.sp500_scanner as sc
+    calls = []
+
+    def fake_download(symbols, **kw):
+        calls.append(list(symbols))
+        if len(calls) == 1:
+            logging.getLogger("yfinance").error("$MKC: possibly delisted; no price data found")
+            return _yahoo_frame([s for s in symbols if s != "MKC"])
+        return _yahoo_frame(list(symbols))
+
+    monkeypatch.setattr(sc.yf, "download", fake_download)
+    before = logging.getLogger("yfinance").level
+    with caplog.at_level(logging.INFO):
+        bars = sc.download_daily_bars(["AAPL", "MKC"], retry_pause=0)
+    assert sorted(bars) == ["AAPL", "MKC"]
+    assert "possibly delisted" not in caplog.text          # recovered miss: no ERROR line
+    assert logging.getLogger("yfinance").level == before

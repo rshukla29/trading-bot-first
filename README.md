@@ -213,6 +213,10 @@ Source: Option Alpha and Quantish published SPX 0DTE ORB research
   10:30 and 12:00, one trade a day. Breakout up → **sell a put spread**
   with the short put at/below the range low; breakout down → **sell a
   call spread** with the short call at/above the range high. $2 wide.
+- **Minimum credit:** the spread's mid credit must be at least $0.10
+  (`CREDIT_ORB_MIN_CREDIT`), or the breakout is skipped for the day — the
+  log says `credit 0.06 below minimum 0.10 — skipping` (as on 2026-10-14).
+  Below that, the premium doesn't cover the risk of the $2 width.
 - **Exit:** hold; bought back at 3:50pm (SPY options settle in shares, so
   nothing is left to expire; the 3:57pm expiry guard is the backup). If the
   long leg has no bid (worthless, common near the close), only the short

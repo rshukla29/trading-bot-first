@@ -115,7 +115,21 @@ def download_daily_bars(symbols: list[str], period: str = "2y", retries: int = 2
     Yahoo's threaded batch download drops a handful of random, perfectly
     live names per run ("possibly delisted": FAST, IQV, VEEV... on
     2026-10-13, a different set each day), so the missing ones are
-    re-requested — unthreaded, after a short pause — up to `retries` times."""
+    re-requested — unthreaded, after a short pause — up to `retries` times.
+    yfinance's own "possibly delisted" errors are muted (they fire on a miss
+    the retry then recovers); a symbol still missing after the retries gets
+    one warning below."""
+    yf_log = logging.getLogger("yfinance")
+    old_level = yf_log.level
+    yf_log.setLevel(logging.CRITICAL)
+    try:
+        return _download_with_retries(symbols, period, retries, retry_pause)
+    finally:
+        yf_log.setLevel(old_level)
+
+
+def _download_with_retries(symbols: list[str], period: str, retries: int,
+                           retry_pause: float) -> dict[str, pd.DataFrame]:
     raw = yf.download(
         symbols, period=period, interval="1d", group_by="ticker",
         auto_adjust=True, threads=True, progress=False,
