@@ -34,7 +34,7 @@ from ib_async import IB, ExecutionFilter, Fill
 
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
-from tradingbot.journal import Journal
+from tradingbot.journal import Journal, closed_trade_multiplier, closed_trade_prices
 from tradingbot.paths import dated_dir
 from tradingbot.position_guard import intended_short_conids, unexpected_shorts
 from tradingbot.protection import orphan_stops, working_stop_qty_by_symbol
@@ -62,6 +62,12 @@ class ClosedTrade:
     quantity: float
     price: float
     realized_pnl: float
+    commission: float | None = None  # closing commission; None on rows recorded before 2026-10-13
+
+    @property
+    def bought_sold(self) -> tuple[float, float]:
+        return closed_trade_prices(self.side, self.quantity, self.price, self.realized_pnl, self.commission,
+                                   closed_trade_multiplier(self.symbol))
 
 
 def _describe_contract(c) -> str:
@@ -107,10 +113,11 @@ def persist_closed_fills(journal: Journal, fills: list[Fill], today: date) -> li
             quantity=f.execution.shares,
             price=f.execution.price,
             realized_pnl=f.commissionReport.realizedPNL,
+            commission=f.commissionReport.commission,
         )
         journal.record_closed_trade(
             f.execution.execId, today.isoformat(), trade.symbol, trade.side, trade.quantity, trade.price,
-            trade.realized_pnl,
+            trade.realized_pnl, trade.commission,
         )
         trades.append(trade)
     return trades
@@ -118,9 +125,20 @@ def persist_closed_fills(journal: Journal, fills: list[Fill], today: date) -> li
 
 def _closed_trades_from_journal_rows(rows: list[sqlite3.Row]) -> list[ClosedTrade]:
     return [
-        ClosedTrade(row["symbol"], row["side"], row["quantity"], row["price"], row["realized_pnl"])
+        ClosedTrade(row["symbol"], row["side"], row["quantity"], row["price"], row["realized_pnl"],
+                    row["commission"] if "commission" in row.keys() else None)
         for row in rows
     ]
+
+
+def avg_price(p) -> float:
+    """IBKR's averageCost is per contract for options (premium x 100);
+    divide by the multiplier so it compares directly to the market price."""
+    try:
+        mult = float(p.contract.multiplier or 1)
+    except (TypeError, ValueError):
+        mult = 1.0
+    return p.averageCost / (mult or 1.0)
 
 
 def _render_positions_section(portfolio) -> tuple[list[str], float]:
@@ -130,7 +148,7 @@ def _render_positions_section(portfolio) -> tuple[list[str], float]:
         return parts, 0.0
 
     parts.append(
-        "<table><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th>"
+        "<table><tr><th>Symbol</th><th>Qty</th><th>Avg Price</th><th>Mkt Price</th>"
         "<th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>"
     )
     total_unrealized = 0.0
@@ -139,7 +157,7 @@ def _render_positions_section(portfolio) -> tuple[list[str], float]:
         total_unrealized += p.unrealizedPNL
         parts.append(
             f"<tr><td>{escape(desc)}</td><td>{p.position:.0f}</td>"
-            f"<td>{p.averageCost:.2f}</td><td>{p.marketPrice:.2f}</td>"
+            f"<td>{avg_price(p):.2f}</td><td>{p.marketPrice:.2f}</td>"
             f"<td>{p.marketValue:.2f}</td>"
             f"<td class='{_pnl_class(p.unrealizedPNL)}'>{p.unrealizedPNL:.2f}</td></tr>"
         )
@@ -148,6 +166,8 @@ def _render_positions_section(portfolio) -> tuple[list[str], float]:
         f"<td class='{_pnl_class(total_unrealized)}'><b>{total_unrealized:.2f}</b></td></tr>"
     )
     parts.append("</table>")
+    parts.append("<p class='empty'>Avg Price = average price paid per share (for options, per share of the "
+                 "contract — x100 per contract), the same unit as Mkt Price.</p>")
     return parts, total_unrealized
 
 
@@ -216,22 +236,36 @@ def _render_closed_trades_section(trades: list[ClosedTrade], period_label: str) 
         return parts, 0.0
 
     parts.append(
-        "<table><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Fill Price</th>"
-        "<th>Realized P&amp;L</th></tr>"
+        "<table><tr><th>Symbol</th><th>Position</th><th>Qty</th><th>Avg Bought @</th><th>Avg Sold @</th>"
+        "<th>Net P&amp;L</th></tr>"
     )
     total_realized = 0.0
+    any_approx = False
     for t in trades:
         total_realized += t.realized_pnl
+        bought, sold = t.bought_sold
+        approx = "≈" if t.commission is None else ""
+        any_approx = any_approx or bool(approx)
+        long = t.side in ("SLD", "SELL")
+        bought_txt = f"{approx}{bought:.2f}" if long else f"{bought:.2f}"
+        sold_txt = f"{sold:.2f}" if long else f"{approx}{sold:.2f}"
         parts.append(
-            f"<tr><td>{escape(t.symbol)}</td><td>{escape(t.side)}</td>"
-            f"<td>{t.quantity:.0f}</td><td>{t.price:.2f}</td>"
+            f"<tr><td>{escape(t.symbol)}</td><td>{'long' if long else 'short'}</td>"
+            f"<td>{t.quantity:.0f}</td><td>{bought_txt}</td><td>{sold_txt}</td>"
             f"<td class='{_pnl_class(t.realized_pnl)}'>{t.realized_pnl:.2f}</td></tr>"
         )
     parts.append(
-        f"<tr><td colspan='4'><b>TOTAL</b></td>"
+        f"<tr><td colspan='5'><b>TOTAL</b></td>"
         f"<td class='{_pnl_class(total_realized)}'><b>{total_realized:.2f}</b></td></tr>"
     )
     parts.append("</table>")
+    note = ("Prices are per share (options: per share of the contract, x100 per contract). The closing price is "
+            "IBKR's fill; the opening average is worked out from IBKR's realized P&amp;L, so it includes the "
+            "opening commission. Net P&amp;L is after all commissions.")
+    if any_approx:
+        note += (" ≈ = recorded before commissions were saved (before 2026-10-13): off by at most the closing "
+                 "commission spread over the shares.")
+    parts.append(f"<p class='empty'>{note}</p>")
     return parts, total_realized
 
 

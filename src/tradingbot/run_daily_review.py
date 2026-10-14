@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from tradingbot.config import settings
+from tradingbot.journal import closed_trade_multiplier, closed_trade_prices
 from tradingbot.paths import dated_dir
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
@@ -89,13 +90,22 @@ def section_account(day: date, ib) -> str:
     if not bal.empty:
         bal["change"] = bal["net_liquidation"].diff(-1)
         out.append("Net liquidation (recorded by the 4:30pm snapshot):\n\n" + md_table(bal))
-    ct = q("SELECT symbol, side, quantity, price, realized_pnl FROM closed_trades WHERE date=?", (day.isoformat(),))
+    ct = q("SELECT symbol, side, quantity, price, realized_pnl, commission FROM closed_trades WHERE date=?",
+           (day.isoformat(),))
+    if not ct.empty:
+        prices = [closed_trade_prices(r.side, r.quantity, r.price, r.realized_pnl,
+                                      None if pd.isna(r.commission) else r.commission,
+                                      closed_trade_multiplier(r.symbol)) for r in ct.itertuples()]
+        ct.insert(3, "avg_bought", [round(b, 2) for b, _ in prices])
+        ct.insert(4, "avg_sold", [round(x, 2) for _, x in prices])
+        ct = ct.drop(columns=["price", "commission"])
     out.append(f"\nClosed fills today (IBKR fills; realized P&L total {ct['realized_pnl'].sum():.2f} — options that "
                f"expired worthless have no fill, so their cost is missing here):\n\n" + md_table(ct))
     out.append("\n" + strategy_pnl(day))
     if ib is not None:
         pos = [dict(symbol=p.contract.localSymbol or p.contract.symbol, type=p.contract.secType, qty=p.position,
-                    avg_cost=round(p.avgCost, 2)) for p in ib.positions() if p.position != 0]
+                    avg_price=round(p.avgCost / float(p.contract.multiplier or 1), 2))
+               for p in ib.positions() if p.position != 0]
         out.append("\nOpen positions now:\n\n" + md_table(pd.DataFrame(pos)))
         orders = [dict(symbol=t.contract.localSymbol or t.contract.symbol, action=t.order.action,
                        qty=t.order.totalQuantity, type=t.order.orderType, aux=t.order.auxPrice,

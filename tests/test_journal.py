@@ -73,3 +73,39 @@ def test_update_trend_join_position_rejects_unknown_fields(journal):
     pid = journal.open_trend_join_position("AAA", "2026-09-25", 106.0, 18, 101.97, None, "x")
     with pytest.raises(ValueError):
         journal.update_trend_join_position(pid, status="closed")
+
+
+# --- bought/sold prices backed out of IBKR's realized P&L ----------------------
+
+from tradingbot.journal import closed_trade_multiplier, closed_trade_prices  # noqa: E402
+
+
+def test_multiplier_from_closed_trade_symbol():
+    assert closed_trade_multiplier("SPY 20261013 777.0P") == 100.0
+    assert closed_trade_multiplier("JNJ") == 1.0
+
+
+def test_long_option_entry_price_from_realized_pnl():
+    # 2026-10-13: bought 10 x 777P at 0.79, sold at 0.91; IBKR realized
+    # 110.85 after ~$6.6 opening + ~$2.6 closing commission.
+    bought, sold = closed_trade_prices("SLD", 10, 0.91, 110.85, 2.6, 100.0)
+    assert sold == 0.91 and round(bought, 2) == 0.80   # 0.79 + opening commission per share
+
+
+def test_short_closed_by_a_buy_shows_the_credit_as_sold():
+    # Sold 2 calls at 0.12, bought back at 0.08: +$8 less $1.3 commission each side.
+    bought, sold = closed_trade_prices("BOT", 2, 0.08, 6.70, 1.3, 100.0)
+    assert bought == 0.08 and round(sold, 2) == 0.12
+
+
+def test_stock_entry_price():
+    bought, sold = closed_trade_prices("SLD", 7, 257.20, 21.97, 1.0, 1.0)
+    assert round(bought, 2) == 253.92 and sold == 257.20
+
+
+def test_rerun_fills_in_a_missing_commission(tmp_path):
+    journal = Journal(str(tmp_path / "j.db"))
+    journal.record_closed_trade("e1", "2026-10-13", "SPY", "SLD", 10, 0.91, 110.85)
+    journal.record_closed_trade("e1", "2026-10-13", "SPY", "SLD", 10, 0.91, 110.85, commission=2.6)
+    (row,) = journal.closed_trades_between("2026-10-13", "2026-10-13")
+    assert row["commission"] == 2.6

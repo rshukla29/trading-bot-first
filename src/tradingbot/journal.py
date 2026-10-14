@@ -199,6 +199,27 @@ CREATE TABLE IF NOT EXISTS closed_trades (
 """
 
 
+def closed_trade_multiplier(symbol: str) -> float:
+    """closed_trades.symbol is "SPY 20261013 777.0P" for an option (100
+    shares per contract), a plain ticker for a stock."""
+    parts = symbol.split()
+    return 100.0 if len(parts) == 3 and parts[2][-1:] in ("C", "P") else 1.0
+
+
+def closed_trade_prices(side: str, quantity: float, exit_price: float, realized_pnl: float,
+                        commission: float | None, multiplier: float) -> tuple[float, float]:
+    """(bought @, sold @) per share for a closing fill. IBKR only reports the
+    closing price, so the opening (average) price is backed out of its
+    realized P&L: realized = (sold - bought) * qty * multiplier - closing
+    commission, with the opening commission already inside IBKR's average
+    cost. A missing commission (older rows) leaves it off by at most that
+    commission spread over the shares."""
+    per_share = (realized_pnl + (commission or 0.0)) / (quantity * multiplier)
+    if side in ("SLD", "SELL"):           # sold to close a long
+        return exit_price - per_share, exit_price
+    return exit_price, exit_price + per_share   # bought to close a short
+
+
 class Journal:
     def __init__(self, db_path: str):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -210,6 +231,10 @@ class Journal:
             for col in ("peak_premium", "entry_iv", "model_iv"):
                 if col not in existing:
                     conn.execute(f"ALTER TABLE orb_positions ADD COLUMN {col} REAL")
+            # Closing commission (added 2026-10-13, NULL on older rows): needed
+            # to back the exact entry price out of IBKR's realized P&L.
+            if "commission" not in {r[1] for r in conn.execute("PRAGMA table_info(closed_trades)")}:
+                conn.execute("ALTER TABLE closed_trades ADD COLUMN commission REAL")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -588,16 +613,20 @@ class Journal:
 
     def record_closed_trade(
         self, exec_id: str, date: str, symbol: str, side: str, quantity: float, price: float, realized_pnl: float,
+        commission: float | None = None,
     ) -> None:
-        """INSERT OR IGNORE: exec_id is IBKR's own unique execution id, so
-        re-recording the same fill on a later rerun of the same day's
-        snapshot is a safe no-op, not a duplicate."""
+        """exec_id is IBKR's own unique execution id, so re-recording the
+        same fill on a later rerun of the same day's snapshot is a no-op,
+        not a duplicate (it only fills in a missing commission)."""
         with self._connect() as conn:
             conn.execute(
-                """INSERT OR IGNORE INTO closed_trades
-                   (exec_id, date, symbol, side, quantity, price, realized_pnl, ts)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (exec_id, date, symbol, side, quantity, price, realized_pnl, datetime.now(timezone.utc).isoformat()),
+                """INSERT INTO closed_trades
+                   (exec_id, date, symbol, side, quantity, price, realized_pnl, ts, commission)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(exec_id) DO UPDATE SET
+                   commission = COALESCE(closed_trades.commission, excluded.commission)""",
+                (exec_id, date, symbol, side, quantity, price, realized_pnl, datetime.now(timezone.utc).isoformat(),
+                 commission),
             )
 
     def closed_trades_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
