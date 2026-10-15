@@ -169,14 +169,47 @@ def open_spread(ib, journal: Journal, cfg: CreditOrbConfig, sig, chain, symbol: 
             "right": right, "close_attempts": 0}
 
 
+def _close_fills(pos: dict) -> tuple[int, float]:
+    """(contracts bought back, average cost) over every close order sent so
+    far, read from each order's *current* status. A cancelled order can still
+    fill after the bot gave up on it — 2026-10-15: attempt 1 read "0 filled",
+    then 1 filled before the cancel landed, so the journal booked 1 spread of
+    2 (+$18 instead of +$36). ib_async keeps these Trade objects updated, so
+    reading them again at the end counts late fills too."""
+    filled, cost_sum = 0, 0.0
+    for t in pos.get("close_trades", []):
+        got = int(t.orderStatus.filled or 0)
+        if got:
+            filled += got
+            cost_sum += abs(t.orderStatus.avgFillPrice) * got
+    return filled, (cost_sum / filled if filled else 0.0)
+
+
+def _finish_close(journal: Journal, pos: dict, symbol: str, reason: str) -> None:
+    filled, cost = _close_fills(pos)
+    realized = (pos["credit"] - cost) * filled * CONTRACT_MULTIPLIER
+    if filled < pos["traded"]:
+        # Some contracts were closed outside this bot (expiry guard, manual
+        # close) at a price it can't see; IBKR's own fills have the real total.
+        logger.warning("%s: bot closed %d of %d contracts — the other %d were closed elsewhere; journal P&L covers "
+                       "only the bot's %d", symbol, filled, pos["traded"], pos["traded"] - filled, filled)
+        if filled == 0:
+            reason = "already_flat"
+    journal.close_credit_orb(pos["id"], cost, reason, realized)
+    journal.log_order(symbol, "CLOSE_CREDIT_SPREAD", filled, "BAG", broker="IBKR", status="filled")
+    logger.info("%s: CLOSED credit spread (%s), %d contracts, cost %.2f, P&L %.2f",
+                symbol, reason, filled, cost, realized)
+
+
 def close_spread(ib, journal: Journal, pos: dict, symbol: str, reason: str) -> bool:
     """Buy the spread back. Returns True once flat. Never buys back more
     than the account is actually short on the short leg."""
+    pos.setdefault("traded", pos["contracts"])
+    pos.setdefault("close_trades", [])
     short_held = -held_qty(ib, pos["short"].conId)
-    qty = max(0, min(pos["contracts"], int(short_held)))
+    qty = max(0, min(pos["traded"] - _close_fills(pos)[0], int(short_held)))
     if qty == 0:
-        journal.close_credit_orb(pos["id"], 0.0, "already_flat", pos.get("realized", 0.0))
-        logger.warning("%s: credit spread already flat at IBKR — marking closed", symbol)
+        _finish_close(journal, pos, symbol, reason)
         return True
     sb, sa, lb, la = _leg_quotes(ib, pos["short"], pos["long"], lenient=True)
     if lb == 0:
@@ -190,27 +223,22 @@ def close_spread(ib, journal: Journal, pos: dict, symbol: str, reason: str) -> b
         limit = round(value + 0.02 * (1 + pos["close_attempts"]), 2)  # more aggressive on each retry
         combo = _combo_contract(symbol, [(pos["short"], "BUY"), (pos["long"], "SELL")])
         trade = ib.placeOrder(combo, LimitOrder("BUY", qty, limit, tif="DAY"))  # positive = net debit
+    pos["close_trades"].append(trade)
     done = wait_for_fill(ib, trade, timeout=45)
     if not done:
         ib.cancelOrder(trade.order)
         ib.sleep(2)
     got = int(trade.orderStatus.filled)
     pos["close_attempts"] += 1
-    if got:
-        cost = abs(trade.orderStatus.avgFillPrice)
-        pos["realized"] = pos.get("realized", 0.0) + (pos["credit"] - cost) * got * CONTRACT_MULTIPLIER
-        pos["contracts"] -= got
-        pos["last_cost"] = cost
-        # The journal keeps the original size (contracts traded); what's left
-        # to close lives in memory, and a restart re-reads it from IBKR
-        # (close_spread clamps to the short leg actually held).
-    if pos["contracts"] > 0:
-        logger.warning("%s: close filled %d of %d — %d left, retrying", symbol, got, qty, pos["contracts"])
+    # The journal keeps the original size (contracts traded); what's left to
+    # close is traded minus every close order's fills (late fills included),
+    # clamped to the short leg IBKR actually shows — also after a restart.
+    left = pos["traded"] - _close_fills(pos)[0]
+    pos["contracts"] = left
+    if left > 0:
+        logger.warning("%s: close filled %d of %d — %d left, retrying", symbol, got, qty, left)
         return False
-    journal.close_credit_orb(pos["id"], pos.get("last_cost", 0.0), reason, pos["realized"])
-    journal.log_order(symbol, "CLOSE_CREDIT_SPREAD", qty, "BAG", broker="IBKR", status="filled")
-    logger.info("%s: CLOSED credit spread (%s), cost %.2f, P&L %.2f", symbol, reason, pos.get("last_cost", 0.0),
-                pos["realized"])
+    _finish_close(journal, pos, symbol, reason)
     return True
 
 

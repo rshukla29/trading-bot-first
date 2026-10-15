@@ -94,12 +94,16 @@ def enter_orb_trade(ib: IB, contract: Option, contracts: int) -> tuple[Trade, fl
     return trade, mid
 
 
-def exit_orb_trade(ib: IB, contract: Option, contracts: int, at_bid: bool = False) -> tuple[Trade, float]:
+def exit_orb_trade(ib: IB, contract: Option, contracts: int, at_bid: bool = False,
+                   quote=get_quote) -> tuple[Trade, float]:
     """Sells to close at the live mid, or at the bid on a retry (a cheap
     same-day option can sit unfilled at the mid for minutes while it
     decays). Returns (Trade, price_used). `contracts` must already be
-    clamped to what's actually held."""
-    bid, _, mid = get_quote(ib, contract)
+    clamped to what's actually held. `quote`: run_orb_bot passes its
+    streaming quote, since get_quote cancels the shared market-data
+    subscription (2026-10-15: "cancelMktData: No reqId found" after a close;
+    after a partial fill the bot would have watched a frozen price)."""
+    bid, _, mid = quote(ib, contract)
     price = bid if at_bid else mid
     order = LimitOrder("SELL", contracts, round(price, 2), tif="DAY")
     trade = ib.placeOrder(contract, order)

@@ -252,7 +252,7 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         return True
 
     retry = position.get("exit_attempts", 0) > 0
-    trade, _ = exit_orb_trade(ib, position["contract"], qty, at_bid=retry)
+    trade, _ = exit_orb_trade(ib, position["contract"], qty, at_bid=retry, quote=_quote)
     if not wait_for_fill(ib, trade):
         ib.cancelOrder(trade.order)
         ib.sleep(2)  # let a fill that raced the cancel arrive before reading it

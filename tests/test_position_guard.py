@@ -47,7 +47,7 @@ def test_partial_fill_then_retry_never_oversells(monkeypatch):
     sells = []
     fills = iter([3, 7])  # attempt 1 fills 3 of 10; attempt 2 fills all 7
 
-    def fake_exit(ib, contract, qty, at_bid=False):
+    def fake_exit(ib, contract, qty, at_bid=False, quote=None):
         n = next(fills)
         sells.append((qty, n, at_bid))
         held["qty"] -= n
