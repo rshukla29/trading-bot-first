@@ -445,18 +445,38 @@ def record_entry_iv(ib, journal: Journal, position_id: int, fill: float, spot: f
                 fill_iv * 100, model_iv * 100, vix, fill_iv / model_iv)
 
 
+SHORT_GRACE_SECONDS = 60.0
+_short_first_seen: dict[int, float] = {}
+
+
 def repair_short_options(ib, journal: Journal, symbols: list[str]) -> None:
     """ORB only ever buys options. Any short option on an ORB symbol that
-    isn't an iron condor leg is a mistake — buy it back immediately."""
+    isn't an iron condor or credit-spread leg is a mistake — buy it back,
+    but only once it has been there SHORT_GRACE_SECONDS: another bot's
+    order can be mid-fill (2026-10-19: 4 of the condor's 802 calls were
+    bought back 5s before its journal row existed)."""
     allowed = intended_short_conids(journal)
-    for pos in unexpected_shorts(ib.positions(), allowed):
-        if pos.contract.secType == "OPT" and pos.contract.symbol in symbols:
-            trade = buy_back(ib, pos)
-            if wait_for_fill(ib, trade, timeout=60):
-                logger.error("%s: unintended short bought back @ %.2f",
-                             pos.contract.localSymbol, trade.orderStatus.avgFillPrice)
-                journal.log_order(pos.contract.symbol, "BUY_TO_CLOSE_SHORT", int(abs(pos.position)), "OPT",
-                                  broker="IBKR", status="filled")
+    now = _now_et().timestamp()
+    shorts = [p for p in unexpected_shorts(ib.positions(), allowed)
+              if p.contract.secType == "OPT" and p.contract.symbol in symbols]
+    current = {p.contract.conId for p in shorts}
+    for con_id in list(_short_first_seen):
+        if con_id not in current:
+            del _short_first_seen[con_id]
+    for pos in shorts:
+        first = _short_first_seen.setdefault(pos.contract.conId, now)
+        if first == now:
+            logger.warning("%s: short x%d not owned by any bot — buying back if still there in %.0fs",
+                           pos.contract.localSymbol, abs(pos.position), SHORT_GRACE_SECONDS)
+        if now - first < SHORT_GRACE_SECONDS:
+            continue
+        del _short_first_seen[pos.contract.conId]
+        trade = buy_back(ib, pos)
+        if wait_for_fill(ib, trade, timeout=60):
+            logger.error("%s: unintended short bought back @ %.2f",
+                         pos.contract.localSymbol, trade.orderStatus.avgFillPrice)
+            journal.log_order(pos.contract.symbol, "BUY_TO_CLOSE_SHORT", int(abs(pos.position)), "OPT",
+                              broker="IBKR", status="filled")
 
 
 def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStrategy, state: dict) -> None:

@@ -168,6 +168,14 @@ def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) ->
         logger.info("%s: computed 0 contracts, skipping", symbol)
         return
 
+    # Pending row first: the short legs are intended from the moment they can
+    # fill (ORB's short-option guard checks every 5s).
+    pid = journal.open_condor_position(
+        symbol, datetime.now(timezone.utc).isoformat(), legs.expiry,
+        legs.call_short.strike, legs.call_long.strike, legs.put_short.strike, legs.put_long.strike,
+        legs.call_short.conId, legs.call_long.conId, legs.put_short.conId, legs.put_long.conId,
+        credit_estimate, contracts, status="pending",
+    )
     filled_n, credit_sum = 0, 0.0
     for limit in condor_open_ladder(ib, legs):
         trade, _ = open_condor(ib, symbol, legs, contracts - filled_n, limit)
@@ -181,16 +189,12 @@ def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) ->
         if filled_n == contracts:
             break
     if filled_n == 0:
+        journal.cancel_condor(pid, "not_filled")
         logger.warning("%s: open order did not fill at mid or halfway to natural — will retry next run", symbol)
         return
     contracts = filled_n
     actual_credit = credit_sum / filled_n
-    journal.open_condor_position(
-        symbol, datetime.now(timezone.utc).isoformat(), legs.expiry,
-        legs.call_short.strike, legs.call_long.strike, legs.put_short.strike, legs.put_long.strike,
-        legs.call_short.conId, legs.call_long.conId, legs.put_short.conId, legs.put_long.conId,
-        actual_credit, contracts,
-    )
+    journal.confirm_condor(pid, datetime.now(timezone.utc).isoformat(), actual_credit, contracts)
     journal.log_order(symbol, "OPEN_CONDOR", contracts, "COMBO", broker="IBKR", status="filled")
     logger.info("%s: OPENED condor, %d contracts, actual credit=%.2f, expiry %s", symbol, contracts, actual_credit, legs.expiry)
 

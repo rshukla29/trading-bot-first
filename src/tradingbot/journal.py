@@ -296,21 +296,45 @@ class Journal:
         put_long_conid: int,
         credit_received: float,
         contracts: int,
+        status: str = "open",
     ) -> int:
+        """run_iron_condor_bot writes the row as 'pending' *before* sending
+        the order, then confirms it — so ORB's short-option guard knows the
+        sold legs are intended from the moment they can fill. 2026-10-19: the
+        row was written only after the fill, and the guard bought back 4 of
+        the 10 short 802 calls while the order was still filling."""
         with self._connect() as conn:
             cur = conn.execute(
                 """INSERT INTO condor_positions
                    (symbol, entry_date, expiry, call_short_strike, call_long_strike,
                     put_short_strike, put_long_strike, call_short_conid, call_long_conid,
                     put_short_conid, put_long_conid, credit_received, contracts, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     symbol, entry_date, expiry, call_short_strike, call_long_strike,
                     put_short_strike, put_long_strike, call_short_conid, call_long_conid,
-                    put_short_conid, put_long_conid, credit_received, contracts,
+                    put_short_conid, put_long_conid, credit_received, contracts, status,
                 ),
             )
             return cur.lastrowid
+
+    def confirm_condor(self, position_id: int, entry_date: str, credit_received: float, contracts: int) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE condor_positions SET status='open', entry_date=?, credit_received=?, contracts=? WHERE id=?",
+                (entry_date, credit_received, contracts, position_id),
+            )
+
+    def cancel_condor(self, position_id: int, reason: str) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE condor_positions SET status='cancelled', exit_reason=? WHERE id=?",
+                         (reason, position_id))
+
+    def condor_rows_with_shorts(self) -> list[sqlite3.Row]:
+        """Open AND pending condors: the ones whose short legs are intended."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute("SELECT * FROM condor_positions WHERE status IN ('open', 'pending')").fetchall()
 
     def open_condor_positions(self, symbol: str | None = None) -> list[sqlite3.Row]:
         with self._connect() as conn:
@@ -328,7 +352,8 @@ class Journal:
         enforce entry cadence even across closed positions."""
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT entry_date FROM condor_positions WHERE symbol=? ORDER BY entry_date DESC LIMIT 1",
+                "SELECT entry_date FROM condor_positions WHERE symbol=? AND status IN ('open', 'closed') "
+                "ORDER BY entry_date DESC LIMIT 1",
                 (symbol,),
             ).fetchone()
             return row[0] if row else None

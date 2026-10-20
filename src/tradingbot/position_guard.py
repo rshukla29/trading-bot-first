@@ -38,7 +38,7 @@ def intended_short_conids(journal: Journal) -> set[int]:
     """Contracts that are meant to be short: the sold legs of open iron
     condors and open ORB credit spreads."""
     conids: set[int] = set()
-    for row in journal.open_condor_positions():
+    for row in journal.condor_rows_with_shorts():
         conids.add(row["call_short_conid"])
         conids.add(row["put_short_conid"])
     for row in journal.open_credit_orb_rows():
