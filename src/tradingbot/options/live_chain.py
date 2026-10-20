@@ -51,7 +51,10 @@ def get_quote(ib: IB, contract, wait_seconds: float = 3.0) -> tuple[float, float
     ib.sleep(wait_seconds)
     bid, ask = ticker.bid, ticker.ask
     ib.cancelMktData(contract)
-    if bid is None or ask is None or bid <= 0 or ask <= 0:
+    # NaN fails every comparison, so `nan <= 0` is False: check it explicitly.
+    # 2026-10-20: HAS quoted nan/nan for 80 minutes and Trend Join's exits
+    # compared against nan instead of falling back to the last bar.
+    if bid is None or ask is None or bid != bid or ask != ask or bid <= 0 or ask <= 0:
         raise ValueError(f"No valid live quote for {contract.localSymbol or contract}: bid={bid} ask={ask}")
     return bid, ask, (bid + ask) / 2
 

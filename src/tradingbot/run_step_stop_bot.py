@@ -116,6 +116,7 @@ def main() -> None:
                 current = max(t.order.auxPrice for t in stops)
                 new_stop = plan_stop_raise(
                     pos.avgCost, price, current, settings.step_stop_pct, settings.step_stop_buffer_pct,
+                    max_loss_pct=settings.stop_loss_pct,
                 )
                 if new_stop is None:
                     continue

@@ -97,3 +97,16 @@ def test_credit_close_already_flat_with_no_bot_fills(monkeypatch):
            "credit": 0.19, "right": "P", "close_attempts": 0}
     assert cob.close_spread(None, j, pos, "SPY", "close_1550") is True
     assert j.closed == [("already_flat", 0.0, 0.0)]
+
+
+def test_get_quote_rejects_nan_so_callers_fall_back():
+    # 2026-10-20: HAS quoted nan/nan; `nan <= 0` is False, so it passed as a price.
+    import pytest
+    from tradingbot.options.live_chain import get_quote
+    ticker = SimpleNamespace(bid=float("nan"), ask=float("nan"))
+    ib = SimpleNamespace(reqMktData=lambda c, genericTickList="", snapshot=False: ticker,
+                         sleep=lambda s: None, cancelMktData=lambda c: None)
+    with pytest.raises(ValueError):
+        get_quote(ib, SimpleNamespace(localSymbol="HAS"))
+    ticker.bid, ticker.ask = 109.20, 109.24
+    assert get_quote(ib, SimpleNamespace(localSymbol="HAS"))[2] == pytest.approx(109.22)

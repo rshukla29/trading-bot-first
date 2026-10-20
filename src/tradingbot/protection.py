@@ -49,10 +49,23 @@ def check_protection(
 
 def plan_stop_raise(
     avg_cost: float, price: float, current_stop: float, step_pct: float, buffer_pct: float,
+    max_loss_pct: float | None = None,
 ) -> float | None:
     """New (higher) stop level from the 10% step rule, or None to leave
-    the stop alone. Never returns a level at or below the current stop."""
-    level = step_trailing_stop(avg_cost, price, step_pct, buffer_pct)
+    the stop alone. Never returns a level at or below the current stop.
+
+    max_loss_pct: also lift a stop that sits further below the real fill
+    cost than the documented max loss. Bracket stops are priced off the
+    signal close, but the entry fills at the next open — 2026-10-20: LLY
+    cost 1265.93 with its stop at 1116.31 (-11.8%), INTC -14.2%. Skipped
+    while the price is within the buffer of that floor, so lifting the stop
+    can't trigger it on the spot."""
+    candidates = [step_trailing_stop(avg_cost, price, step_pct, buffer_pct)]
+    if max_loss_pct:
+        floor = round(avg_cost * (1 - max_loss_pct), 2)
+        if price > floor * (1 + buffer_pct):
+            candidates.append(floor)
+    level = max((c for c in candidates if c is not None), default=None)
     if level is None or level <= current_stop:
         return None
     return level

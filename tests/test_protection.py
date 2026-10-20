@@ -186,3 +186,17 @@ def test_bracket_waits_for_ibkr_acknowledgement_and_flags_a_lost_order():
     assert await_ack(ib, trades, timeout=1.0) is False
     ib.ack_status = "PreSubmitted"
     assert await_ack(ib, place_bracket_buy(ib, "GRMN", 7, 268.44, 0.10), timeout=1.0) is True
+
+
+def test_stop_lifted_to_max_loss_from_real_cost():
+    # LLY 2026-10-20: cost 1265.93, stop 1116.31 (priced off the signal close) = -11.8%.
+    assert plan_stop_raise(1265.93, 1250.0, 1116.31, 0.10, 0.01, max_loss_pct=0.10) == 1139.34
+
+
+def test_stop_floor_never_loosens_or_fires_on_the_spot():
+    # LRCX: stop 258.23 is tighter than cost x 0.9 (248.36) -> leave it.
+    assert plan_stop_raise(275.96, 270.0, 258.23, 0.10, 0.01, max_loss_pct=0.10) is None
+    # Price already at the floor: lifting the stop would sell immediately -> leave it.
+    assert plan_stop_raise(1265.93, 1140.0, 1116.31, 0.10, 0.01, max_loss_pct=0.10) is None
+    # The step rule still wins once it's higher.
+    assert plan_stop_raise(10.0, 11.10, 9.00, 0.10, 0.01, max_loss_pct=0.10) == 11.00

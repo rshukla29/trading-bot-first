@@ -100,7 +100,10 @@ def section_account(day: date, ib) -> str:
         ct.insert(4, "avg_sold", [round(x, 2) for _, x in prices])
         ct = ct.drop(columns=["price", "commission"])
     out.append(f"\nClosed fills today (IBKR fills; realized P&L total {ct['realized_pnl'].sum():.2f} — options that "
-               f"expired worthless have no fill, so their cost is missing here):\n\n" + md_table(ct))
+               f"expired worthless have no fill, so their cost is missing here). avg_bought is backed out of IBKR's "
+               f"realized P&L, so it includes the opening commission (a 1.38 fill shows as 1.39); realized_pnl is "
+               f"after all commissions. The bots' journals record actual fill prices and P&L before commissions, "
+               f"so a journal-vs-IBKR gap of about the commissions is expected, not a bug:\n\n" + md_table(ct))
     out.append("\n" + strategy_pnl(day))
     if ib is not None:
         pos = [dict(symbol=p.contract.localSymbol or p.contract.symbol, type=p.contract.secType, qty=p.position,
@@ -130,7 +133,10 @@ def strategy_pnl(day: date) -> str:
                        "AND exit_ts LIKE ?"),
     ):
         rows.append(dict(strategy=name, realized=float(q(sql, (d + "%",)).iloc[0, 0])))
-    stocks = q("SELECT symbol, realized_pnl FROM closed_trades WHERE date=? AND symbol NOT LIKE '% %'", (d,))
+    # Stock fills not already counted by Trend Join's own journal row
+    # (2026-10-20: HAS was in both, double-counting it).
+    stocks = q("SELECT symbol, realized_pnl FROM closed_trades WHERE date=? AND symbol NOT LIKE '% %' "
+               "AND symbol NOT IN (SELECT symbol FROM trend_join_positions WHERE exit_ts LIKE ?)", (d, d + "%"))
     rows.append(dict(strategy="Stocks (RSI(2), MA, manual — IBKR fills)", realized=float(stocks["realized_pnl"].sum())))
     df = pd.DataFrame(rows)
     total = df["realized"].sum()
