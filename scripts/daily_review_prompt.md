@@ -33,6 +33,13 @@ Which numbers to use:
 - For P&L, use the "Realized P&L by strategy (journals; complete trades)" table. The IBKR "Closed fills" total
   leaves out options that expired worthless (no fill), so it overstates credit-spread days.
 - For ORB vs the backtest, use only the "Current rules" line; older-rule trades are not comparable.
+- Journal P&L is **before** commissions; IBKR's realized_pnl is **after** them. The "Closed fills" avg_bought /
+  avg_sold prices are backed out of IBKR's realized P&L, so they include the opening commission and differ from
+  the real fill price by about $0.01 per option share (a 1.38 fill shows as 1.39; a 0.145 spread credit can show
+  as ~0.13 across its legs). A journal-vs-IBKR gap of roughly $0.65 per option contract per fill (ORB: 2 fills
+  per contract; a credit spread: 4 leg fills per contract) is the commissions — **not a bug, don't report it**.
+  Only report a mismatch if it is clearly bigger than the commissions, or the journal's contracts, strikes or
+  direction disagree with the fills. A credit spread's credit is the average over its fills (log "attempt" lines).
 
 Known log patterns (not problems by themselves):
 - `Error 202 ... Order Canceled - reason:` (blank reason) right after a "did not fill" / timeout line is the bot
