@@ -125,7 +125,7 @@ def main() -> None:
                     ib.placeOrder(t.contract, t.order)
                 gain = (price / pos.avgCost - 1) * 100
                 logger.info(
-                    "%s: +%.1f%% (price %.2f, cost %.2f) — stop raised %.2f -> %.2f",
+                    "%s: %+.1f%% (price %.2f, cost %.2f) — stop raised %.2f -> %.2f",
                     symbol, gain, price, pos.avgCost, current, new_stop,
                 )
                 journal.log_order(symbol, "SELL", int(pos.position), "STP_RAISE", broker="IBKR",
