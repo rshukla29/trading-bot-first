@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Snapshot postmarket 2026-10-22</title><style>
+body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 24px; color: #1a1a1a; }
+h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 28px; }
+table { border-collapse: collapse; width: 100%; max-width: 800px; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; font-size: 13px; }
+th { background: #f4f4f4; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+.pos { color: #0a7a2f; } .neg { color: #b3261e; }
+.empty { color: #888; font-style: italic; }
+.warn { color: #b3261e; font-weight: bold; }
+</style></head><body>
+<h1>Trading bot snapshot: postmarket — 2026-10-22 (account DUT090413)</h1>
+<h2>Open orders</h2>
+<table><tr><th>Symbol</th><th>Action</th><th>Qty</th><th>Type</th><th>Price</th><th>Status</th></tr>
+<tr><td>V</td><td>SELL</td><td>5</td><td>STP</td><td>357.48</td><td>PreSubmitted</td></tr>
+<tr><td>CSCO</td><td>SELL</td><td>18</td><td>STP</td><td>97.94</td><td>PreSubmitted</td></tr>
+<tr><td>SNPS</td><td>SELL</td><td>4</td><td>STP</td><td>409.12</td><td>PreSubmitted</td></tr>
+<tr><td>ADM</td><td>SELL</td><td>25</td><td>STP</td><td>71.42</td><td>PreSubmitted</td></tr>
+<tr><td>LLY</td><td>SELL</td><td>1</td><td>STP</td><td>1139.34</td><td>PreSubmitted</td></tr>
+</table>
+<h2>Open positions &amp; unrealized P&amp;L</h2>
+<table><tr><th>Symbol</th><th>Qty</th><th>Avg Price</th><th>Mkt Price</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>
+<tr><td>ADM</td><td>25</td><td>79.58</td><td>79.89</td><td>1997.25</td><td class='pos'>7.75</td></tr>
+<tr><td>CSCO</td><td>18</td><td>108.83</td><td>104.86</td><td>1887.48</td><td class='neg'>-71.38</td></tr>
+<tr><td>LLY</td><td>1</td><td>1265.93</td><td>1307.00</td><td>1307.00</td><td class='pos'>41.07</td></tr>
+<tr><td>SNPS</td><td>4</td><td>451.05</td><td>424.20</td><td>1696.80</td><td class='neg'>-107.40</td></tr>
+<tr><td>SPY 20261022 770.0C</td><td>2</td><td>0.17</td><td>0.00</td><td>0.00</td><td class='neg'>-34.95</td></tr>
+<tr><td>SPY 20261127 746.0P</td><td>10</td><td>5.08</td><td>7.63</td><td>7629.49</td><td class='pos'>2552.78</td></tr>
+<tr><td>SPY 20261127 751.0P</td><td>-10</td><td>5.72</td><td>8.75</td><td>-8752.34</td><td class='neg'>-3029.17</td></tr>
+<tr><td>SPY 20261127 815.0C</td><td>-10</td><td>2.07</td><td>0.60</td><td>-602.44</td><td class='pos'>1470.81</td></tr>
+<tr><td>SPY 20261127 820.0C</td><td>10</td><td>1.47</td><td>0.42</td><td>418.75</td><td class='neg'>-1047.96</td></tr>
+<tr><td>SPY 20261218 739.0P</td><td>10</td><td>8.75</td><td>9.72</td><td>9718.02</td><td class='pos'>972.35</td></tr>
+<tr><td>SPY 20261218 744.0P</td><td>-10</td><td>9.59</td><td>10.73</td><td>-10732.22</td><td class='neg'>-1138.09</td></tr>
+<tr><td>SPY 20261218 802.0C</td><td>-10</td><td>4.85</td><td>4.11</td><td>-4114.50</td><td class='pos'>736.80</td></tr>
+<tr><td>SPY 20261218 807.0C</td><td>10</td><td>3.65</td><td>3.11</td><td>3114.00</td><td class='neg'>-531.67</td></tr>
+<tr><td>V</td><td>5</td><td>397.20</td><td>414.21</td><td>2071.05</td><td class='pos'>85.05</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='neg'><b>-94.01</b></td></tr>
+</table>
+<p class='empty'>Avg Price = average price paid per share (for options, per share of the contract — x100 per contract), the same unit as Mkt Price.</p>
+<h2>Stop-loss coverage (stocks)</h2>
+<table><tr><th>Symbol</th><th>Owner</th><th>Qty</th><th>Stop Qty</th><th>Stop Price</th><th>Status</th></tr>
+<tr><td>ADM</td><td>rsi2</td><td>25</td><td>25</td><td>71.42</td><td>protected</td></tr>
+<tr><td>CSCO</td><td>rsi2</td><td>18</td><td>18</td><td>97.94</td><td>protected</td></tr>
+<tr><td>LLY</td><td>ma_crossover</td><td>1</td><td>1</td><td>1139.34</td><td>protected</td></tr>
+<tr><td>SNPS</td><td>rsi2</td><td>4</td><td>4</td><td>409.12</td><td>protected</td></tr>
+<tr><td>V</td><td>ma_crossover</td><td>5</td><td>5</td><td>357.48</td><td>protected</td></tr>
+</table>
+<h2>Fibonacci levels (20-day swing)</h2>
+<table><tr><th>Symbol</th><th>Last</th><th>Swing high</th><th>Swing low</th><th>38.2%</th><th>50%</th><th>61.8%</th><th>127.2% up</th><th>161.8% up</th><th>127.2% down</th><th>Where price sits</th></tr>
+<tr><td>SPY</td><td>763.96</td><td>781.62</td><td>758.79</td><td>772.90</td><td>770.20</td><td>767.51</td><td>787.83</td><td>795.73</td><td>752.58</td><td>deep retracement (77%)</td></tr>
+<tr><td>ADM</td><td>79.84</td><td>84.28</td><td>78.10</td><td>81.92</td><td>81.19</td><td>80.46</td><td>85.96</td><td>88.10</td><td>76.42</td><td>deep retracement (72%)</td></tr>
+<tr><td>CSCO</td><td>104.89</td><td>118.65</td><td>103.58</td><td>112.89</td><td>111.12</td><td>109.34</td><td>122.75</td><td>127.96</td><td>99.48</td><td>deep retracement (91%)</td></tr>
+<tr><td>LLY</td><td>1306.69</td><td>1321.21</td><td>1131.21</td><td>1248.63</td><td>1226.21</td><td>1203.79</td><td>1372.89</td><td>1438.63</td><td>1079.53</td><td>shallow pullback (8%)</td></tr>
+<tr><td>SNPS</td><td>422.48</td><td>512.49</td><td>403.33</td><td>470.79</td><td>457.91</td><td>445.03</td><td>542.18</td><td>579.95</td><td>373.64</td><td>deep retracement (82%)</td></tr>
+<tr><td>V</td><td>414.34</td><td>414.60</td><td>356.75</td><td>392.50</td><td>385.68</td><td>378.85</td><td>430.34</td><td>450.35</td><td>341.01</td><td>shallow pullback (0%)</td></tr>
+</table>
+<p class='empty'>Retracements are measured down from the swing high; extensions project the swing range beyond the high (up) or low (down). Computed from IBKR daily bars — IBKR's API can't read chart drawings.</p>
+<h2>Closed positions P&amp;L (today)</h2>
+<table><tr><th>Symbol</th><th>Position</th><th>Qty</th><th>Avg Bought @</th><th>Avg Sold @</th><th>Net P&amp;L</th></tr>
+<tr><td>LRCX</td><td>long</td><td>6</td><td>275.96</td><td>234.71</td><td class='neg'>-248.51</td></tr>
+<tr><td>INTC</td><td>long</td><td>22</td><td>94.28</td><td>84.84</td><td class='neg'>-208.62</td></tr>
+<tr><td>SPY 20261022 768.0C</td><td>short</td><td>2</td><td>0.01</td><td>0.31</td><td class='pos'>57.30</td></tr>
+<tr><td>CSX</td><td>long</td><td>38</td><td>51.61</td><td>51.97</td><td class='pos'>12.78</td></tr>
+<tr><td>ALLE</td><td>long</td><td>11</td><td>175.87</td><td>176.40</td><td class='pos'>4.78</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='neg'><b>-382.27</b></td></tr>
+</table>
+<p class='empty'>Prices are per share (options: per share of the contract, x100 per contract). The closing price is IBKR's fill; the opening average is worked out from IBKR's realized P&amp;L, so it includes the opening commission. Net P&amp;L is after all commissions.</p>
+<h2>Account P&amp;L (today)</h2>
+<table><tr><td>Realized P&amp;L</td><td class='neg'>-382.27</td></tr><tr><td>Unrealized P&amp;L</td><td class='neg'>-87.38</td></tr><tr><td>Daily P&amp;L</td><td class='neg'>-467.37</td></tr></table>
+<h2>Overall</h2>
+<table><tr><td>Total Balance (Net Liquidation)</td><td>999,666.17</td></tr><tr><td>YTD P&amp;L (vs 1,000,000 baseline)</td><td class='neg'>-333.83 (-0.03%)</td></tr></table>
+</body></html>
