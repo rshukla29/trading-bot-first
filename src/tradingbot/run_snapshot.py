@@ -38,6 +38,7 @@ from tradingbot.journal import Journal, closed_trade_multiplier, closed_trade_pr
 from tradingbot.paths import dated_dir
 from tradingbot.position_guard import intended_short_conids, unexpected_shorts
 from tradingbot.protection import orphan_stops, working_stop_qty_by_symbol
+from tradingbot.strategy_pnl import strategy_pnl
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -270,6 +271,33 @@ def _render_closed_trades_section(trades: list[ClosedTrade], period_label: str) 
     return parts, total_realized
 
 
+def _render_strategy_pnl_section(start: date, end: date, period_label: str) -> list[str]:
+    """Realized P&L per strategy for the period (strategy_pnl.py)."""
+    parts = [f"<h2>P&amp;L by strategy ({escape(period_label)})</h2>"]
+    try:
+        df = strategy_pnl(settings.db_path, start, end)
+    except Exception as e:  # never let this section break the report
+        logger.exception("strategy P&L failed")
+        return parts + [f"<p class='warn'>Strategy P&amp;L unavailable: {escape(str(e))}</p>"]
+    parts.append("<table><tr><th>Strategy</th><th>Closed trades</th><th>Wins</th><th>Win %</th>"
+                 "<th>Realized P&amp;L</th></tr>")
+    for r in df.itertuples():
+        win_pct = f"{r.wins / r.trades * 100:.0f}%" if r.trades else "—"
+        parts.append(f"<tr><td>{escape(r.strategy)}</td><td>{r.trades}</td><td>{r.wins}</td><td>{win_pct}</td>"
+                     f"<td class='{_pnl_class(r.realized)}'>{r.realized:.2f}</td></tr>")
+    total, trades, wins = df["realized"].sum(), int(df["trades"].sum()), int(df["wins"].sum())
+    total_win_pct = f"{wins / trades * 100:.0f}%" if trades else "—"
+    parts.append(f"<tr><td><b>TOTAL</b></td><td><b>{trades}</b></td><td><b>{wins}</b></td>"
+                 f"<td><b>{total_win_pct}</b></td><td class='{_pnl_class(total)}'><b>{total:.2f}</b></td></tr>")
+    parts.append("</table>")
+    parts.append("<p class='empty'>Closed trades only — open positions (e.g. iron condors, stocks still held) are in "
+                 "the positions table. Option strategies, Trend Join and Stock ORB come from each bot's journal "
+                 "(option P&amp;L before commissions); MA-crossover and RSI(2) from IBKR's stock fills (after "
+                 "commissions), matched to the bot that bought them; Manual / other is everything else (e.g. your "
+                 "own trades).</p>")
+    return parts
+
+
 FIB_LOOKBACK_DAYS = 20
 
 
@@ -368,6 +396,7 @@ def build_report(
 
     closed_parts, _ = _render_closed_trades_section(closed_trades, "today")
     parts.extend(closed_parts)
+    parts.extend(_render_strategy_pnl_section(date.today(), date.today(), "today"))
 
     net_liq = client.net_liquidation()
     ytd_pnl = net_liq - settings.account_starting_balance
@@ -427,6 +456,8 @@ def build_period_report(client: IBKRClient, journal: Journal, period_label: str,
 
     closed_parts, realized_period = _render_closed_trades_section(closed_trades, period_label)
     parts.extend(closed_parts)
+    parts.extend(_render_strategy_pnl_section(period_start, today, f"{period_label}, {period_start.isoformat()} "
+                                                                    f"to {today.isoformat()}"))
 
     total_period_pnl = realized_period + unrealized_now
 

@@ -200,3 +200,43 @@ def test_stop_floor_never_loosens_or_fires_on_the_spot():
     assert plan_stop_raise(1265.93, 1140.0, 1116.31, 0.10, 0.01, max_loss_pct=0.10) is None
     # The step rule still wins once it's higher.
     assert plan_stop_raise(10.0, 11.10, 9.00, 0.10, 0.01, max_loss_pct=0.10) == 11.00
+
+
+# --- P&L by strategy (daily / weekly / monthly reports) ----------------------
+
+def test_strategy_pnl_splits_by_strategy_and_never_double_counts(tmp_path):
+    from datetime import date
+    from tradingbot.journal import Journal
+    from tradingbot.run_snapshot import _render_strategy_pnl_section
+    from tradingbot.strategy_pnl import strategy_pnl
+    db = str(tmp_path / "j.db")
+    j = Journal(db)
+    # ORB: exit 19:50 UTC on 10-20 = 10-20 ET
+    pid = j.open_orb_position("SPY", "2026-10-20T14:00:00+00:00", "20261020", 768, "C", 1, 1.38, 10, 764, 766)
+    j.close_orb_position(pid, "2026-10-20T14:02:25+00:00", 1.63, "fib_target", 250.0)
+    # Trend Join HAS: its own journal; its IBKR fill must not count again
+    tj = j.open_trend_join_position("HAS", "2026-10-20", 108.40, 18, 100.39, 1, "gap")
+    j.close_trend_join_position(tj, "eod_flatten", 14.76)
+    import sqlite3
+    with sqlite3.connect(db) as c:   # close_* stamps "now"; pin it to the trade's day
+        c.execute("UPDATE trend_join_positions SET exit_ts='2026-10-20T19:51:16+00:00' WHERE id=?", (tj,))
+    j.record_closed_trade("e1", "2026-10-20", "HAS", "SLD", 18, 109.22, 12.72)
+    # RSI(2) AMAT: bought by run_rsi2_bot, stopped out in two lots = one trade
+    j.log_signal("AMAT", "BUY", 432.0, "RSI(2)=1", source="run_rsi2_bot")
+    j.log_order("AMAT", "BUY", 4, "MKT+STP", broker="IBKR", status="submitted")
+    with sqlite3.connect(db) as c:   # bought after the 10-16 close
+        c.execute("UPDATE signals SET ts='2026-10-16T20:30:08+00:00' WHERE symbol='AMAT'")
+        c.execute("UPDATE orders SET ts='2026-10-16T20:30:10+00:00' WHERE symbol='AMAT'")
+    j.record_closed_trade("e2", "2026-10-20", "AMAT", "SLD", 3, 401.8, -90.0)
+    j.record_closed_trade("e3", "2026-10-20", "AMAT", "SLD", 1, 401.8, -32.83)
+    # A manual sale (no bot order)
+    j.record_closed_trade("e4", "2026-10-20", "ASTX", "SLD", 100, 5.0, 47.07)
+
+    df = strategy_pnl(db, date(2026, 10, 20), date(2026, 10, 20)).set_index("strategy")
+    assert df.loc["ORB (SPY 0DTE options)", "realized"] == 250.0
+    assert df.loc["Trend Join", "realized"] == 14.76                  # journal, not +12.72 again
+    assert (df.loc["RSI(2)", "trades"], df.loc["RSI(2)", "realized"]) == (1, -122.83)
+    assert df.loc["Manual / other", "realized"] == 47.07
+    assert round(df["realized"].sum(), 2) == 189.0
+    html = "\n".join(_render_strategy_pnl_section(date(2026, 10, 20), date(2026, 10, 20), "today"))
+    assert "P&amp;L by strategy" in html   # renders (reads settings.db_path; content checked above)
