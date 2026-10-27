@@ -303,7 +303,10 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
 ```
 
 - **Daily** — 9:00am premarket and 4:30pm postmarket: open orders, open
-  positions with unrealized P&L, positions closed today, account P&L,
+  positions with unrealized P&L (average price per share, options too),
+  positions closed today (average bought and sold price per share and net
+  P&L — the bought price is worked out from IBKR's realized P&L, so it
+  includes the opening commission), account P&L,
   total balance, YTD P&L (vs. `ACCOUNT_STARTING_BALANCE`), and a
   **stop-loss coverage** table (each stock's owner and working stop, with
   an UNPROTECTED warning for any bot position missing one, plus a warning
@@ -314,6 +317,14 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
   drawings).
 - **Weekly** — Fridays after the close (Mon–Fri).
 - **Monthly** — last trading day of the month after the close.
+- **P&L by strategy** (all three reports) — closed trades, wins, win % and
+  realized P&L per strategy for the day / week / month, plus a total
+  ([strategy_pnl.py](src/tradingbot/strategy_pnl.py)). Strategies with
+  their own journal (the option strategies, Trend Join, ...) are read from
+  it (option P&L before commissions); MA-crossover and RSI(2) come from
+  IBKR's stock fills (after commissions), matched to the bot that bought
+  them; anything else — e.g. your own manual trades — is "Manual / other".
+  Closed trades only: open positions stay in the positions table.
 
 ## Daily review (4:50pm)
 
