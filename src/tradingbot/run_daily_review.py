@@ -131,12 +131,15 @@ def strategy_pnl(day: date) -> str:
                         "AND exit_date LIKE ?"),
         ("Trend Join", "SELECT COALESCE(SUM(realized_pnl),0) FROM trend_join_positions WHERE status='closed' "
                        "AND exit_ts LIKE ?"),
+        ("Stock ORB", "SELECT COALESCE(SUM(realized_pnl),0) FROM stock_orb_positions WHERE status='closed' "
+                      "AND exit_ts LIKE ?"),
     ):
         rows.append(dict(strategy=name, realized=float(q(sql, (d + "%",)).iloc[0, 0])))
-    # Stock fills not already counted by Trend Join's own journal row
-    # (2026-10-20: HAS was in both, double-counting it).
+    # Stock fills not already counted by Trend Join's / Stock ORB's own
+    # journal rows (2026-10-20: HAS was in both, double-counting it).
     stocks = q("SELECT symbol, realized_pnl FROM closed_trades WHERE date=? AND symbol NOT LIKE '% %' "
-               "AND symbol NOT IN (SELECT symbol FROM trend_join_positions WHERE exit_ts LIKE ?)", (d, d + "%"))
+               "AND symbol NOT IN (SELECT symbol FROM trend_join_positions WHERE exit_ts LIKE ?) "
+               "AND symbol NOT IN (SELECT symbol FROM stock_orb_positions WHERE exit_ts LIKE ?)", (d, d + "%", d + "%"))
     rows.append(dict(strategy="Stocks (RSI(2), MA, manual — IBKR fills)", realized=float(stocks["realized_pnl"].sum())))
     df = pd.DataFrame(rows)
     total = df["realized"].sum()
@@ -214,7 +217,32 @@ def section_credit_orb(day: date) -> str:
         if not marks.empty:
             marks["ts"] = pd.to_datetime(marks["ts"], utc=True).dt.tz_convert(ET).dt.strftime("%H:%M")
             out.append("\nLeg quote marks:\n\n" + md_table(marks))
-    keep = [ln for ln in read_log("credit_orb", day) if re.search(r"breakout|SELL|OPENED|CLOSED|not filled|ERROR|WARNING", ln)]
+    # "skipping" so a breakout declined on the credit floor shows its reason
+    # (the review kept flagging the cut-off excerpt, 10-14 to 10-20).
+    keep = [ln for ln in read_log("credit_orb", day)
+            if re.search(r"breakout|skipping|SELL|OPENED|CLOSED|not filled|ERROR|WARNING", ln)]
+    out.append("\nKey log lines:\n\n```\n" + "\n".join(keep[:40]) + "\n```\n")
+    return "\n".join(out)
+
+
+def section_stock_orb(day: date) -> str:
+    out = ["## Strategy 7 — Stock ORB (S&P 500, day-trader-skill pack rules, paper experiment)\n",
+           f"Rules: 15-min range, first 5-min close above its high 9:45-15:30, stop at the range midpoint, "
+           f"target {settings.stock_orb_target_r:g}R, flat by 15:55; ${settings.stock_orb_max_loss_per_trade:.0f} "
+           f"risk/trade, ${settings.stock_orb_max_daily_loss:.0f}/day, {settings.stock_orb_max_trades_per_day} "
+           f"trades/day, ${settings.stock_orb_max_order_value:,.0f} max position. Our 60-day backtest showed no "
+           f"edge (~-0.08R/trade over all triggers); judge it on these real fills. The Time Machine is report-only.\n"]
+    pos = q("""SELECT symbol, trigger_bar, or_low, or_high, entry_price, qty, stop_price, target_price, status,
+               exit_price, exit_reason, realized_pnl, tm_mc_avg_r, tm_hist_trades, tm_hist_avg_r
+               FROM stock_orb_positions WHERE trade_date=? ORDER BY id""", (day.isoformat(),))
+    out.append(md_table(pos))
+    allp = q("SELECT realized_pnl FROM stock_orb_positions WHERE status='closed'")
+    if not allp.empty:
+        pnl = allp["realized_pnl"]
+        out.append(f"\nAll Stock ORB trades so far: {len(pnl)}, win {(pnl > 0).mean() * 100:.0f}%, "
+                   f"net {pnl.sum():.2f}\n")
+    keep = [ln for ln in read_log("stock_orb", day)
+            if re.search(r"breakout|BOUGHT|hit|CLOSED|Time Machine|skipping|not confirmed|ERROR|WARNING", ln)]
     out.append("\nKey log lines:\n\n```\n" + "\n".join(keep[:40]) + "\n```\n")
     return "\n".join(out)
 
@@ -239,7 +267,8 @@ def section_other(day: date) -> str:
 def section_health(day: date) -> str:
     out = ["## Health: errors and warnings in today's logs\n"]
     names = sorted(p.name[: -len(f"_{day.isoformat()}.log")] for p in Path("logs").glob(f"*_{day.isoformat()}.log"))
-    for expected in ("orb", "credit_orb", "trend_join", "step_stop", "iron_condor", "rsi2", "ma_crossover", "expiry_guard"):
+    for expected in ("orb", "credit_orb", "stock_orb", "trend_join", "step_stop", "iron_condor", "rsi2",
+                     "ma_crossover", "expiry_guard"):
         if expected not in names:
             names.append(expected)
     for name in names:
@@ -319,7 +348,7 @@ def main() -> None:
     sections = [f"# Daily facts — {day.isoformat()} ({day.strftime('%A')})\n",
                 "Generated after the close by run_daily_review.py. Read-only data for the daily review.\n"]
     for fn, args in ((section_account, (day, ib)), (section_orb, (day, model)), (section_credit_orb, (day,)),
-                     (section_other, (day,)), (section_health, (day,))):
+                     (section_stock_orb, (day,)), (section_other, (day,)), (section_health, (day,))):
         try:
             sections.append(fn(*args))
         except Exception as e:

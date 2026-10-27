@@ -15,6 +15,7 @@ you explicitly opt into live money.**
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 | 6 | ORB credit spreads *(paper experiment)* | SPY 0DTE put/call credit spreads | Sells premium on the far side of the range | 10:20am–4:00pm — `CreditOrbTradingBot` | `run_credit_orb_bot` |
+| 7 | Stock ORB *(paper experiment)* | S&P 500 stocks | Intraday opening-range breakout ([day-trader-skill](https://github.com/Jakeschincariol/day-trader-skill) rules) | 9:30am–4:00pm — `StockOrbTradingBot` | `run_stock_orb_bot` |
 | — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Raises stops in 10% profit steps | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
 
 Run any of them manually with `python -m tradingbot.<entrypoint>`.
@@ -26,6 +27,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 | 9:00am | `SnapshotPremarketBot` | Premarket report |
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
 | 9:30am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout (filtered), step-up lock; entries 9:45–12:00, flat by 3:55pm |
+| 9:30am → 4:00pm | `StockOrbTradingBot` | S&P 500 opening-range breakouts; entries 9:45–3:30 (max 3), stop/target at IBKR, flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
 | 10:20am → 4:00pm | `CreditOrbTradingBot` | 60-min range; entry 10:30–12:00; spread bought back 3:50pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
@@ -231,6 +233,37 @@ Source: Option Alpha and Quantish published SPX 0DTE ORB research
   bot records both legs' real bid/ask every ~5 minutes
   (`credit_orb_marks`) to build the data to judge it properly.
 
+### 7. Stock ORB (S&P 500 intraday, paper experiment since 2026-10-27)
+
+Code: [strategy/stock_orb.py](src/tradingbot/strategy/stock_orb.py) (rules +
+Time Machine, shared with the backtest),
+[run_stock_orb_bot.py](src/tradingbot/run_stock_orb_bot.py). Source: the
+published rules of Jake Schincariol's
+[day-trader-skill](https://github.com/Jakeschincariol/day-trader-skill)
+pack (MIT), run exactly as published — all values are the pack's defaults.
+
+- **Entry:** 15-min opening range (9:30–9:45). The first 5-min bar that
+  *closes* above the range high (a wick doesn't count), ending 9:45–3:30.
+  Long only. Every 5-min bar the bot scans the S&P 500 on Yahoo (the pack
+  scans ~5,900 stocks — too many for IBKR's or Yahoo's limits every 5
+  minutes), ranks fresh breakouts by dollars traded, and re-checks each on
+  IBKR's own bars before buying.
+- **Exit:** stop at the range midpoint, target at 2R, both at IBKR as a
+  bracket (one cancels the other); anything left is sold at 3:55pm.
+- **Risk (trader-risk defaults):** $50 per trade, $150 of stop-risk a day,
+  3 trades a day, $4,000 max position, one entry per symbol per day. Skips
+  the MA/RSI(2) watchlists, anything already held (manual positions
+  included) and Trend Join's symbols.
+- **Time Machine (report-only):** after each entry, replays that stock's
+  last 60 days of 5-min bars — every past day the setup triggered, plus
+  10,000 simulated rest-of-day paths — and logs/journals the verdict. It
+  never blocks or changes a trade.
+- **Why it's an experiment:** our backtest of the published rules on 60 days
+  of S&P 500 5-min data ([scripts/stock_orb_backtest.py](scripts/stock_orb_backtest.py))
+  shows no edge — about −0.08R per trade over ~16,000 triggers, and
+  −$1,044 for the 3-a-day version at these sizes. The owner chose to run it
+  as published and judge it on real fills.
+
 ### How the strategies stay out of each other's way
 
 - MA-crossover and RSI(2) watchlists don't overlap; RSI(2)'s scanner
@@ -252,6 +285,7 @@ Source: Option Alpha and Quantish published SPX 0DTE ORB research
   |---|---|
   | 1 | MA-crossover, RSI(2) (4:30pm), step-stop manager (9:30am–4:00pm) |
   | 90 | Expiry guard (3:57pm) |
+  | 93 | Stock ORB |
   | 95 | ORB credit spreads |
   | 96 | Iron condor |
   | 97 | Trend Join |

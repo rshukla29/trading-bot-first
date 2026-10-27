@@ -174,6 +174,7 @@ def _render_positions_section(portfolio) -> tuple[list[str], float]:
 def stock_owners(journal: Journal) -> dict[str, str]:
     """symbol -> which bot owns that stock position (absent = manual)."""
     owners = {row["symbol"]: "trend_join" for row in journal.open_trend_join_positions()}
+    owners.update({row["symbol"]: "stock_orb" for row in journal.open_stock_orb_positions()})
     for strategy in ("ma_crossover", "rsi2"):
         owners.update({s: strategy for s in journal.owned_stocks(strategy)})
     return owners

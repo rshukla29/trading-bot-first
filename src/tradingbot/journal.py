@@ -117,6 +117,34 @@ CREATE TABLE IF NOT EXISTS trend_join_positions (
     realized_pnl REAL
 );
 
+-- Strategy #7, Stock ORB (run_stock_orb_bot.py). One row per trade; the
+-- stop and target are bracket orders at IBKR. tm_* = the report-only Time
+-- Machine run at entry.
+CREATE TABLE IF NOT EXISTS stock_orb_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    entry_ts TEXT NOT NULL,
+    trigger_bar TEXT,
+    or_high REAL,
+    or_low REAL,
+    entry_price REAL NOT NULL,
+    qty INTEGER NOT NULL,
+    stop_price REAL NOT NULL,
+    target_price REAL NOT NULL,
+    stop_order_id INTEGER,
+    target_order_id INTEGER,
+    status TEXT NOT NULL DEFAULT 'open',
+    exit_ts TEXT,
+    exit_price REAL,
+    exit_reason TEXT,
+    realized_pnl REAL,
+    tm_summary TEXT,
+    tm_mc_avg_r REAL,
+    tm_hist_trades INTEGER,
+    tm_hist_avg_r REAL
+);
+
 -- Which daily stock bot (run_ibkr_bot = "ma_crossover", run_rsi2_bot =
 -- "rsi2") opened each stock position. IBKR positions carry no strategy
 -- tag, so without this a bot would manage (and could sell) any position on
@@ -568,6 +596,52 @@ class Journal:
                    SET status='closed', remaining=0, exit_ts=?, exit_reason=?, realized_pnl=?
                    WHERE id=?""",
                 (datetime.now(timezone.utc).isoformat(), exit_reason, realized_pnl, position_id),
+            )
+
+    def open_stock_orb_position(
+        self, symbol: str, trade_date: str, trigger_bar: str, or_high: float, or_low: float, entry_price: float,
+        qty: int, stop_price: float, target_price: float, stop_order_id: int | None, target_order_id: int | None,
+    ) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO stock_orb_positions
+                   (symbol, trade_date, entry_ts, trigger_bar, or_high, or_low, entry_price, qty, stop_price,
+                    target_price, stop_order_id, target_order_id, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')""",
+                (symbol, trade_date, datetime.now(timezone.utc).isoformat(), trigger_bar, or_high, or_low,
+                 entry_price, qty, stop_price, target_price, stop_order_id, target_order_id),
+            )
+            return cur.lastrowid
+
+    def open_stock_orb_positions(self) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute("SELECT * FROM stock_orb_positions WHERE status='open' ORDER BY id").fetchall()
+
+    def stock_orb_rows_on(self, trade_date: str) -> list[sqlite3.Row]:
+        """Every entry on `trade_date`, open or closed — trades/day, the daily
+        loss budget and one entry per symbol per day."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                "SELECT * FROM stock_orb_positions WHERE trade_date=? ORDER BY id", (trade_date,)
+            ).fetchall()
+
+    def set_stock_orb_time_machine(self, position_id: int, summary: str, mc_avg_r: float | None,
+                                   hist_trades: int | None, hist_avg_r: float | None) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE stock_orb_positions SET tm_summary=?, tm_mc_avg_r=?, tm_hist_trades=?, tm_hist_avg_r=? "
+                "WHERE id=?", (summary, mc_avg_r, hist_trades, hist_avg_r, position_id),
+            )
+
+    def close_stock_orb_position(self, position_id: int, exit_price: float, exit_reason: str,
+                                 realized_pnl: float) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE stock_orb_positions SET status='closed', exit_ts=?, exit_price=?, exit_reason=?,
+                   realized_pnl=? WHERE id=?""",
+                (datetime.now(timezone.utc).isoformat(), exit_price, exit_reason, realized_pnl, position_id),
             )
 
     def claim_stock(self, symbol: str, strategy: str) -> None:

@@ -305,6 +305,27 @@ class Settings(BaseSettings):
     credit_orb_close_time: str = "15:50"
     credit_orb_skip_weekdays: str = ""  # e.g. "2,4" skips Wed/Fri (Quantish refinement)
 
+    # Strategy #7 — Stock ORB (run_stock_orb_bot.py, rules in
+    # strategy/stock_orb.py), the published rules of the day-trader-skill
+    # pack. A paper experiment from 2026-10-27: our 60-day S&P 500 backtest
+    # (scripts/stock_orb_backtest.py) shows no edge, the owner chose to run
+    # it as published and judge it on real fills. All values are the pack's
+    # own defaults (trader-risk / trader-exit / trader-entry), unscaled.
+    stock_orb_enabled: bool = True
+    stock_orb_client_id: int = 93
+    stock_orb_or_minutes: int = 15
+    stock_orb_bar_minutes: int = 5
+    stock_orb_entry_start: str = "09:45"
+    stock_orb_entry_end: str = "15:30"
+    stock_orb_flatten_time: str = "15:55"
+    stock_orb_target_r: float = 2.0
+    stock_orb_min_price: float = 5.0
+    stock_orb_max_loss_per_trade: float = 50.0
+    stock_orb_max_daily_loss: float = 150.0
+    stock_orb_max_trades_per_day: int = 3
+    stock_orb_max_order_value: float = 4_000.0
+    stock_orb_time_machine: bool = True  # report-only: logged + journaled, never blocks a trade
+
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.
     live_trading: bool = False

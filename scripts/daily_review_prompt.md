@@ -14,7 +14,7 @@ no closing remarks). Start with the heading `# Daily review — {DATE}`, then ex
 Two or three sentences: total realized P&L, which strategies traded, the single most important thing that happened.
 
 ## Per strategy
-A short table: strategy | trades | P&L | matched the rules? | vs expectation. For ORB compare the live trades with the model replay and the rolling stats vs the backtest expectation. For the credit-spread experiment, note fills and what the quote marks show.
+A short table: strategy | trades | P&L | matched the rules? | vs expectation. For ORB compare the live trades with the model replay and the rolling stats vs the backtest expectation. For the credit-spread experiment, note fills and what the quote marks show. For Stock ORB (strategy 7, the day-trader-skill pack's published rules, a paper experiment the owner chose to run despite a no-edge backtest), check each trade followed the rules (trigger bar, midpoint stop, 2R target, 3:55 flatten, $50 risk) and report the running total; the Time Machine numbers are report-only — note whether its verdict matched the outcome, never recommend changing the rules from a handful of trades.
 
 ## Problems found
 Bugs, failed or unfilled orders, errors, unprotected positions, unexpected shorts, positions/orders that look wrong. Quote the evidence (log line or table row). Say "none" if none.
