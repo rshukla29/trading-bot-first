@@ -331,9 +331,10 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
 `DailyReviewBot` runs [scripts/run_daily_review_scheduled.ps1](scripts/run_daily_review_scheduled.ps1):
 
 1. [run_daily_review.py](src/tradingbot/run_daily_review.py) gathers the
-   day's facts (read-only): account and closed fills, every ORB trade with
-   its fill price vs the model and a model replay of the day, the credit
-   spread attempts and quote marks, stock-strategy signals and orders,
+   day's facts (read-only): account and closed fills (avg bought/sold
+   prices), realized P&L by strategy, every ORB trade with its fill price
+   vs the model and a model replay of the day, the credit spread attempts
+   and quote marks, stock-strategy signals and orders,
    open positions/orders, and warnings/errors from every log →
    `analysis/daily/YYYY/MM/DD/facts_<date>.md`.
 2. Claude Code runs headless with **read-only tools** (no writing, shell or
@@ -352,7 +353,9 @@ The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
   volume, and which names strategies #1 and #2 would buy right now.
   `python -m tradingbot.sp500_scanner [--top 20] [--save]` — `--save`
   writes the full scan to `scans/YYYY/MM/DD/sp500_scan_<date>.csv`, a
-  separate tree from `reports/` (gitignored; local only).
+  separate tree from `reports/` (gitignored; local only). Runs daily at
+  4:15pm (`SP500ScanBot`). Stocks Yahoo's batch download drops are
+  re-requested up to twice (shared with Trend Join's and RSI(2)'s screens).
 - **IBKR top movers check** (read-only): `python -m scripts.check_top_movers`
 - **Backtests:** `scripts/backtest_report.py`, `rsi2_backtest_report.py`,
   `options_backtest_report.py`, `iron_condor_backtest_report.py`
