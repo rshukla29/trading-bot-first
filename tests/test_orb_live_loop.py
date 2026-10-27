@@ -199,3 +199,12 @@ def test_position_checked_every_60s_until_lock_then_every_tick(monkeypatch):
         orb.tick_symbol(None, None, None, None, state)
     # every 60s before the lock (0, 60, 120), then every 5s (125..145)
     assert checks == [0, 60, 120, 125, 130, 135, 140, 145]
+
+
+def test_no_entry_before_first_entry_time(harness, monkeypatch):
+    tick, calls = harness
+    monkeypatch.setattr(orb.settings, "options_first_entry_time", "10:00")
+    tick("09:55:07")                 # completed 9:50 bar, but before the cutoff
+    assert calls == []
+    tick("10:00:09")
+    assert calls and calls[-1][0] == "10:00:09"

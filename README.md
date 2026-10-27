@@ -11,7 +11,7 @@ you explicitly opt into live money.**
 |---|---|---|---|---|---|
 | 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | 4:30pm, right after RSI(2) — `RSI2TradingBot` | `run_ibkr_bot` |
 | 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top movers + S&P 500 yfinance screen (scans not on Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
-| 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:29am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
+| 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:30am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 | 6 | ORB credit spreads *(paper experiment)* | SPY 0DTE put/call credit spreads | Sells premium on the far side of the range | 10:20am–4:00pm — `CreditOrbTradingBot` | `run_credit_orb_bot` |
@@ -25,7 +25,7 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 |---|---|---|
 | 9:00am | `SnapshotPremarketBot` | Premarket report |
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
-| 9:29am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout (filtered), step-up lock; entries until 12:00, flat by 3:55pm |
+| 9:30am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout (filtered), step-up lock; entries 9:45–12:00, flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
 | 10:20am → 4:00pm | `CreditOrbTradingBot` | 60-min range; entry 10:30–12:00; spread bought back 3:50pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |

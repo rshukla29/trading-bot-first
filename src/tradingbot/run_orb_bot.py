@@ -399,6 +399,11 @@ def _last_entry_time() -> time:
     return time(int(h), int(m))
 
 
+def _first_entry_time() -> time:
+    h, m = settings.options_first_entry_time.split(":")
+    return time(int(h), int(m))
+
+
 def iv_pause_active(journal: Journal) -> bool:
     """True when the median fill-IV / VIX-model-IV ratio over the last
     orb_iv_check_trades entries (at least 5) exceeds orb_iv_pause_ratio."""
@@ -517,6 +522,8 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
         state["last_bar_ts"] = latest_bar_ts
         if _now_et().time() >= _last_entry_time():
             return  # no new entries after the cutoff; open positions are still managed above
+        if _now_et().time() < _first_entry_time():
+            return  # no entries before the opening range is complete
         if iv_pause_active(journal):
             logger.warning("%s: ORB entries paused — recent fills priced >%.2fx the VIX-calibrated estimate",
                            symbol, settings.orb_iv_pause_ratio)

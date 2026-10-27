@@ -162,6 +162,9 @@ class Settings(BaseSettings):
     # no cutoff and entered at 3:55pm twice; backtests show no cost to a
     # 12:00 cutoff and live entries after 10:15 lost money.
     options_last_entry_time: str = "12:00"
+    # No ORB entries before this time (ET) — a hard guard on top of the
+    # 15-min opening range, which already can't confirm a breakout earlier.
+    options_first_entry_time: str = "09:45"
     # Practitioner entry filters (since 2026-10-02): opening range >= 0.2% of
     # the open, breakout on VWAP's side (calls above, puts below), and two
     # consecutive 5-min closes beyond the range. With the step-up/3:55 exits
