@@ -334,7 +334,8 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
    day's facts (read-only): account and closed fills (avg bought/sold
    prices), realized P&L by strategy, every ORB trade with its fill price
    vs the model and a model replay of the day, the credit spread attempts
-   and quote marks, stock-strategy signals and orders,
+   and quote marks, Stock ORB's trades with their Time Machine reports,
+   stock-strategy signals and orders,
    open positions/orders, and warnings/errors from every log →
    `analysis/daily/YYYY/MM/DD/facts_<date>.md`.
 2. Claude Code runs headless with **read-only tools** (no writing, shell or
@@ -358,7 +359,8 @@ The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
   re-requested up to twice (shared with Trend Join's and RSI(2)'s screens).
 - **IBKR top movers check** (read-only): `python -m scripts.check_top_movers`
 - **Backtests:** `scripts/backtest_report.py`, `rsi2_backtest_report.py`,
-  `options_backtest_report.py`, `iron_condor_backtest_report.py`
+  `options_backtest_report.py`, `iron_condor_backtest_report.py`,
+  `stock_orb_backtest.py` (Stock ORB on 60 days of S&P 500 5-min bars)
 - **ORB exit comparison:** `python scripts/orb_exit_comparison.py --symbol SPY
   [--slippage 0.05]` — six exit-rule variants on 4 years of cached 5-min
   bars, with costs and a half-year breakdown.
