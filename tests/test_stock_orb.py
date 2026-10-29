@@ -2,7 +2,6 @@
 from datetime import time
 from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -13,7 +12,6 @@ from tradingbot.strategy.stock_orb import (
     plan_trade,
     share_quantity,
     simulate_exit,
-    time_machine,
 )
 
 DAY = "2026-10-27"
@@ -69,24 +67,31 @@ def test_stop_checked_before_target_and_flat_by():
     assert simulate_exit(late, p)[:2] == ("flat", 102.2)       # out at the bar ending 15:55
 
 
-def _history(n_days=25, seed=1):
-    rng = np.random.default_rng(seed)
-    frames = []
-    for d in pd.bdate_range("2026-09-01", periods=n_days):
-        idx = pd.date_range(f"{d.date()} 09:30", periods=78, freq="5min", tz="America/New_York")
-        c = 100 + np.cumsum(rng.normal(0, 0.2, 78))
-        frames.append(pd.DataFrame({"open": c, "high": c + 0.15, "low": c - 0.15, "close": c, "volume": 1e4},
-                                   index=idx))
-    return pd.concat(frames)
+def test_time_machine_is_the_packs_own_and_matches_its_reel():
+    """Our adapter feeds the vendored Time Machine; on the pack's own TSLA
+    fixture it must print the reel's exact result (SKILL.md)."""
+    import gzip
+    from pathlib import Path
+    from tradingbot.strategy.stock_orb import Trigger, run_time_machine, time_machine_plan, time_machine_summary
+    from tradingbot.vendor import timemachine as tm
+    text = gzip.open(Path(__file__).parent / "fixtures/trader-timemachine/TSLA-60d5m.json.gz", "rt",
+                     encoding="utf-8").read()
+    trig = Trigger(pd.Timestamp("2026-10-19 10:10", tz="America/New_York"), 364.18, 362.18, 354.47, 0.0)
+    p = plan_trade(trig.entry, trig.or_high, trig.or_low, 1.0)
+    assert (p.stop, p.target) == (358.32, 370.04)          # the reel's stop and 1R target
+    raw = time_machine_plan("TSLA", trig, p)
+    assert raw["entry_time"] == "10:15 AM"
+    doc = run_time_machine(raw, chart_text=text, now_utc=tm.parse_now("2026-10-19 10:50"), until=None)
+    assert doc["verdict"] == "Close to a coin flip: target first 29.4 % vs stop first 25.5 %."
+    assert (doc["history"]["triggered"], doc["history"]["target"], doc["history"]["stop"]) == (33, 13, 15)
+    assert "seed 19" in time_machine_summary(doc)
 
 
-def test_time_machine_is_deterministic_and_needs_20_sessions():
-    plan = plan_trade(101.8, 101.5, 99.0, 2.0)
-    a = time_machine(_history(), plan, 5, 2.0, replays=500)
-    b = time_machine(_history(), plan, 5, 2.0, replays=500)
-    assert a == b and a.sessions == 25
-    assert a.mc_target_pct + a.mc_stop_pct <= 100
-    assert time_machine(_history(10), plan, 5, 2.0) is None
+def test_time_machine_plan_times_before_10am():
+    from tradingbot.strategy.stock_orb import Trigger, time_machine_plan
+    trig = Trigger(pd.Timestamp(f"{DAY} 09:45", tz="America/New_York"), 101.8, 101.5, 99.0, 0.0)
+    raw = time_machine_plan("BRK-B", trig, plan_trade(101.8, 101.5, 99.0, 2.0))
+    assert raw["entry_time"] == "9:50 AM" and raw["symbol"] == "BRK-B"   # not "09:50" (a bare 9 is fine, 1-8 means pm)
 
 
 def test_journal_rows_budget_and_time_machine(tmp_path):

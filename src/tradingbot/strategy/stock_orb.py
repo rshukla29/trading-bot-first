@@ -20,22 +20,22 @@ Rules (defaults from the pack):
     counts as the stop — conservative), else flat by 15:55.
   - Size: shares = max loss per trade / risk, capped by the max order value.
 
-Time Machine (trader-timemachine): from the stock's last ~60 days of
-5-min bars, (1) replay every past session where this setup triggered and
-(2) run 10,000 simulated rest-of-day paths built bar by bar from past bars
-at about the same time of day. Report-only in this repo: it is logged and
-journaled with each trade, never used to block one.
+Time Machine: the pack's own trader-timemachine, vendored verbatim in
+tradingbot/vendor/timemachine.py (see run_time_machine below). From the
+stock's last 60 days of 5-min bars it runs 10,000 simulated rest-of-day
+paths plus the same rule on every past session, and prints one verdict.
+Report-only in this repo: logged and journaled with each trade, never used
+to block one.
 """
 from __future__ import annotations
 
+import datetime as _dt
 import math
-import random
 from dataclasses import dataclass
 from datetime import time
 
 import pandas as pd
 
-SESSION_BARS = 78  # 9:30-16:00 in 5-min bars
 MIN_RISK_PCT = 0.05
 
 
@@ -141,113 +141,42 @@ def simulate_exit(after: pd.DataFrame, plan: Plan, flat_by: time = time(15, 55),
 
 
 # --------------------------------------------------------------------------
-# Time Machine (report-only)
+# Time Machine (report-only) — the pack's own code, vendor/timemachine.py
 # --------------------------------------------------------------------------
 
-@dataclass
-class TimeMachineReport:
-    sessions: int
-    mc_target_pct: float
-    mc_stop_pct: float
-    mc_avg_r: float
-    hist_trades: int
-    hist_target: int
-    hist_stop: int
-    hist_avg_r: float | None
-    verdict: str
-
-    def summary(self) -> str:
-        hist = (f"history {self.hist_trades} trades ({self.hist_target} target / {self.hist_stop} stop), "
-                f"avg {self.hist_avg_r:+.2f}R" if self.hist_avg_r is not None else "history: no past triggers")
-        return (f"Time Machine ({self.sessions} sessions): simulated {self.mc_target_pct:.0f}% target-first / "
-                f"{self.mc_stop_pct:.0f}% stop-first, avg {self.mc_avg_r:+.2f}R; {hist} — {self.verdict}")
+def time_machine_plan(symbol: str, trigger: Trigger, plan: Plan, flat_by: str = "15:55",
+                      bar_minutes: int = 5) -> dict:
+    """A Stock ORB trade in trader-exit's plan.json shape, for the vendored
+    Time Machine. `symbol` in Yahoo notation (BRK-B). The entry bar is the
+    trigger bar; entry_time is its close."""
+    close = trigger.ts + pd.Timedelta(minutes=bar_minutes)
+    return {"symbol": symbol, "side": "buy", "date": trigger.ts.date().isoformat(), "setup": "orb",
+            "entry": plan.entry, "entry_time": close.strftime("%I:%M %p").lstrip("0"), "interval": "5m",
+            "opening_range": {"high": trigger.or_high, "low": trigger.or_low, "minutes": 15},
+            "stop": plan.stop, "stop_rule": "or_mid", "target": plan.target, "flat_by": flat_by}
 
 
-def full_sessions(bars: pd.DataFrame, before: pd.Timestamp | None = None) -> list[pd.DataFrame]:
-    """Complete 78-bar regular sessions (half days and gappy days dropped),
-    strictly before `before` if given."""
-    rth = regular_session(bars)
-    out = []
-    for d, day in rth.groupby(rth.index.date):
-        if before is not None and pd.Timestamp(d) >= before.normalize().tz_localize(None):
-            continue
-        if len(day) == SESSION_BARS:
-            out.append(day)
-    return out
+def run_time_machine(plan_raw: dict, chart_text: str | None = None, now_utc: _dt.datetime | None = None,
+                     until: str | None = "15:55") -> dict:
+    """The vendored Time Machine on one plan -> its timemachine.json document
+    (odds, history, verdict). Fetches Yahoo's 60-day 5-min chart unless
+    `chart_text` is given. `until` defaults to the 15:55 flat-by, as the
+    pack's SKILL.md says to. Raises vendor.timemachine.TMError when the run
+    is refused (fewer than 20 full sessions, entry bar not in the data, ...)."""
+    from tradingbot.vendor import timemachine as tm
+
+    plan = tm.normalize_plan(plan_raw)
+    now = now_utc or tm.parse_now(None)
+    text = chart_text if chart_text is not None else tm.fetch_chart(plan["symbol"])
+    return tm.time_machine(text, plan, now, until=until)
 
 
-def time_machine(history: pd.DataFrame, plan: Plan, entry_slot: int, target_r: float,
-                 or_minutes: int = 15, replays: int = 10_000, window: int = 2, seed: int = 19,
-                 min_sessions: int = 20, today: pd.Timestamp | None = None) -> TimeMachineReport | None:
-    """`entry_slot`: index (0-77) of the first bar AFTER the trigger bar.
-    None when there are fewer than `min_sessions` full sessions."""
-    sessions = full_sessions(history, today)
-    if len(sessions) < min_sessions:
-        return None
-
-    # (1) Monte Carlo: ratio-to-previous-close candles pooled by time-of-day slot.
-    pool: list[list[tuple[float, float, float, float]]] = [[] for _ in range(SESSION_BARS)]
-    for day in sessions:
-        o, h, l, c = (day[k].to_numpy() for k in ("open", "high", "low", "close"))
-        for i in range(1, SESSION_BARS):
-            pc = c[i - 1]
-            if pc > 0:
-                pool[i].append((o[i] / pc, h[i] / pc, l[i] / pc, c[i] / pc))
-    rng = random.Random(seed)
-    outcomes = {"target": 0, "stop": 0, "close": 0}
-    total_r = 0.0
-    for _ in range(replays):
-        price = plan.entry
-        result = None
-        for i in range(max(1, entry_slot), SESSION_BARS):
-            j = min(SESSION_BARS - 1, max(1, i + rng.randint(-window, window)))
-            _, rh, rl, rc = rng.choice(pool[j])
-            lo, hi, price_next = price * rl, price * rh, price * rc
-            if lo <= plan.stop:
-                result = "stop"
-                break
-            if hi >= plan.target:
-                result = "target"
-                break
-            price = price_next
-        if result == "stop":
-            total_r -= 1.0
-        elif result == "target":
-            total_r += target_r
-        else:
-            result = "close"
-            total_r += (price - plan.entry) / plan.risk
-        outcomes[result] += 1
-
-    # (2) History: replay this setup on every past full session.
-    hist_r = []
-    hist_outcomes = {"target": 0, "stop": 0, "flat": 0}
-    for day in sessions:
-        trig = find_trigger(day, or_minutes)
-        if trig is None:
-            continue
-        p = plan_trade(trig.entry, trig.or_high, trig.or_low, target_r)
-        if p is None:
-            continue
-        outcome, px, _ = simulate_exit(day[day.index > trig.ts], p, flat_by=time(16, 0))
-        hist_outcomes[outcome] += 1
-        hist_r.append(target_r if outcome == "target" else -1.0 if outcome == "stop" else (px - p.entry) / p.risk)
-
-    one_sided = outcomes["target"] + outcomes["stop"]
-    share = outcomes["target"] / one_sided * 100 if one_sided else 0.0
-    breakeven = 100 / (1 + target_r)
-    gap = share - breakeven
-    verdict = ("coin flip" if abs(gap) < 5 else
-               ("leans target" if gap > 0 else "leans stop") if abs(gap) < 15 else
-               ("strongly leans target" if gap > 0 else "strongly leans stop"))
-    return TimeMachineReport(
-        sessions=len(sessions),
-        mc_target_pct=outcomes["target"] / replays * 100,
-        mc_stop_pct=outcomes["stop"] / replays * 100,
-        mc_avg_r=total_r / replays,
-        hist_trades=len(hist_r),
-        hist_target=hist_outcomes["target"],
-        hist_stop=hist_outcomes["stop"],
-        hist_avg_r=sum(hist_r) / len(hist_r) if hist_r else None,
-        verdict=verdict,
-    )
+def time_machine_summary(doc: dict) -> str:
+    """One line for the log and the journal: the odds, the history, and the
+    verdict exactly as the Time Machine prints it."""
+    m, h = doc["mc"], doc["history"]
+    hist = (f"history {h['triggered']} of {h['sessions']} sessions fired: {h['target']} target / {h['stop']} stop "
+            f"/ {h['close']} neither, avg {h['avg_R']:+.3f}R" if h.get("triggered") else "history: never fired")
+    return (f"Time Machine (seed {m['seed']}, {m['replays']:,} replays to {m['until']}): target first "
+            f"{m['p_target'] * 100:.1f}%, stop first {m['p_stop'] * 100:.1f}%, neither {m['p_neither'] * 100:.1f}%, "
+            f"avg {m['avg_R']:+.3f}R; {hist}. {' '.join([doc['verdict']] + list(doc.get('verdict_notes') or []))}")

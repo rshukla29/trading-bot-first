@@ -254,10 +254,15 @@ pack (MIT), run exactly as published — all values are the pack's defaults.
   3 trades a day, $4,000 max position, one entry per symbol per day. Skips
   the MA/RSI(2) watchlists, anything already held (manual positions
   included) and Trend Join's symbols.
-- **Time Machine (report-only):** after each entry, replays that stock's
-  last 60 days of 5-min bars — every past day the setup triggered, plus
-  10,000 simulated rest-of-day paths — and logs/journals the verdict. It
-  never blocks or changes a trade.
+- **Time Machine (report-only):** after each entry the bot runs the pack's
+  own Time Machine — vendored verbatim in
+  [vendor/timemachine.py](src/tradingbot/vendor/timemachine.py) with its
+  MIT license and its 47 tests — on that trade: 10,000 simulated
+  rest-of-day paths built from the stock's last 60 days of 5-min bars, plus
+  the same rule on every past session, up to the 3:55pm flat-by. The full
+  report goes to the log, its verdict line (e.g. "Leans toward the stop")
+  and odds to the journal and the daily review. It never blocks or changes
+  a trade.
 - **Why it's an experiment:** our backtest of the published rules on 60 days
   of S&P 500 5-min data ([scripts/stock_orb_backtest.py](scripts/stock_orb_backtest.py))
   shows no edge — about −0.08R per trade over ~16,000 triggers, and
@@ -361,6 +366,11 @@ The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
 - **Backtests:** `scripts/backtest_report.py`, `rsi2_backtest_report.py`,
   `options_backtest_report.py`, `iron_condor_backtest_report.py`,
   `stock_orb_backtest.py` (Stock ORB on 60 days of S&P 500 5-min bars)
+- **Time Machine** (any planned day trade, by hand; never places an order):
+  `python -m tradingbot.vendor.timemachine run --symbol TSLA --date 2026-10-19
+  --entry 364.18 --stop 358.32 --target 370.04 --entry-time "10:15 AM" --until 15:55`
+  — add `chart` instead of `run` for an ASCII fan chart. See
+  [vendor/README.md](src/tradingbot/vendor/README.md).
 - **ORB exit comparison:** `python scripts/orb_exit_comparison.py --symbol SPY
   [--slippage 0.05]` — six exit-rule variants on 4 years of cached 5-min
   bars, with costs and a half-year breakdown.

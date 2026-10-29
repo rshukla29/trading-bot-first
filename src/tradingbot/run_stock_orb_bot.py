@@ -51,8 +51,10 @@ from tradingbot.strategy.stock_orb import (
     find_trigger,
     plan_trade,
     regular_session,
+    run_time_machine,
     share_quantity,
-    time_machine,
+    time_machine_plan,
+    time_machine_summary,
 )
 from tradingbot.strategy.trend_join import completed_bars
 
@@ -216,28 +218,32 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
         flatten(ib, journal, pos, "fill_below_stop")
         return None
     if settings.stock_orb_time_machine:
-        report_time_machine(journal, pos, plan, trig, now)
+        report_time_machine(journal, pos, plan, trig)
     return pos
 
 
-def report_time_machine(journal: Journal, pos: LivePosition, plan, trig: Trigger, now: pd.Timestamp) -> None:
-    """Report-only: never blocks or changes a trade."""
+def report_time_machine(journal: Journal, pos: LivePosition, plan, trig: Trigger) -> None:
+    """Report-only: the pack's own Time Machine (vendor/timemachine.py) on
+    this trade, logged in full and summarised in the journal. Never blocks
+    or changes a trade."""
+    from tradingbot.vendor import timemachine as tm
     try:
-        raw = yf.download(yahoo_symbol(pos.symbol), period="60d", interval="5m", auto_adjust=False,
-                          prepost=False, progress=False, multi_level_index=False)
-        hist = raw.rename(columns=str.lower)[["open", "high", "low", "close", "volume"]].dropna()
-        hist.index = hist.index.tz_convert(ET)
-        bm = settings.stock_orb_bar_minutes
-        slot = ((trig.ts.hour - 9) * 60 + trig.ts.minute - 30) // bm + 1
-        rep = time_machine(hist, plan, slot, settings.stock_orb_target_r, settings.stock_orb_or_minutes,
-                           today=now)
-        if rep is None:
-            journal.set_stock_orb_time_machine(pos.id, "Time Machine: fewer than 20 full sessions", None, None, None)
-            return
-        logger.info("%s: %s", pos.symbol, rep.summary())
-        journal.set_stock_orb_time_machine(pos.id, rep.summary(), rep.mc_avg_r, rep.hist_trades, rep.hist_avg_r)
+        doc = run_time_machine(time_machine_plan(yahoo_symbol(pos.symbol), trig, plan,
+                                                 settings.stock_orb_flatten_time, settings.stock_orb_bar_minutes),
+                               until=settings.stock_orb_flatten_time)
+    except tm.TMError as e:
+        logger.warning("%s: Time Machine refused: %s (report-only, trade unaffected)", pos.symbol, e)
+        journal.set_stock_orb_time_machine(pos.id, f"Time Machine refused: {e}", None, None, None)
+        return
     except Exception:
         logger.exception("%s: Time Machine report failed (report-only, trade unaffected)", pos.symbol)
+        return
+    for line in tm.report(doc):
+        if line:
+            logger.info("%s TM | %s", pos.symbol, line)
+    h = doc["history"]
+    journal.set_stock_orb_time_machine(pos.id, time_machine_summary(doc), doc["mc"]["avg_R"],
+                                       h.get("triggered"), h.get("avg_R"))
 
 
 # --------------------------------------------------------------------------
