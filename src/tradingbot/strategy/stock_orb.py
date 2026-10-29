@@ -171,6 +171,24 @@ def run_time_machine(plan_raw: dict, chart_text: str | None = None, now_utc: _dt
     return tm.time_machine(text, plan, now, until=until)
 
 
+def time_machine_check(doc: dict, min_gap: float = 0.05) -> dict:
+    """The numbers the reports keep, plus `agrees`: the Time Machine's own
+    lean (target's share of the replays that hit a side, minus break-even
+    1/(1+R)) is at least `min_gap` — i.e. its verdict is "Leans toward the
+    target" (>= 5 points) or "Strongly toward the target". A coin flip or a
+    lean toward the stop doesn't agree."""
+    from tradingbot.vendor import timemachine as tm
+
+    m, h = doc["mc"], doc["history"]
+    lv = tm.lean(m)
+    return {
+        "p_target": m["p_target"], "p_stop": m["p_stop"], "p_neither": m["p_neither"], "avg_r": m["avg_R"],
+        "hist_triggered": h.get("triggered"), "hist_target": h.get("target"), "hist_stop": h.get("stop"),
+        "hist_avg_r": h.get("avg_R"), "verdict": " ".join([doc["verdict"]] + list(doc.get("verdict_notes") or [])),
+        "agrees": lv is not None and lv[0] >= min_gap,
+    }
+
+
 def time_machine_summary(doc: dict) -> str:
     """One line for the log and the journal: the odds, the history, and the
     verdict exactly as the Time Machine prints it."""

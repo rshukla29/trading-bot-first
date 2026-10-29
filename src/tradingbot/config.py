@@ -324,7 +324,15 @@ class Settings(BaseSettings):
     stock_orb_max_daily_loss: float = 150.0
     stock_orb_max_trades_per_day: int = 3
     stock_orb_max_order_value: float = 4_000.0
-    stock_orb_time_machine: bool = True  # report-only: logged + journaled, never blocks a trade
+    stock_orb_time_machine: bool = True  # run the pack's Time Machine before every entry
+    # Gate (owner's choice, 2026-10-28): trade only when the Time Machine
+    # agrees — its verdict "Leans toward the target" or "Strongly toward the
+    # target", i.e. the target's share of the replays that hit a side beats
+    # break-even (1/(1+R)) by at least this many points. Coin flips, leans
+    # toward the stop and refusals are skipped. False = report-only.
+    stock_orb_tm_filter: bool = True
+    stock_orb_tm_min_gap: float = 0.05
+    stock_orb_max_checks_per_bar: int = 10  # candidates checked per 5-min bar (one Yahoo request each)
 
     # Safety: paper accounts on IBKR have account IDs starting with "DU".
     # Trading on any other account requires this to be explicitly true.

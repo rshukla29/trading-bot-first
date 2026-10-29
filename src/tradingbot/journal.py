@@ -145,6 +145,23 @@ CREATE TABLE IF NOT EXISTS stock_orb_positions (
     tm_hist_avg_r REAL
 );
 
+-- Every Time Machine check Stock ORB ran before an entry — traded or
+-- skipped — for the reports (decision: traded / skipped / not_filled).
+CREATE TABLE IF NOT EXISTS stock_orb_tm_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    trigger_bar TEXT,
+    entry REAL, stop REAL, target REAL,
+    p_target REAL, p_stop REAL, p_neither REAL, avg_r REAL,
+    hist_triggered INTEGER, hist_target INTEGER, hist_stop INTEGER, hist_avg_r REAL,
+    verdict TEXT,
+    agrees INTEGER NOT NULL DEFAULT 0,
+    decision TEXT NOT NULL,
+    position_id INTEGER
+);
+
 -- Which daily stock bot (run_ibkr_bot = "ma_crossover", run_rsi2_bot =
 -- "rsi2") opened each stock position. IBKR positions carry no strategy
 -- tag, so without this a bot would manage (and could sell) any position on
@@ -643,6 +660,33 @@ class Journal:
                    realized_pnl=? WHERE id=?""",
                 (datetime.now(timezone.utc).isoformat(), exit_price, exit_reason, realized_pnl, position_id),
             )
+
+    def record_stock_orb_tm_check(self, trade_date: str, symbol: str, trigger_bar: str, entry: float, stop: float,
+                                  target: float, check: dict, decision: str, position_id: int | None = None) -> int:
+        """`check`: p_target, p_stop, p_neither, avg_r, hist_triggered,
+        hist_target, hist_stop, hist_avg_r, verdict, agrees (missing keys =
+        NULL, e.g. when the Time Machine refused)."""
+        cols = ("p_target", "p_stop", "p_neither", "avg_r", "hist_triggered", "hist_target", "hist_stop",
+                "hist_avg_r", "verdict")
+        with self._connect() as conn:
+            cur = conn.execute(
+                f"""INSERT INTO stock_orb_tm_checks (ts, trade_date, symbol, trigger_bar, entry, stop, target,
+                    {", ".join(cols)}, agrees, decision, position_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, {", ".join("?" * len(cols))}, ?, ?, ?)""",
+                (datetime.now(timezone.utc).isoformat(), trade_date, symbol, trigger_bar, entry, stop, target,
+                 *(check.get(c) for c in cols), int(bool(check.get("agrees"))), decision, position_id),
+            )
+            return cur.lastrowid
+
+    def stock_orb_tm_checks_between(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(
+                """SELECT c.*, p.status AS pos_status, p.exit_reason, p.realized_pnl
+                   FROM stock_orb_tm_checks c LEFT JOIN stock_orb_positions p ON p.id = c.position_id
+                   WHERE c.trade_date >= ? AND c.trade_date <= ? ORDER BY c.id""",
+                (start_date, end_date),
+            ).fetchall()
 
     def claim_stock(self, symbol: str, strategy: str) -> None:
         with self._connect() as conn:

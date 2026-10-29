@@ -298,6 +298,55 @@ def _render_strategy_pnl_section(start: date, end: date, period_label: str) -> l
     return parts
 
 
+def _render_stock_orb_tm_section(start: date, end: date, period_label: str) -> list[str]:
+    """Every Time Machine check Stock ORB ran before an entry, traded or
+    skipped, with the trade's result."""
+    parts = [f"<h2>Stock ORB — Time Machine checks ({escape(period_label)})</h2>"]
+    try:
+        rows = Journal(settings.db_path).stock_orb_tm_checks_between(start.isoformat(), end.isoformat())
+    except Exception as e:  # never let this section break the report
+        logger.exception("Time Machine checks failed")
+        return parts + [f"<p class='warn'>Time Machine checks unavailable: {escape(str(e))}</p>"]
+    if not rows:
+        return parts + ["<p class='empty'>(no Stock ORB breakouts checked)</p>"]
+
+    def pct(x):
+        return "—" if x is None else f"{x * 100:.1f}%"
+
+    traded = [r for r in rows if r["decision"].startswith("traded")]
+    pnl = sum(r["realized_pnl"] or 0.0 for r in traded if r["pos_status"] == "closed")
+    parts.append(f"<p>{len(rows)} checked, {sum(r['agrees'] for r in rows)} agreed, {len(traded)} traded, "
+                 f"{sum(r['decision'] == 'skipped' for r in rows)} skipped — traded P&amp;L "
+                 f"<span class='{_pnl_class(pnl)}'>{pnl:.2f}</span></p>")
+    parts.append("<table><tr><th>Date</th><th>Symbol</th><th>Bar</th><th>Entry / Stop / Target</th>"
+                 "<th>Target first</th><th>Stop first</th><th>Neither</th><th>Avg R</th><th>History</th>"
+                 "<th>Verdict</th><th>Decision</th><th>Result</th></tr>")
+    for r in rows:
+        hist = ("—" if r["hist_triggered"] is None else
+                f"{r['hist_triggered']} fired: {r['hist_target']} T / {r['hist_stop']} S, "
+                f"{r['hist_avg_r']:+.2f}R" if r["hist_avg_r"] is not None else f"{r['hist_triggered']} fired")
+        if not r["decision"].startswith("traded"):
+            result = "—"
+        elif r["pos_status"] == "closed":
+            result = (f"<span class='{_pnl_class(r['realized_pnl'] or 0)}'>{(r['realized_pnl'] or 0):.2f}</span> "
+                      f"({escape(r['exit_reason'] or '')})")
+        else:
+            result = "open"
+        avg_r = "—" if r["avg_r"] is None else f"{r['avg_r']:+.3f}"
+        parts.append(
+            f"<tr><td>{escape(r['trade_date'])}</td><td>{escape(r['symbol'])}</td><td>{escape(r['trigger_bar'] or '')}</td>"
+            f"<td>{r['entry']:.2f} / {r['stop']:.2f} / {r['target']:.2f}</td><td>{pct(r['p_target'])}</td>"
+            f"<td>{pct(r['p_stop'])}</td><td>{pct(r['p_neither'])}</td><td>{avg_r}</td><td>{hist}</td>"
+            f"<td style='text-align:left'>{escape(r['verdict'] or '')}</td><td>{escape(r['decision'])}</td>"
+            f"<td>{result}</td></tr>")
+    parts.append("</table>")
+    parts.append("<p class='empty'>The pack's own Time Machine (vendor/timemachine.py), run before each entry: "
+                 "10,000 replays of the rest of the day from the stock's last 60 days of 5-min bars, to the 3:55pm "
+                 "flat-by (seed 19), plus the same rule on each past session. A trade is placed only when it "
+                 "leans or strongly leans toward the target. A simulation, not a prediction.</p>")
+    return parts
+
+
 FIB_LOOKBACK_DAYS = 20
 
 
@@ -397,6 +446,7 @@ def build_report(
     closed_parts, _ = _render_closed_trades_section(closed_trades, "today")
     parts.extend(closed_parts)
     parts.extend(_render_strategy_pnl_section(date.today(), date.today(), "today"))
+    parts.extend(_render_stock_orb_tm_section(date.today(), date.today(), "today"))
 
     net_liq = client.net_liquidation()
     ytd_pnl = net_liq - settings.account_starting_balance
@@ -458,6 +508,7 @@ def build_period_report(client: IBKRClient, journal: Journal, period_label: str,
     parts.extend(closed_parts)
     parts.extend(_render_strategy_pnl_section(period_start, today, f"{period_label}, {period_start.isoformat()} "
                                                                     f"to {today.isoformat()}"))
+    parts.extend(_render_stock_orb_tm_section(period_start, today, period_label))
 
     total_period_pnl = realized_period + unrealized_now
 

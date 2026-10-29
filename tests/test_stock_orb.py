@@ -124,3 +124,82 @@ def test_bracket_exits_are_one_cancels_other():
     assert parent.action == "BUY" and not parent.transmit and stop.transmit
     assert take.lmtPrice == 104.9 and stop.auxPrice == 100.25
     assert take.parentId == stop.parentId == parent.orderId and take.ocaGroup == stop.ocaGroup
+
+
+def _entry_harness(tmp_path, monkeypatch, check):
+    """try_enter on a fresh AAPL breakout with a stubbed Time Machine."""
+    import tradingbot.run_stock_orb_bot as bot
+    calls = []
+    day = _bars(RANGE + [("09:45", 101.0, 102.0, 100.9, 101.8)])
+    monkeypatch.setattr(bot, "fetch_intraday_bars", lambda *a, **k: day)
+    monkeypatch.setattr(bot, "pre_trade_time_machine",
+                        lambda sym, plan, trig: calls.append("time_machine") or ("TM summary", check))
+
+    def bracket(ib, contract, qty, stop, target):
+        calls.append("order")
+        mk = lambda oid: SimpleNamespace(order=SimpleNamespace(orderId=oid),
+                                         orderStatus=SimpleNamespace(avgFillPrice=101.85, status="Filled"))
+        return mk(1), mk(2), mk(3)
+
+    monkeypatch.setattr(bot, "place_bracket", bracket)
+    monkeypatch.setattr(bot, "wait_for_fill", lambda ib, t, **k: True)
+    j = Journal(str(tmp_path / "j.db"))
+    pos = bot.try_enter(SimpleNamespace(qualifyContracts=lambda *c: c), j, "AAPL",
+                        pd.Timestamp(f"{DAY} 09:50:25", tz="America/New_York"), DAY)
+    return pos, calls, j
+
+
+AGREES = {"p_target": 0.31, "p_stop": 0.40, "p_neither": 0.29, "avg_r": 0.12, "hist_triggered": 20, "hist_target": 8,
+          "hist_stop": 9, "hist_avg_r": 0.15, "verdict": "Leans toward the target: ...", "agrees": True}
+
+
+def test_time_machine_agrees_then_trade(tmp_path, monkeypatch):
+    pos, calls, j = _entry_harness(tmp_path, monkeypatch, AGREES)
+    assert calls == ["time_machine", "order"] and pos is not None and pos.qty == 32
+    (c,) = j.stock_orb_tm_checks_between(DAY, DAY)
+    assert (c["decision"], c["agrees"], c["position_id"]) == ("traded", 1, pos.id)
+    assert c["pos_status"] == "open"
+
+
+def test_time_machine_disagrees_or_refuses_no_trade(tmp_path, monkeypatch):
+    stop_lean = dict(AGREES, verdict="Leans toward the stop: ...", agrees=False)
+    pos, calls, j = _entry_harness(tmp_path, monkeypatch, stop_lean)
+    assert calls == ["time_machine"] and pos is None             # no order sent
+    assert j.stock_orb_rows_on(DAY) == []
+    (c,) = j.stock_orb_tm_checks_between(DAY, DAY)
+    assert (c["decision"], c["verdict"]) == ("skipped", "Leans toward the stop: ...")
+
+    pos, calls, j = _entry_harness(tmp_path / "b", monkeypatch, None)  # refused / failed
+    assert calls == ["time_machine"] and pos is None
+
+
+def test_gate_off_trades_whatever_the_verdict(tmp_path, monkeypatch):
+    import tradingbot.run_stock_orb_bot as bot
+    monkeypatch.setattr(bot.settings, "stock_orb_tm_filter", False)
+    pos, calls, _ = _entry_harness(tmp_path, monkeypatch, dict(AGREES, agrees=False))
+    assert calls == ["time_machine", "order"] and pos is not None
+
+
+def test_agreement_follows_the_time_machines_own_lean():
+    from tradingbot.strategy.stock_orb import time_machine_check
+    def doc(pt, ps, r=2.0):
+        return {"mc": {"p_target": pt, "p_stop": ps, "p_neither": 1 - pt - ps, "avg_R": 0.0, "r_at_target": r},
+                "history": {}, "verdict": "v"}
+    assert time_machine_check(doc(0.30, 0.40))["agrees"]        # 43% of one-sided vs 33% break-even: leans target
+    assert not time_machine_check(doc(0.25, 0.50))["agrees"]    # 33%: break-even, not agreement
+    assert not time_machine_check(doc(0.173, 0.523))["agrees"]  # today's CBOE: leans toward the stop
+    assert not time_machine_check(doc(0.0, 0.0))["agrees"]      # nothing hit a side
+
+
+def test_report_lists_every_check(tmp_path, monkeypatch):
+    from datetime import date
+    import tradingbot.run_snapshot as snap
+    j = Journal(str(tmp_path / "r.db"))
+    pid = j.open_stock_orb_position("AAPL", DAY, "09:45", 101.5, 99.0, 101.85, 32, 100.25, 104.9, 1, 2)
+    j.close_stock_orb_position(pid, 104.9, "target", 97.6)
+    j.record_stock_orb_tm_check(DAY, "AAPL", "09:45", 101.8, 100.25, 104.9, AGREES, "traded", pid)
+    j.record_stock_orb_tm_check(DAY, "CBOE", "10:55", 324.31, 321.22, 330.49,
+                                dict(AGREES, verdict="Leans toward the stop", agrees=False), "skipped")
+    monkeypatch.setattr(snap.settings, "db_path", str(tmp_path / "r.db"))
+    html = "\n".join(snap._render_stock_orb_tm_section(date(2026, 10, 27), date(2026, 10, 27), "today"))
+    assert "2 checked, 1 agreed, 1 traded, 1 skipped" in html and "97.60" in html and "Leans toward the stop" in html

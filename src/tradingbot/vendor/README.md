@@ -12,7 +12,7 @@
   [timemachine_SKILL.md](timemachine_SKILL.md). Its tests:
   [tests/test_timemachine.py](../../../tests/test_timemachine.py) (verbatim, with
   the TSLA fixture in `tests/fixtures/trader-timemachine/`).
-- **Used by:** Stock ORB (strategy #7), report-only, after each entry.
+- **Used by:** Stock ORB (strategy #7), run before each entry as a gate: a trade only when its verdict leans toward the target.
 - **By hand** (standard library only, one Yahoo request; never places an order):
 
   ```

@@ -8,10 +8,12 @@ Daily flow (all times ET):
                                bar is its first close above the 15-min
                                opening range high is a hit. Hits are ranked
                                by dollars traded so far, re-checked on IBKR's
-                               own bars, and bought with a bracket: market
-                               BUY + stop at the range midpoint + limit SELL
-                               at 2R (one-cancels-other, all at IBKR)
-  after each entry             Time Machine report (logged + journaled only)
+                               own bars, run through the Time Machine
+                               (report-only: logged + journaled, the trade
+                               goes ahead whatever it says), then bought
+                               with a bracket: market BUY + stop at the
+                               range midpoint + limit SELL at 2R
+                               (one-cancels-other, all at IBKR)
   every ~15s                   watch for the stop or target filling
   15:55                        flatten whatever is left, then exit
 
@@ -53,6 +55,7 @@ from tradingbot.strategy.stock_orb import (
     regular_session,
     run_time_machine,
     share_quantity,
+    time_machine_check,
     time_machine_plan,
     time_machine_summary,
 )
@@ -195,12 +198,30 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
     reason = (f"close {trig.entry:.2f} > opening range high {trig.or_high:.2f} "
               f"(range {trig.or_low:.2f}-{trig.or_high:.2f}, bar {trig.ts.strftime('%H:%M')})")
     journal.log_signal(sym, "BUY", trig.entry, reason, source=SOURCE)
+    # The Time Machine runs BEFORE the order, as the pack intends (between
+    # the plan and the money). With stock_orb_tm_filter on, the trade is
+    # placed only if it agrees (leans or strongly toward the target); a
+    # refusal or an error counts as not agreeing. Every check is journaled.
+    tm_on = settings.stock_orb_time_machine
+    tm_summary, check = pre_trade_time_machine(sym, plan, trig) if tm_on else (None, None)
+    bar = trig.ts.strftime("%H:%M")
+
+    def record(decision: str, position_id: int | None = None) -> None:
+        if tm_on:
+            journal.record_stock_orb_tm_check(today, sym, bar, plan.entry, plan.stop, plan.target,
+                                              check or {"verdict": tm_summary}, decision, position_id)
+
+    if tm_on and settings.stock_orb_tm_filter and not (check and check["agrees"]):
+        record("skipped")
+        logger.info("%s: Time Machine doesn't agree — no trade. %s", sym, check["verdict"] if check else tm_summary)
+        return None
     contract = Stock(sym, "SMART", "USD")
     ib.qualifyContracts(contract)
     parent, take, stop_trade = place_bracket(ib, contract, qty, plan.stop, plan.target)
     if not wait_for_fill(ib, parent):
         logger.warning("%s: entry did not fill (status=%s), cancelling", sym, parent.orderStatus.status)
         ib.cancelOrder(parent.order)
+        record("not_filled")
         return None
     fill = parent.orderStatus.avgFillPrice
     journal.log_order(sym, "BUY", qty, "MKT+STP+LMT", broker="IBKR", status="filled", stop_price=plan.stop,
@@ -209,6 +230,10 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
         sym, today, trig.ts.strftime("%H:%M"), trig.or_high, trig.or_low, fill, qty, plan.stop, plan.target,
         stop_trade.order.orderId, take.order.orderId,
     )
+    record("traded", pid)
+    if tm_on:
+        journal.set_stock_orb_time_machine(pid, tm_summary, check and check["avg_r"],
+                                           check and check["hist_triggered"], check and check["hist_avg_r"])
     pos = LivePosition(pid, sym, contract, fill, qty, plan.stop, plan.target, stop_trade, take)
     logger.info("%s: BOUGHT %d @ %.2f (signal %.2f), stop %.2f, target %.2f (%.1fR), risk $%.0f — %s",
                 sym, qty, fill, trig.entry, plan.stop, plan.target, settings.stock_orb_target_r,
@@ -217,33 +242,29 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
         logger.warning("%s: filled at/below the stop, flattening immediately", sym)
         flatten(ib, journal, pos, "fill_below_stop")
         return None
-    if settings.stock_orb_time_machine:
-        report_time_machine(journal, pos, plan, trig)
     return pos
 
 
-def report_time_machine(journal: Journal, pos: LivePosition, plan, trig: Trigger) -> None:
-    """Report-only: the pack's own Time Machine (vendor/timemachine.py) on
-    this trade, logged in full and summarised in the journal. Never blocks
-    or changes a trade."""
+def pre_trade_time_machine(sym: str, plan, trig: Trigger) -> tuple[str, dict | None]:
+    """The pack's own Time Machine (vendor/timemachine.py) on the planned
+    trade, run before the order: full report to the log; returns (one-line
+    summary, check numbers incl. `agrees`). The check is None when the Time
+    Machine refused or failed — that never counts as agreeing."""
     from tradingbot.vendor import timemachine as tm
     try:
-        doc = run_time_machine(time_machine_plan(yahoo_symbol(pos.symbol), trig, plan,
+        doc = run_time_machine(time_machine_plan(yahoo_symbol(sym), trig, plan,
                                                  settings.stock_orb_flatten_time, settings.stock_orb_bar_minutes),
                                until=settings.stock_orb_flatten_time)
     except tm.TMError as e:
-        logger.warning("%s: Time Machine refused: %s (report-only, trade unaffected)", pos.symbol, e)
-        journal.set_stock_orb_time_machine(pos.id, f"Time Machine refused: {e}", None, None, None)
-        return
+        logger.warning("%s: Time Machine refused: %s", sym, e)
+        return f"Time Machine refused: {e}", None
     except Exception:
-        logger.exception("%s: Time Machine report failed (report-only, trade unaffected)", pos.symbol)
-        return
+        logger.exception("%s: Time Machine failed", sym)
+        return "Time Machine failed (see log)", None
     for line in tm.report(doc):
         if line:
-            logger.info("%s TM | %s", pos.symbol, line)
-    h = doc["history"]
-    journal.set_stock_orb_time_machine(pos.id, time_machine_summary(doc), doc["mc"]["avg_R"],
-                                       h.get("triggered"), h.get("avg_R"))
+            logger.info("%s TM (before entry) | %s", sym, line)
+    return time_machine_summary(doc), time_machine_check(doc, settings.stock_orb_tm_min_gap)
 
 
 # --------------------------------------------------------------------------
@@ -373,9 +394,13 @@ def main() -> None:
                         hits = yahoo_hits([s for s in universe if ib_symbol(s) not in excluded], now)
                         logger.info("Bar %s: %d fresh breakout(s)%s", (boundary - pd.Timedelta(minutes=bm)).strftime("%H:%M"),
                                     len(hits), f": {[h[0] for h in hits[:10]]}" if hits else "")
-                        for ysym, _ in hits:
+                        for n, (ysym, _) in enumerate(hits):
                             if len(journal.stock_orb_rows_on(today)) >= settings.stock_orb_max_trades_per_day:
                                 logger.info("Max trades/day (%d) reached", settings.stock_orb_max_trades_per_day)
+                                break
+                            if n >= settings.stock_orb_max_checks_per_bar:
+                                logger.info("Checked %d candidates this bar (the cap) — skipping the other %d",
+                                            n, len(hits) - n)
                                 break
                             pos = try_enter(ib, journal, ysym, now, today)
                             if pos is not None:

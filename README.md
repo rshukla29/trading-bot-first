@@ -254,15 +254,21 @@ pack (MIT), run exactly as published — all values are the pack's defaults.
   3 trades a day, $4,000 max position, one entry per symbol per day. Skips
   the MA/RSI(2) watchlists, anything already held (manual positions
   included) and Trend Join's symbols.
-- **Time Machine (report-only):** after each entry the bot runs the pack's
+- **Time Machine gate:** before each entry the bot runs the pack's
   own Time Machine — vendored verbatim in
   [vendor/timemachine.py](src/tradingbot/vendor/timemachine.py) with its
   MIT license and its 47 tests — on that trade: 10,000 simulated
   rest-of-day paths built from the stock's last 60 days of 5-min bars, plus
-  the same rule on every past session, up to the 3:55pm flat-by. The full
-  report goes to the log, its verdict line (e.g. "Leans toward the stop")
-  and odds to the journal and the daily review. It never blocks or changes
-  a trade.
+  the same rule on every past session, up to the 3:55pm flat-by; the full
+  report goes to the log. **The trade is placed only when the Time Machine
+  agrees** — its verdict "Leans toward the target" or "Strongly toward the
+  target" (the target's share of the replays that hit a side beats
+  break-even, 1/(1+R) = 33% at 2R, by 5+ points). Coin flips, leans toward
+  the stop and refusals (e.g. under 20 full sessions of data) are skipped.
+  At most 10 candidates are checked per 5-min bar (one Yahoo request each).
+  Every check, traded or skipped, is in the daily, weekly and monthly
+  reports ("Stock ORB — Time Machine checks") and the daily review.
+  `STOCK_ORB_TM_FILTER=false` turns the gate off (report-only).
 - **Why it's an experiment:** our backtest of the published rules on 60 days
   of S&P 500 5-min data ([scripts/stock_orb_backtest.py](scripts/stock_orb_backtest.py))
   shows no edge — about −0.08R per trade over ~16,000 triggers, and

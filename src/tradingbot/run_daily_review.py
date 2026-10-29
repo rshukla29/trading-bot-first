@@ -231,11 +231,19 @@ def section_stock_orb(day: date) -> str:
            f"target {settings.stock_orb_target_r:g}R, flat by 15:55; ${settings.stock_orb_max_loss_per_trade:.0f} "
            f"risk/trade, ${settings.stock_orb_max_daily_loss:.0f}/day, {settings.stock_orb_max_trades_per_day} "
            f"trades/day, ${settings.stock_orb_max_order_value:,.0f} max position. Our 60-day backtest showed no "
-           f"edge (~-0.08R/trade over all triggers); judge it on these real fills. The Time Machine is report-only.\n"]
+           f"edge (~-0.08R/trade over all triggers); judge it on these real fills. The pack's Time Machine runs "
+           f"before every entry; with the gate on (since 2026-10-29) a trade is placed only when it leans toward "
+           f"the target.\n"]
     pos = q("""SELECT symbol, trigger_bar, or_low, or_high, entry_price, qty, stop_price, target_price, status,
                exit_price, exit_reason, realized_pnl, tm_mc_avg_r, tm_hist_trades, tm_hist_avg_r
                FROM stock_orb_positions WHERE trade_date=? ORDER BY id""", (day.isoformat(),))
     out.append(md_table(pos))
+    checks = q("""SELECT symbol, trigger_bar, entry, stop, target, p_target, p_stop, p_neither, avg_r,
+                  hist_triggered, hist_target, hist_stop, hist_avg_r, decision, verdict
+                  FROM stock_orb_tm_checks WHERE trade_date=? ORDER BY id""", (day.isoformat(),))
+    gate = ("ON: trades only when it leans toward the target" if settings.stock_orb_tm_filter
+            else "OFF: report-only")
+    out.append(f"\nTime Machine checks before entry (gate {gate}):\n\n" + md_table(checks))
     allp = q("SELECT realized_pnl FROM stock_orb_positions WHERE status='closed'")
     if not allp.empty:
         pnl = allp["realized_pnl"]
