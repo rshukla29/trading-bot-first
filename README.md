@@ -341,10 +341,18 @@ only if it agrees → bracket order → stop / target / 3:55 flatten.**
 - **Why it's an experiment:** our backtest of the published rules on 60 days
   of S&P 500 5-min data ([scripts/stock_orb_backtest.py](scripts/stock_orb_backtest.py))
   shows no edge — about −0.08R per trade over ~16,000 triggers, and
-  −$1,044 for the 3-a-day version at these sizes. The Time Machine gate is
-  not backtested; expect it to skip most breakouts (the same 60-day history
-  feeds both). The owner chose to run it
+  −$1,044 for the 3-a-day version at these sizes. The owner chose to run it
   as published and judge it on real fills.
+- **Gate backtest** ([scripts/stock_orb_tm_backtest.py](scripts/stock_orb_tm_backtest.py),
+  run 2026-10-30): the Time Machine on all 10,074 triggers of Sep 4 – Oct 30,
+  each run on only the sessions before its date. It agreed with 344 (3.4%),
+  and those did *worse* than the ones it rejected: −0.26R vs −0.16R per
+  trade, in both halves of the period. The live bot's day (3 trades, $150
+  budget) lost −$256 gated vs −$661 ungated over 40 days, but the average
+  per trade was the same (−0.16R vs −0.15R) and the halves disagreed, so
+  that difference is noise. No evidence the gate adds an edge; it is kept
+  because the owner asked for it, and the live checks in the reports will
+  show how it does on real fills.
 
 ### How the strategies stay out of each other's way
 
