@@ -37,6 +37,67 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 | 4:15pm | `SP500ScanBot` | Saves the S&P 500 scan (movers, unusual volume, strategy buy signals) to `scans/YYYY/MM/DD/` |
 | 4:50pm | `DailyReviewBot` | Daily review: facts script + Claude Code (read-only) writes recommendations to `analysis/daily/YYYY/MM/DD/` |
 
+### Strategy workflow
+
+Every strategy follows the same path: **scan → entry rule → checks (any
+fails → no trade) → order → exits (first one hit)**. GitHub draws these
+charts; the details for each are in the numbered sections below.
+
+```mermaid
+flowchart LR
+  subgraph PRE["Before the open"]
+    P1["9:00 premarket snapshot"] --> P2["9:25 step-stop manager starts"]
+  end
+  subgraph DAY["Market hours"]
+    D1["9:30 ORB options · Stock ORB"] --> D2["9:50 Trend Join"] --> D3["10:20 Credit ORB"] --> D4["3:45 iron condor"] --> D5["3:50–3:55 intraday bots flat"] --> D6["3:57 expiry guard"]
+  end
+  subgraph POST["After the close"]
+    A1["4:15 S&P 500 scan"] --> A2["4:30 RSI(2) then MA-crossover · postmarket snapshot"] --> A3["4:50 daily review"]
+  end
+  PRE --> DAY --> POST
+```
+
+```mermaid
+flowchart LR
+  subgraph S1["1 · MA-crossover — 4:30pm, daily bars"]
+    direction LR
+    a1["WATCHLIST, 19 stocks"] --> a2{"Golden cross 20/50 SMA + trend filters<br/>or consolidation retest"} --> a3{"Max 5 positions · not held<br/>1% risk, ≤ $2,000"} --> a4["Buy at next open<br/>+ GTC stop −10%"] --> a5["Exit: death cross · RSI(14) back below 80<br/>· step stop"]
+  end
+  subgraph S2["2 · RSI(2) — 4:30pm, daily bars"]
+    direction LR
+    b1["RSI2 watchlist + IBKR movers<br/>+ S&P 500 screen (not Fridays)"] --> b2{"Above 200-SMA<br/>and RSI(2) below 5"} --> b3{"Volume ≤ 3× avg · IBKR re-check<br/>max 5, ≤ $2,000"} --> b4["Buy at next open, most oversold first<br/>+ GTC stop −10%"] --> b5["Exit: RSI(2) above 65 · step stop"]
+  end
+```
+
+```mermaid
+flowchart LR
+  subgraph S3["3 · ORB SPY 0DTE options — 9:30am"]
+    direction LR
+    c1["15-min opening range"] --> c2{"Two 5-min closes outside<br/>→ call or put"} --> c3{"Range ≥ 0.2% · VWAP side<br/>9:45–12:00 · fill IV ≤ 1.25× model<br/>1 call + 1 put a day"} --> c4["Buy 0DTE option<br/>≤ 10 contracts"] --> c5["Exit: +50% profit lock in 25% steps<br/>· 200% Fib target · 3:55 flatten"]
+  end
+  subgraph S4["4 · Iron condor SPY — 3:45pm"]
+    direction LR
+    d1["SPY chain ~45 DTE"] --> d2{"Sell ~16-delta call + put<br/>$5 wings"} --> d3{"One new per 7 days<br/>max 3 open"} --> d4["Limit at mid,<br/>then toward natural"] --> d5["Exit: 50% of credit · loss 2× credit<br/>· 21 DTE"]
+  end
+  subgraph S6["6 · ORB credit spreads SPY 0DTE — 10:20am"]
+    direction LR
+    f1["60-min opening range ≥ 0.2%"] --> f2{"First 5-min close outside, 10:30–12:00<br/>→ sell the far-side $2 spread"} --> f3{"Mid credit ≥ $0.10<br/>max loss ≤ $500"} --> f4["Sell spread"] --> f5["Exit: buy back 3:50pm<br/>· expiry guard 3:57"]
+  end
+```
+
+```mermaid
+flowchart LR
+  subgraph S5["5 · Trend Join Long — 9:50am"]
+    direction LR
+    e1["Gap ≥ 3% S&P 500 names above 200-SMA<br/>scans 9:55–12:55"] --> e2{"New high of day above<br/>yesterday's + premarket high<br/>rel. volume ≥ 2×"} --> e3{"≤ $2,000 · max 5 open<br/>5 a day · 1 per symbol"} --> e4["Buy + stop at<br/>low of day − 1%"] --> e5["+0.75R sell ⅓ · +1R breakeven<br/>· swing-low trail · 3:51 flatten"]
+  end
+  subgraph S7["7 · Stock ORB + Time Machine — 9:30am"]
+    direction LR
+    g1["Yahoo S&P 500 scan<br/>every 5-min bar"] --> g2{"First 5-min close above<br/>the 15-min range high<br/>9:45–3:30"} --> g3{"Confirmed on IBKR bars<br/>$50 a trade · $150 a day · 3 a day"} --> g4{"Time Machine leans<br/>toward the target?"} --> g5["Bracket: buy + stop<br/>at range mid + 2R target"] --> g6["Exit: stop · target<br/>· 3:55 flatten"]
+    g4 -- "no" --> g7["Skip, recorded in the reports"]
+  end
+```
+
 ### Profit-locking step stop (MA-crossover, RSI(2))
 
 Once a position is in profit, its stop moves up in 10% steps and never
@@ -424,6 +485,14 @@ configurable there — see `.env.example` for the full list. Never commit
    check "Enable ActiveX and Socket Clients", confirm the port matches
    `.env`, and add `127.0.0.1` to trusted IPs.
 3. Leave TWS/Gateway running whenever the bots run — they connect locally.
+4. Market data: the live account subscribes to NYSE (Network A/CTA) and
+   NASDAQ (Network C/UTP) level 1 for the API (non-professional; Network B
+   and options were already there), shared with the paper account
+   (Settings → Paper Trading Account). Without them IBKR's intraday bars for
+   NYSE/Nasdaq stocks arrive ~15 minutes late (`Error 10089`). Don't stay
+   logged into the live account (TWS, IBKR Desktop, mobile app) during market
+   hours: the shared data then goes to that session and the paper bots get
+   `Error 10197 No market data during competing live session`.
 
 ### 4. Scheduling
 

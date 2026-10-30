@@ -51,6 +51,15 @@ Known log patterns (not problems by themselves):
 - `Error 162 ... API scanner subscription cancelled` in the RSI(2) log is IBKR confirming the bot closed its
   top-movers scanner after reading the results — normal, nothing failed. (A different Error 162, "TWS session is
   connected from a different IP address", IS a problem: a competing login cutting the bots' data.)
+- Stock ORB's `Yahoo hit not confirmed on IBKR bars — skipping` for a few names is normal (the two feeds differ
+  slightly). But if (nearly) every breakout of the day fails it and no Time Machine check runs, that IS a problem:
+  IBKR's bars for those stocks are arriving late — the NYSE (Network A) / NASDAQ (Network C) real-time data isn't
+  reaching the paper account (subscription lapsed, sharing off, or a competing live session — `Error 10197 No
+  market data during competing live session`, `Error 10089 ... requires additional subscription`). Report it under
+  Problems found as a data problem, not as the strategy working; it blocked every NYSE/Nasdaq name on 10-27, 10-29
+  and 10-30.
+- `Error 10197 No market data during competing live session` in any log means the live account was logged in
+  elsewhere (TWS, IBKR Desktop or the mobile app) during the session, so the paper bots lost NYSE/Nasdaq data.
 - `only N bars, strategy needs 201 — skipping` for scanner-discovered symbols means the stock is too newly listed
   for the 200-day average; skipping it is correct.
 - yfinance `possibly delisted; no price data found` for S&P 500 members is usually a transient Yahoo data gap.
