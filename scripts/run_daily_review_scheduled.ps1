@@ -1,6 +1,6 @@
 param([string]$ReviewDate = "")
 
-Set-Location "c:\Users\rshuk\.vscode\Projects\trading-bot"
+Set-Location (Split-Path $PSScriptRoot -Parent)  # the repo folder, wherever it was cloned
 
 $logDir = "logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }

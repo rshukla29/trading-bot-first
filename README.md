@@ -1,9 +1,13 @@
 # trading-bot
 
-Automated trading bots for Interactive Brokers (via `ib_async`): six
+Automated trading bots for Interactive Brokers (via `ib_async`): seven
 independent strategies covering stocks and SPY options, plus daily,
 weekly and monthly P&L reports. **Paper trading only (account `DU…`) until
 you explicitly opt into live money.**
+
+**Setting it up for the first time?** Start with the
+[setup guide](docs/SETUP.md): what you need and every step, no programming
+needed.
 
 ## Strategies at a glance
 
@@ -457,6 +461,12 @@ The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
 
 ## Setup
 
+**New here?** Follow [docs/SETUP.md](docs/SETUP.md): a step-by-step guide,
+no programming needed, from opening the IBKR account to the first report.
+[scripts/install.ps1](scripts/install.ps1) does steps 1, 2 and 4 below in
+one go (packages, `.env`, tests, scheduled tasks in your PC's time zone).
+The steps below are the same thing by hand.
+
 ### 1. Python environment
 
 Requires Python 3.11+. From `trading-bot/`:
@@ -498,7 +508,10 @@ configurable there — see `.env.example` for the full list. Never commit
 
 Each scheduled bot has a wrapper in [scripts/](scripts/)
 (`run_*_scheduled.ps1`) registered in Windows Task Scheduler; logs go to
-`logs/<bot>_<date>.log`.
+`logs/<bot>_<date>.log`. The wrappers find the repo folder themselves, so
+the repo can live anywhere. [scripts/install.ps1](scripts/install.ps1)
+creates all the tasks (Mon–Fri, New York times converted to the PC's time
+zone; re-running it replaces them).
 
 ## Safety
 
