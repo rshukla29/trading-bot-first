@@ -20,11 +20,14 @@ fills, IBKR fixed commission both sides. One Yahoo request per symbol for its
 
     python scripts/stock_orb_tm_backtest.py             # uses the cache if there is one
     python scripts/stock_orb_tm_backtest.py --refresh   # re-download the charts
+    python scripts/stock_orb_tm_backtest.py --stop or_low   # stop at the range low
+    python scripts/stock_orb_tm_backtest.py --stop 20       # stop 20 % below the entry
 """
 from __future__ import annotations
 
+import argparse
 import json
-import sys
+import math
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from pathlib import Path
@@ -32,7 +35,7 @@ from pathlib import Path
 import pandas as pd
 
 from tradingbot.sp500_scanner import fetch_sp500_constituents
-from tradingbot.strategy.stock_orb import (Trigger, find_trigger, plan_trade, regular_session, run_time_machine,
+from tradingbot.strategy.stock_orb import (Plan, Trigger, find_trigger, plan_trade, regular_session, run_time_machine,
                                            share_quantity, simulate_exit, time_machine_check, time_machine_plan)
 
 CACHE = Path("data/tm_charts.pkl")
@@ -70,7 +73,20 @@ def bars_from_chart(text: str) -> pd.DataFrame:
     return regular_session(df.dropna())
 
 
-def triggers_for(sym: str, text: str) -> list[dict]:
+def plan_for(trig: Trigger, stop: str) -> Plan | None:
+    """The live plan (stop at the range midpoint) or a wider stop: `or_low`
+    (the range low) or a percent below the entry ("20" = 20 %). Target 2R."""
+    if stop == "or_mid":
+        return plan_trade(trig.entry, trig.or_high, trig.or_low, TARGET_R)
+    price = trig.or_low if stop == "or_low" else trig.entry * (1 - float(stop) / 100)
+    stop_px = math.floor(price * 100) / 100
+    risk = trig.entry - stop_px
+    if risk <= 0:
+        return None
+    return Plan(trig.entry, stop_px, round(trig.entry + TARGET_R * risk, 2), risk)
+
+
+def triggers_for(sym: str, text: str, stop: str = "or_mid") -> list[dict]:
     df = bars_from_chart(text)
     days = sorted(set(df.index.date))
     out = []
@@ -81,7 +97,7 @@ def triggers_for(sym: str, text: str) -> list[dict]:
         trig = find_trigger(day)
         if trig is None:
             continue
-        plan = plan_trade(trig.entry, trig.or_high, trig.or_low, TARGET_R)
+        plan = plan_for(trig, stop)
         if plan is None:
             continue
         fill = trig.entry + SLIP
@@ -98,15 +114,16 @@ def triggers_for(sym: str, text: str) -> list[dict]:
     return out
 
 
-def judge(task: tuple[str, str]) -> list[dict]:
+def judge(task: tuple[str, str, str]) -> list[dict]:
     """All triggers of one symbol, each with the Time Machine's verdict."""
     from tradingbot.vendor import timemachine as tm
-    sym, text = task
-    rows = triggers_for(sym, text)
+    sym, text, stop = task
+    rule = stop if stop in ("or_mid", "or_low") else "pct"
+    rows = triggers_for(sym, text, stop)
     for t in rows:
         trig = Trigger(t["ts"], t["entry"], t["or_high"], t["or_low"], t["dollar_volume"])
         try:
-            check = time_machine_check(run_time_machine(time_machine_plan(sym, trig, t["plan"]), chart_text=text))
+            check = time_machine_check(run_time_machine(time_machine_plan(sym, trig, t["plan"], stop_rule=rule), chart_text=text))
             t.update(agrees=bool(check["agrees"]), p_target=check["p_target"], p_stop=check["p_stop"],
                      verdict=check["verdict"].split(":")[0])
         except tm.TMError as e:
@@ -152,12 +169,19 @@ def stats(t: pd.DataFrame) -> str:
 
 
 def main() -> None:
-    charts = load_charts("--refresh" in sys.argv)
-    print(f"{len(charts)} charts; running the Time Machine on every trigger...", flush=True)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--refresh", action="store_true", help="re-download the charts")
+    ap.add_argument("--stop", default="or_mid",
+                    help="or_mid (live rule), or_low, or a percent below the entry, e.g. 20")
+    args = ap.parse_args()
+    charts = load_charts(args.refresh)
+    print(f"{len(charts)} charts; stop {args.stop}; running the Time Machine on every trigger...", flush=True)
     with ProcessPoolExecutor() as pool:
-        rows = [r for rs in pool.map(judge, charts.items(), chunksize=4) for r in rs]
+        rows = [r for rs in pool.map(judge, [(s, c, args.stop) for s, c in charts.items()], chunksize=4)
+                for r in rs]
     t = pd.DataFrame(rows)
-    t.to_csv(OUT, index=False)
+    out = OUT if args.stop == "or_mid" else OUT.with_name(f"{OUT.stem}_stop_{args.stop}.csv")
+    t.to_csv(out, index=False)
     days = sorted(t.date.unique())
     mid = days[len(days) // 2]
     print(f"\n{len(t)} triggers on {len(days)} sessions {days[0]} .. {days[-1]} "
@@ -171,7 +195,7 @@ def main() -> None:
         print(f"  Time Machine disagrees  {stats(part[~part.agrees])}")
         print(f"  live bot, no gate       {stats(live_bot(part, gated=False))}")
         print(f"  live bot, gated         {stats(live_bot(part, gated=True))}\n")
-    print(f"Every trigger with its verdict: {OUT}")
+    print(f"Every trigger with its verdict: {out}")
 
 
 if __name__ == "__main__":

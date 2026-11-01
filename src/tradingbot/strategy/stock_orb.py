@@ -24,8 +24,9 @@ Time Machine: the pack's own trader-timemachine, vendored verbatim in
 tradingbot/vendor/timemachine.py (see run_time_machine below). From the
 stock's last 60 days of 5-min bars it runs 10,000 simulated rest-of-day
 paths plus the same rule on every past session, and prints one verdict.
-Report-only in this repo: logged and journaled with each trade, never used
-to block one.
+The live bot runs it before every entry and, with STOCK_ORB_TM_FILTER on
+(the default), buys only when it agrees: "Leans" or "Strongly toward the
+target" (see time_machine_check). Every check is journaled, traded or not.
 """
 from __future__ import annotations
 
@@ -145,15 +146,17 @@ def simulate_exit(after: pd.DataFrame, plan: Plan, flat_by: time = time(15, 55),
 # --------------------------------------------------------------------------
 
 def time_machine_plan(symbol: str, trigger: Trigger, plan: Plan, flat_by: str = "15:55",
-                      bar_minutes: int = 5) -> dict:
+                      bar_minutes: int = 5, stop_rule: str = "or_mid") -> dict:
     """A Stock ORB trade in trader-exit's plan.json shape, for the vendored
     Time Machine. `symbol` in Yahoo notation (BRK-B). The entry bar is the
-    trigger bar; entry_time is its close."""
+    trigger bar; entry_time is its close. `stop_rule` tells its history
+    replay how the stop was set: or_mid (the live rule), or_low, or pct
+    (the plan's stop distance as a percent of the entry)."""
     close = trigger.ts + pd.Timedelta(minutes=bar_minutes)
     return {"symbol": symbol, "side": "buy", "date": trigger.ts.date().isoformat(), "setup": "orb",
             "entry": plan.entry, "entry_time": close.strftime("%I:%M %p").lstrip("0"), "interval": "5m",
             "opening_range": {"high": trigger.or_high, "low": trigger.or_low, "minutes": 15},
-            "stop": plan.stop, "stop_rule": "or_mid", "target": plan.target, "flat_by": flat_by}
+            "stop": plan.stop, "stop_rule": stop_rule, "target": plan.target, "flat_by": flat_by}
 
 
 def run_time_machine(plan_raw: dict, chart_text: str | None = None, now_utc: _dt.datetime | None = None,
