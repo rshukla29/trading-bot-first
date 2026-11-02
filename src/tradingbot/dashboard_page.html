@@ -569,12 +569,14 @@ function attention(issues, day) {
 
 // ------------------------------------------------------------ boot
 $("#meta").textContent = `Paper account · updated ${D.generated}`;
-$("#tabs").innerHTML = TABS.map(([id, t]) => `<button role="tab" data-id="${id}">${t}</button>`).join("");
+// Stock ORB only: no Time Machine tab in a copy of the repo without it (or before its first check).
+$("#tabs").innerHTML = TABS.filter(([id]) => id !== "timemachine" || D.tm.length)
+  .map(([id, t]) => `<button role="tab" data-id="${id}">${t}</button>`).join("");
 $("#tabs").onclick = e => { const b = e.target.closest("button"); if (b) show(b.dataset.id); };
 document.addEventListener("click", e => { const a = e.target.closest("[data-go]"); if (a) { e.preventDefault(); show(a.dataset.go); } });
 let start = location.hash.slice(1);
 if (!VIEWS[start]) { try { start = localStorage.getItem("dash-tab"); } catch (e) {} }
-show(VIEWS[start] ? start : "overview");
+show(VIEWS[start] && (start !== "timemachine" || D.tm.length) ? start : "overview");
 let resizeTimer, lastWidth = innerWidth;
 addEventListener("resize", () => {
   clearTimeout(resizeTimer);
