@@ -25,7 +25,9 @@ $reviewDir = "analysis\daily\$y\$m\$d"
 $prompt = (Get-Content "scripts\daily_review_prompt.md" -Raw).Replace("{DATE}", $date).Replace("{YEAR}", $y).Replace("{MONTH}", $m).Replace("{DAY}", $d)
 # Read-only tools: Claude reads the facts and history and replies with the
 # review; this script saves the reply. Claude cannot write files, run
-# commands or reach the web.
+# commands or reach the web. Claude replies in UTF-8; without the next line
+# PowerShell decodes it with the console's code page and saves a dash as 3 junk characters.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $review = & claude -p $prompt --allowedTools "Read" "Glob" "Grep" `
     --disallowedTools "Bash" "PowerShell" "Edit" "Write" "NotebookEdit" "WebFetch" "WebSearch" 2>> $logFile
 if ($LASTEXITCODE -eq 0 -and $review) {
@@ -38,4 +40,7 @@ if ($LASTEXITCODE -eq 0 -and $review) {
 # Commit locally (no push), like the daily snapshots.
 git add "analysis/daily/$y/$m/$d" *>> $logFile
 git commit -m "Daily review: $date" *>> $logFile
+
+# Refresh the dashboard so it shows today's review (reports/dashboard.html).
+& ".\.venv\Scripts\python.exe" -m tradingbot.run_dashboard *>> $logFile
 exit 0

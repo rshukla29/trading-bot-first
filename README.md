@@ -422,6 +422,35 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
   the trade's result; with a count line ("N checked, N agreed, N traded, N
   skipped") and the traded P&L.
 
+## Dashboard
+
+`reports/dashboard.html` puts everything on one page: open it by
+double-clicking, or run [scripts/open_dashboard.ps1](scripts/open_dashboard.ps1)
+(right-click → Run with PowerShell) to rebuild it from the latest data and
+open it. It is rebuilt automatically after the 4:30pm snapshot and the
+4:50pm review. Read-only and offline: it reads the journal, `reports/`,
+`analysis/` and `logs/`, never IBKR, and the data is embedded in the file
+(no server). Not committed (`.gitignore`); every number in it is already
+in the journal and the reports.
+
+| Tab | Shows |
+|---|---|
+| Overview | Account value and P&L since the start, realized today / this week / this month / all time, largest drop, account value and realized P&L per day (hover for the breakdown), the latest review's summary, and anything that needs attention (a bot's own errors in its latest log, a condor expiring within a week, no snapshot for days) |
+| Strategies | Per strategy for a chosen period: trades, win rate, realized, average win / loss, profit factor, best / worst, and a running total chart |
+| Daily · weekly · monthly | Realized P&L per day, week or month, split by strategy, with links to that period's snapshot / weekly / monthly reports |
+| Trades | Every closed trade, filterable by period, strategy and symbol, sortable |
+| Open positions | What the journals say is open (live prices: the latest snapshot) |
+| Time Machine | Stock ORB's checks: per day and each one with its verdict and decision |
+| Reports | Every snapshot, weekly and monthly report, by month, plus the one-off studies in `analysis/` |
+| Daily reviews | Each 4:50pm review, rendered |
+| Bot health | Each bot's log for the last 15 days: ran cleanly / warnings / errors. IBKR's own notices (a cancelled order, a brief disconnect, market data messages) count as warnings; errors are lines the bots' code logged at ERROR |
+
+Built by [dashboard.py](src/tradingbot/dashboard.py) (data) and
+[dashboard_page.html](src/tradingbot/dashboard_page.html) (the page);
+`python -m tradingbot.run_dashboard [--open]` by hand. Its realized P&L per
+strategy is the reports' own ([strategy_pnl.py](src/tradingbot/strategy_pnl.py));
+[tests/test_dashboard.py](tests/test_dashboard.py) checks they match.
+
 ## Daily review (4:50pm)
 
 `DailyReviewBot` runs [scripts/run_daily_review_scheduled.ps1](scripts/run_daily_review_scheduled.ps1):

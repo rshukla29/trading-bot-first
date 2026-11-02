@@ -177,10 +177,17 @@ You're set. The bots start by themselves on the next weekday.
   or the IBKR mobile app. While you are, IBKR stops sending live prices to
   the paper account and the bots skip trades.
 
-**After 4:30pm:** open the newest report in the **reports** folder. It
-shows the day's profit and loss for each strategy, every trade with its buy
-and sell prices, and the open positions. With Claude Code, a written review
-appears at 4:50pm in **analysis\daily\YEAR\MONTH\DAY**.
+**After 4:30pm:** open **reports\dashboard.html** (double-click it). One
+page shows the account value, profit and loss per day, week, month and
+strategy, every trade, the open positions, links to every report, the
+written reviews and whether each bot ran cleanly. To refresh it at any
+time, right-click **scripts\open_dashboard.ps1** → **Run with PowerShell**.
+
+The newest report in the **reports** folder has the full detail for the
+day: each strategy's profit and loss, every trade with its buy and sell
+prices, and the open positions with live prices. With Claude Code, a
+written review appears at 4:50pm in **analysis\daily\YEAR\MONTH\DAY** (and
+on the dashboard).
 
 Market holidays need nothing: the bots find the market closed and stop.
 

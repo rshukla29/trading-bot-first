@@ -635,6 +635,17 @@ def main() -> None:
                 print(f"Saved to {monthly_path}")
                 commit_report(monthly_path, f"monthly {today.isoformat()}")
 
+            build_dashboard()
+
+
+def build_dashboard() -> None:
+    """Refresh reports/dashboard.html; never let it break the snapshot."""
+    try:
+        from tradingbot.dashboard import build
+        print(f"Dashboard: {build()}")
+    except Exception:
+        logger.exception("dashboard build failed")
+
 
 if __name__ == "__main__":
     main()

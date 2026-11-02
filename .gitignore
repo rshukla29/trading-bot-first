@@ -10,3 +10,4 @@ logs/
 data/*.csv
 data/*.pkl
 scans/
+reports/dashboard.html
