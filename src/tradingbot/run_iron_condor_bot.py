@@ -71,62 +71,92 @@ def _rehydrate_option(ib, conid: int):
     return qualified[0]
 
 
+QUOTE_RETRY_SECONDS = 5
+
+
 def manage_open_positions(ib, journal: Journal, symbol: str) -> None:
+    """Each open condor on its own: a failure on one (2026-10-27 and 11-02:
+    no quote for a far call leg) is logged and the others are still
+    checked."""
     for pos in journal.open_condor_positions(symbol):
-        legs = CondorLegs(
-            call_short=_rehydrate_option(ib, pos["call_short_conid"]),
-            call_long=_rehydrate_option(ib, pos["call_long_conid"]),
-            put_short=_rehydrate_option(ib, pos["put_short_conid"]),
-            put_long=_rehydrate_option(ib, pos["put_long_conid"]),
-            expiry=pos["expiry"],
-        )
-        cost = net_credit_estimate(ib, legs)
-        credit = pos["credit_received"]
-        expiry_date = datetime.strptime(pos["expiry"], "%Y%m%d").date()
-        days_to_expiry = (expiry_date - date.today()).days
+        try:
+            manage_position(ib, journal, symbol, pos)
+        except Exception:
+            logger.exception("%s: position %d: management failed, will retry next run", symbol, pos["id"])
 
-        exit_reason = None
-        if cost <= credit * (1 - settings.credit_spread_profit_target_pct):
-            exit_reason = "profit_target"
-        elif cost >= credit * settings.credit_spread_stop_loss_multiple:
-            exit_reason = "stop_loss"
-        elif days_to_expiry <= settings.credit_spread_dte_forced_close:
-            exit_reason = "dte_forced_close"
 
-        if exit_reason is None:
-            logger.info("%s: position %d holding (cost=%.2f credit=%.2f dte=%d)",
-                        symbol, pos["id"], cost, credit, days_to_expiry)
-            continue
+def current_cost(ib, legs: CondorLegs) -> float | None:
+    """Cost to close at the legs' mids, asking once more after
+    QUOTE_RETRY_SECONDS when a leg has no quote; None if it still has none."""
+    for attempt in range(2):
+        try:
+            return net_credit_estimate(ib, legs)
+        except ValueError as e:
+            if attempt:
+                logger.warning("%s", e)
+                return None
+            ib.sleep(QUOTE_RETRY_SECONDS)
+    return None
 
-        # Step from the mid toward the natural price, re-quoting each attempt
-        # (mid-only pricing left a condor unclosed for days).
-        remaining, cost_sum = pos["contracts"], 0.0
-        for attempt in range(3):
-            ladder = condor_close_ladder(ib, legs)
-            limit = ladder[min(attempt, len(ladder) - 1)]
-            trade, _ = close_condor(ib, symbol, legs, remaining, limit)
-            if not wait_for_fill(ib, trade, timeout=60):
-                ib.cancelOrder(trade.order)
-                ib.sleep(2)
-            got = int(trade.orderStatus.filled)
-            if got:
-                cost_sum += abs(trade.orderStatus.avgFillPrice) * got
-                remaining -= got
-            if remaining == 0:
-                break
-        if remaining:
-            logger.warning("%s: close for position %d: %d of %d contracts still open after 3 attempts "
-                           "(%s) — will retry next run", symbol, pos["id"], remaining, pos["contracts"], exit_reason)
-            continue
 
-        actual_cost = cost_sum / pos["contracts"]
-        realized_pnl = (credit - actual_cost) * pos["contracts"] * CONTRACT_MULTIPLIER
-        journal.close_condor_position(
-            pos["id"], datetime.now(timezone.utc).isoformat(), actual_cost, exit_reason, realized_pnl,
-        )
-        journal.log_order(symbol, "CLOSE_CONDOR", pos["contracts"], "COMBO", broker="IBKR", status="filled")
-        logger.info("%s: CLOSED position %d (%s), actual cost=%.2f, pnl=%.2f",
-                    symbol, pos["id"], exit_reason, actual_cost, realized_pnl)
+def manage_position(ib, journal: Journal, symbol: str, pos) -> None:
+    legs = CondorLegs(
+        call_short=_rehydrate_option(ib, pos["call_short_conid"]),
+        call_long=_rehydrate_option(ib, pos["call_long_conid"]),
+        put_short=_rehydrate_option(ib, pos["put_short_conid"]),
+        put_long=_rehydrate_option(ib, pos["put_long_conid"]),
+        expiry=pos["expiry"],
+    )
+    cost = current_cost(ib, legs)
+    if cost is None:
+        logger.warning("%s: position %d: no quote for a leg — can't check it this run", symbol, pos["id"])
+        return
+    credit = pos["credit_received"]
+    expiry_date = datetime.strptime(pos["expiry"], "%Y%m%d").date()
+    days_to_expiry = (expiry_date - date.today()).days
+
+    exit_reason = None
+    if cost <= credit * (1 - settings.credit_spread_profit_target_pct):
+        exit_reason = "profit_target"
+    elif cost >= credit * settings.credit_spread_stop_loss_multiple:
+        exit_reason = "stop_loss"
+    elif days_to_expiry <= settings.credit_spread_dte_forced_close:
+        exit_reason = "dte_forced_close"
+
+    if exit_reason is None:
+        logger.info("%s: position %d holding (cost=%.2f credit=%.2f dte=%d)",
+                    symbol, pos["id"], cost, credit, days_to_expiry)
+        return
+
+    # Step from the mid toward the natural price, re-quoting each attempt
+    # (mid-only pricing left a condor unclosed for days).
+    remaining, cost_sum = pos["contracts"], 0.0
+    for attempt in range(3):
+        ladder = condor_close_ladder(ib, legs)
+        limit = ladder[min(attempt, len(ladder) - 1)]
+        trade, _ = close_condor(ib, symbol, legs, remaining, limit)
+        if not wait_for_fill(ib, trade, timeout=60):
+            ib.cancelOrder(trade.order)
+            ib.sleep(2)
+        got = int(trade.orderStatus.filled)
+        if got:
+            cost_sum += abs(trade.orderStatus.avgFillPrice) * got
+            remaining -= got
+        if remaining == 0:
+            break
+    if remaining:
+        logger.warning("%s: close for position %d: %d of %d contracts still open after 3 attempts "
+                       "(%s) — will retry next run", symbol, pos["id"], remaining, pos["contracts"], exit_reason)
+        return
+
+    actual_cost = cost_sum / pos["contracts"]
+    realized_pnl = (credit - actual_cost) * pos["contracts"] * CONTRACT_MULTIPLIER
+    journal.close_condor_position(
+        pos["id"], datetime.now(timezone.utc).isoformat(), actual_cost, exit_reason, realized_pnl,
+    )
+    journal.log_order(symbol, "CLOSE_CONDOR", pos["contracts"], "COMBO", broker="IBKR", status="filled")
+    logger.info("%s: CLOSED position %d (%s), actual cost=%.2f, pnl=%.2f",
+                symbol, pos["id"], exit_reason, actual_cost, realized_pnl)
 
 
 def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) -> None:
@@ -209,9 +239,12 @@ def main() -> None:
         for symbol in settings.credit_spread_symbol_list:
             try:
                 manage_open_positions(client.ib, journal, symbol)
-                maybe_open_new_position(client.ib, journal, symbol, equity)
             except Exception:
                 logger.exception("%s: error during condor management, skipping", symbol)
+            try:
+                maybe_open_new_position(client.ib, journal, symbol, equity)
+            except Exception:
+                logger.exception("%s: error during condor entry, skipping", symbol)
 
 
 if __name__ == "__main__":

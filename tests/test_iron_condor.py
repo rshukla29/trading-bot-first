@@ -128,3 +128,30 @@ def test_min_vol_percentile_blocks_entries_when_vol_is_low():
     )
     result = run(bars, config, warmup=config.vol_percentile_lookback + config.vol_window + 2)
     assert len(result.trades) == 0
+
+
+def test_one_condor_without_a_quote_does_not_stop_the_others(monkeypatch):
+    """2026-11-02: no quote for one condor's far call leg raised out of the
+    loop, so the condors after it went unchecked."""
+    from types import SimpleNamespace
+
+    import tradingbot.run_iron_condor_bot as bot
+
+    positions = [dict(id=3, expiry="20261218", call_short_conid=1, call_long_conid=2, put_short_conid=3,
+                      put_long_conid=4, credit_received=2.07, contracts=10),
+                 dict(id=4, expiry="20261204", call_short_conid=5, call_long_conid=6, put_short_conid=7,
+                      put_long_conid=8, credit_received=1.19, contracts=10)]
+    journal = SimpleNamespace(open_condor_positions=lambda symbol: positions)
+    monkeypatch.setattr(bot, "_rehydrate_option", lambda ib, conid: conid)
+    quotes = []
+
+    def estimate(ib, legs):
+        quotes.append(legs.call_short)
+        if legs.call_short == 1:
+            raise ValueError("No valid live quote for SPY 802C: bid=nan ask=nan")
+        return 1.0
+    monkeypatch.setattr(bot, "net_credit_estimate", estimate)
+    sleeps = []
+    bot.manage_open_positions(SimpleNamespace(sleep=sleeps.append), journal, "SPY")
+    assert quotes == [1, 1, 5]                     # asked twice for #3, then #4 was still checked
+    assert sleeps == [bot.QUOTE_RETRY_SECONDS]
