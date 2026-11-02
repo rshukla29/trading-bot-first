@@ -7,6 +7,7 @@ import pytest
 
 from tradingbot.journal import Journal
 from tradingbot.strategy.stock_orb import (
+    Trigger,
     find_trigger,
     opening_range,
     plan_trade,
@@ -133,7 +134,7 @@ def _entry_harness(tmp_path, monkeypatch, check):
     day = _bars(RANGE + [("09:45", 101.0, 102.0, 100.9, 101.8)])
     monkeypatch.setattr(bot, "fetch_intraday_bars", lambda *a, **k: day)
     monkeypatch.setattr(bot, "pre_trade_time_machine",
-                        lambda sym, plan, trig: calls.append("time_machine") or ("TM summary", check))
+                        lambda sym, plan, trig, **k: calls.append("time_machine") or ("TM summary", check))
 
     def bracket(ib, contract, qty, stop, target):
         calls.append("order")
@@ -144,7 +145,7 @@ def _entry_harness(tmp_path, monkeypatch, check):
     monkeypatch.setattr(bot, "place_bracket", bracket)
     monkeypatch.setattr(bot, "wait_for_fill", lambda ib, t, **k: True)
     j = Journal(str(tmp_path / "j.db"))
-    pos = bot.try_enter(SimpleNamespace(qualifyContracts=lambda *c: c), j, "AAPL",
+    pos = bot.try_enter(SimpleNamespace(qualifyContracts=lambda *c: c, sleep=lambda s: None), j, "AAPL",
                         pd.Timestamp(f"{DAY} 09:50:25", tz="America/New_York"), DAY)
     return pos, calls, j
 
@@ -203,3 +204,35 @@ def test_report_lists_every_check(tmp_path, monkeypatch):
     monkeypatch.setattr(snap.settings, "db_path", str(tmp_path / "r.db"))
     html = "\n".join(snap._render_stock_orb_tm_section(date(2026, 10, 27), date(2026, 10, 27), "today"))
     assert "2 checked, 1 agreed, 1 traded, 1 skipped" in html and "97.60" in html and "Leans toward the stop" in html
+
+
+def test_time_machine_retries_once_when_yahoo_lags(monkeypatch):
+    """Yahoo hasn't published the entry bar yet: wait, then run it again once.
+    Any other refusal is final, and so is a second "not in the data"."""
+    import tradingbot.run_stock_orb_bot as bot
+    from tradingbot.vendor import timemachine as tm
+    trig = Trigger(pd.Timestamp(f"{DAY} 09:45"), 101.8, 101.0, 99.5, 1e6)
+    plan = plan_trade(trig.entry, trig.or_high, trig.or_low, 2.0)
+    lag = tm.TMError("the entry is not in the data: no complete 09:45 bar")
+
+    def run(answers):
+        calls, waits = [], []
+
+        def fake(*a, **k):
+            calls.append(1)
+            x = answers[len(calls) - 1]
+            if isinstance(x, Exception):
+                raise x
+            return x
+        monkeypatch.setattr(bot, "run_time_machine", fake)
+        monkeypatch.setattr(bot, "time_machine_summary", lambda doc: "summary")
+        monkeypatch.setattr(bot, "time_machine_check", lambda doc, gap: {"agrees": True})
+        monkeypatch.setattr(tm, "report", lambda doc: [])
+        out = bot.pre_trade_time_machine("AAPL", plan, trig, wait=waits.append)
+        return out, len(calls), waits
+
+    assert run([lag, {"doc": 1}]) == (("summary", {"agrees": True}), 2, [bot.TM_RETRY_SECONDS])
+    (summary, check), n, waits = run([lag, lag])
+    assert check is None and n == 2 and "not in the data" in summary
+    (summary, check), n, waits = run([tm.TMError("only 13 full session(s)")])
+    assert check is None and n == 1 and waits == []

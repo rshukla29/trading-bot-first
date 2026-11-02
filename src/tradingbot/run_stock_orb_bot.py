@@ -203,7 +203,7 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
     # placed only if it agrees (leans or strongly toward the target); a
     # refusal or an error counts as not agreeing. Every check is journaled.
     tm_on = settings.stock_orb_time_machine
-    tm_summary, check = pre_trade_time_machine(sym, plan, trig) if tm_on else (None, None)
+    tm_summary, check = pre_trade_time_machine(sym, plan, trig, wait=ib.sleep) if tm_on else (None, None)
     bar = trig.ts.strftime("%H:%M")
 
     def record(decision: str, position_id: int | None = None) -> None:
@@ -245,16 +245,31 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
     return pos
 
 
-def pre_trade_time_machine(sym: str, plan, trig: Trigger) -> tuple[str, dict | None]:
+TM_RETRY_SECONDS = 30
+
+
+def pre_trade_time_machine(sym: str, plan, trig: Trigger, wait=None) -> tuple[str, dict | None]:
     """The pack's own Time Machine (vendor/timemachine.py) on the planned
     trade, run before the order: full report to the log; returns (one-line
     summary, check numbers incl. `agrees`). The check is None when the Time
-    Machine refused or failed — that never counts as agreeing."""
+    Machine refused or failed — that never counts as agreeing.
+
+    Yahoo can publish the entry bar a little after IBKR does; the Time
+    Machine then refuses with "the entry is not in the data". With `wait`
+    (ib.sleep live) it waits TM_RETRY_SECONDS and tries once more."""
     from tradingbot.vendor import timemachine as tm
+    tm_plan = time_machine_plan(yahoo_symbol(sym), trig, plan,
+                                settings.stock_orb_flatten_time, settings.stock_orb_bar_minutes)
     try:
-        doc = run_time_machine(time_machine_plan(yahoo_symbol(sym), trig, plan,
-                                                 settings.stock_orb_flatten_time, settings.stock_orb_bar_minutes),
-                               until=settings.stock_orb_flatten_time)
+        try:
+            doc = run_time_machine(tm_plan, until=settings.stock_orb_flatten_time)
+        except tm.TMError as e:
+            if wait is None or "the entry is not in the data" not in str(e):
+                raise
+            logger.info("%s: Yahoo doesn't have the entry bar yet — Time Machine again in %ds",
+                        sym, TM_RETRY_SECONDS)
+            wait(TM_RETRY_SECONDS)
+            doc = run_time_machine(tm_plan, until=settings.stock_orb_flatten_time)
     except tm.TMError as e:
         logger.warning("%s: Time Machine refused: %s", sym, e)
         return f"Time Machine refused: {e}", None
