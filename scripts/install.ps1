@@ -114,6 +114,18 @@ if ($SkipTasks) {
     }
 }
 
+Step "Desktop shortcut for the dashboard"
+# Double-click: rebuilds reports\dashboard.html from the latest data and opens it.
+$desktop = [Environment]::GetFolderPath("Desktop")
+$link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop "Trading dashboard.lnk"))
+$link.TargetPath = "powershell.exe"
+$link.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $repo 'scripts\open_dashboard.ps1')`""
+$link.WorkingDirectory = $repo
+$link.IconLocation = "shell32.dll,22"
+$link.Description = "Rebuild the trading bots dashboard and open it"
+$link.Save()
+Ok "Trading dashboard (on the desktop)"
+
 Step "Done"
 Write-Host "   Next: TWS settings and the first check - docs/SETUP.md, steps 5 to 7."
 Read-Host "Press Enter to close"

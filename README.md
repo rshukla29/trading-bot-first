@@ -424,11 +424,12 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
 
 ## Dashboard
 
-`reports/dashboard.html` puts everything on one page: open it by
-double-clicking, or run [scripts/open_dashboard.ps1](scripts/open_dashboard.ps1)
-(right-click → Run with PowerShell) to rebuild it from the latest data and
-open it. It is rebuilt automatically after the 4:30pm snapshot and the
-4:50pm review. Read-only and offline: it reads the journal, `reports/`,
+`reports/dashboard.html` puts everything on one page. The **Trading
+dashboard** desktop shortcut (created by [scripts/install.ps1](scripts/install.ps1))
+runs [scripts/open_dashboard.ps1](scripts/open_dashboard.ps1): it rebuilds
+the page from the latest data, then opens it. Opening the file itself shows
+the last build (its time is at the top); it is also rebuilt automatically
+after the 4:30pm snapshot and the 4:50pm review. Read-only and offline: it reads the journal, `reports/`,
 `analysis/` and `logs/`, never IBKR, and the data is embedded in the file
 (no server). Not committed (`.gitignore`); every number in it is already
 in the journal and the reports.

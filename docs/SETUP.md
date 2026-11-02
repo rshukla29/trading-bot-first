@@ -114,7 +114,8 @@ GitHub, do so in the window that opens.
    - creates the settings file `.env`;
    - runs the bots' self-tests (all must pass);
    - creates the scheduled tasks that start each bot at the right time on
-     weekdays, converted to your PC's time zone.
+     weekdays, converted to your PC's time zone;
+   - puts a **Trading dashboard** shortcut on your desktop.
 4. If you see a red **PROBLEM**, the line says what to fix. Fix it and run
    the installer again. Running it twice is safe.
 
@@ -177,11 +178,12 @@ You're set. The bots start by themselves on the next weekday.
   or the IBKR mobile app. While you are, IBKR stops sending live prices to
   the paper account and the bots skip trades.
 
-**After 4:30pm:** open **reports\dashboard.html** (double-click it). One
-page shows the account value, profit and loss per day, week, month and
-strategy, every trade, the open positions, links to every report, the
-written reviews and whether each bot ran cleanly. To refresh it at any
-time, right-click **scripts\open_dashboard.ps1** → **Run with PowerShell**.
+**After 4:30pm:** double-click **Trading dashboard** on your desktop. It
+gets the latest data and opens one page with the account value, profit
+and loss per day, week, month and strategy, every trade, the open
+positions, links to every report, the written reviews and whether each
+bot ran cleanly. (Opening **reports\dashboard.html** directly shows the
+data from its last update, written at the top of the page.)
 
 The newest report in the **reports** folder has the full detail for the
 day: each strategy's profit and loss, every trade with its buy and sell
