@@ -14,13 +14,13 @@ needed.
 | # | Strategy | Instrument | Style | Schedule (ET, Mon–Fri) | Entrypoint |
 |---|---|---|---|---|---|
 | 1 | MA-crossover + consolidation retest | Stocks — `WATCHLIST` (19 names) | Trend-following, daily bars, swing (days–weeks) | 4:30pm, right after RSI(2) — `RSI2TradingBot` | `run_ibkr_bot` |
-| 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + IBKR top movers + S&P 500 yfinance screen (scans not on Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
+| 2 | RSI(2) mean-reversion | Stocks — `RSI2_WATCHLIST` (10) + S&P 500 yfinance screen (not on Fridays) | Dip-buying, daily bars, swing (days) | 4:30pm — `RSI2TradingBot` | `run_rsi2_bot` |
 | 3 | Opening Range Breakout (ORB) | SPY 0DTE calls/puts | Intraday options | 9:30am–4:00pm — `ORBTradingBot` | `run_orb_bot` |
 | 4 | Iron condor | SPY options, ~45 DTE | Premium selling, multi-week | 3:45pm — `IronCondorTradingBot` | `run_iron_condor_bot` |
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 | 6 | ORB credit spreads *(paper experiment)* | SPY 0DTE put/call credit spreads | Sells premium on the far side of the range | 10:20am–4:00pm — `CreditOrbTradingBot` | `run_credit_orb_bot` |
 | 7 | Stock ORB *(paper experiment)* | S&P 500 stocks | Intraday opening-range breakout ([day-trader-skill](https://github.com/Jakeschincariol/day-trader-skill) rules), traded only when its Time Machine agrees | 9:30am–4:00pm — `StockOrbTradingBot` | `run_stock_orb_bot` |
-| — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Raises stops in 10% profit steps | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
+| — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Locks profit from +30% (stop +15%, then 15% steps) | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
 
 Run any of them manually with `python -m tradingbot.<entrypoint>`.
 
@@ -69,7 +69,7 @@ flowchart LR
   end
   subgraph S2["2 · RSI(2) — 4:30pm, daily bars"]
     direction LR
-    b1["RSI2 watchlist + IBKR movers<br/>+ S&P 500 screen (not Fridays)"] --> b2{"Above 200-SMA<br/>and RSI(2) below 5"} --> b3{"Volume ≤ 3× avg · IBKR re-check<br/>max 5, ≤ $2,000"} --> b4["Buy at next open, most oversold first<br/>+ GTC stop −10%"] --> b5["Exit: RSI(2) above 65 · step stop"]
+    b1["RSI2 watchlist<br/>+ S&P 500 screen (not Fridays)"] --> b2{"Above 200-SMA<br/>and RSI(2) below 5"} --> b3{"Volume ≤ 3× avg · IBKR re-check<br/>max 5, ≤ $2,000"} --> b4["Buy at next open, most oversold first<br/>+ GTC stop −15%"] --> b5["Exit: RSI(2) above 65 · step stop"]
   end
 ```
 
@@ -104,30 +104,38 @@ flowchart LR
 
 ### Profit-locking step stop (MA-crossover, RSI(2))
 
-Once a position is in profit, its stop moves up in 10% steps and never
-comes back down. Bought 100 shares at $10 ($1,000):
+Once a position is up 30%, its stop moves up to +15% profit, then follows
+15 points behind each further 15% step. It never comes back down. Bought
+100 shares at $10 ($1,000):
 
 | Gain reaches | Stop moves to | Locked-in value |
 |---|---|---|
-| (entry) | −10% ($9.00) | $900 |
-| +11% ($11.10) | +10% ($11.00) | $1,100 |
-| +21% ($12.10) | +20% ($12.00) | $1,200 |
-| +31% … | +30% … | … |
+| (entry) | −10% ($9.00); RSI(2) −15% ($8.50) | $900 / $850 |
+| +30% ($13.00) | +15% ($11.50) | $1,150 |
+| +45% ($14.50) | +30% ($13.00) | $1,300 |
+| +60% ($16.00) | +45% ($14.50) | $1,450 |
+| +75% … | +60% … | … |
 
-The stop stays at −10% until the gain first reaches +11% (the 1% buffer
-keeps the new stop from sitting right at the current price).
+Below +30% the entry stop stays in force. Since 2026-11-03 (owner's rule),
+in place of +11% → +10% in 10% steps: in
+[scripts/step_lock_test.py](scripts/step_lock_test.py) (MA-crossover on its
+watchlist, 2010–2026) the old lock sold 115 winners early — profit factor
+2.24 / 1.56 on the first 60% / last 40% of the years vs 2.58 / 1.95 with
+the new one, about the same as no lock at all. RSI(2) trades rarely reach
++30% (5-day average hold), so it changes nothing there.
 
 - **Stocks (MA-crossover, RSI(2)):** `run_step_stop_bot` checks every ~60s
   from 9:30am to 4:00pm (`StepStopTradingBot`, starts 9:25am) and raises
   the stop order at IBKR, so an intraday spike that fades still locks in
   its step. Uses client ID 1 (the ID that placed the stops) — don't run
   the MA/RSI(2) bots by hand while it's running.
-- **ORB uses its own, wider step-up** (starts at +50%, 25% steps — see #3):
-  the stocks' 10% steps were too tight for 0DTE option premiums in the
-  backtest (profit factor 0.98).
+- **ORB uses its own step-up** (starts at +50%, 25% steps — see #3): 10%
+  steps were too tight for 0DTE option premiums in the backtest (profit
+  factor 0.98).
 - Not applied to Trend Join (its own breakeven + swing-low trail) or the
   iron condor (short premium; already closes at 50% of max profit).
-- Settings: `STEP_STOP_ENABLED`, `STEP_STOP_PCT`, `STEP_STOP_BUFFER_PCT`.
+- Settings: `STEP_STOP_ENABLED`, `STOCK_LOCK_TRIGGER_PCT`, `STOCK_LOCK_STEP_PCT`,
+  `STOCK_LOCK_TRAIL_PCT`.
 
 ### 1. MA-crossover + consolidation retest
 
@@ -141,8 +149,8 @@ Code: [strategy/ma_crossover.py](src/tradingbot/strategy/ma_crossover.py),
   above it on ≥ 1.2× volume → within 5 bars, a dip back to the breakout
   level that closes back above it.
 - **Exit:** death cross (20-SMA below 50-SMA), or RSI(14) goes above 80 and
-  falls back below it; plus the broker-side stop (−10%, then raised in 10%
-  profit steps).
+  falls back below it; plus the broker-side stop (−10%, then the step-up
+  profit lock from +30%).
 
 ### 2. RSI(2) mean-reversion
 
@@ -151,20 +159,31 @@ Code: [strategy/rsi2_mean_reversion.py](src/tradingbot/strategy/rsi2_mean_revers
 
 - **Entry:** price above 200-SMA **and** RSI(2) < 5. Blocked if today's
   volume is > 3× the 20-day average (news-driven move, not a technical dip).
-- **Exit:** RSI(2) > 65; plus the broker-side stop (−10%, then raised in
-  10% profit steps).
-- **Universe:** fixed `RSI2_WATCHLIST` + IBKR top gainers/losers/most-active
-  (price ≥ $10, volume ≥ 500k) + an S&P 500 screen via yfinance (all ~500
-  names in one download; up to 20 RSI(2) buy hits, most oversold first).
-  IBKR re-checks every candidate on its own bars before ordering. Both
-  scans are skipped on Fridays to avoid weekend-gap risk. Runs after the
-  close, so orders fill at the next open.
+- **Exit:** RSI(2) > 65; plus the broker-side stop (−15%, `RSI2_STOP_LOSS_PCT`,
+  then the step-up profit lock from +30%).
+- **Universe:** fixed `RSI2_WATCHLIST` + an S&P 500 screen via yfinance (all
+  ~500 names in one download; up to 20 RSI(2) buy hits, most oversold
+  first). IBKR re-checks every candidate on its own bars before ordering.
+  The screen is skipped on Fridays to avoid weekend-gap risk. Runs after
+  the close, so orders fill at the next open. IBKR's top-movers scan
+  (`RSI2_SCAN_TOP_MOVERS`) is off since 2026-11-03: its non-S&P 500 picks
+  lost −$720 in 4 trades live (CBIO −$577), and the rules are only
+  backtested on the S&P 500.
+- **Why a 15% stop** (since 2026-11-03, was the shared 10%):
+  [scripts/rsi2_loss_cut_test.py](scripts/rsi2_loss_cut_test.py) replays
+  the live rules on the S&P 500, 2011–2026. Profit factor 1.24 / 1.21 on
+  the first 60% / last 40% of the days, vs 1.20 / 1.16 at 10%: most 10%
+  stop-outs were dips that recovered (196 of them, −$39.7k). 20% or no stop
+  wasn't better on both halves, and the test can't see stocks that crashed
+  out of the index. Time exits, the 5-day-SMA exit, a sector cap and
+  skipping big one-day drops didn't help.
 - **Entry order:** exits first, then buys lowest RSI(2) first, so limited
   slots (max 5) go to the most oversold setups.
 
 **Sizing for #1 and #2:** 1% account risk per trade, capped at $2,000
-notional per position (`MAX_POSITION_VALUE`), 10% broker-side **GTC** stop
-(cancelled automatically when the bot sells), max 5 positions each.
+notional per position (`MAX_POSITION_VALUE`), broker-side **GTC** stop
+(−10% MA-crossover, −15% RSI(2); cancelled automatically when the bot
+sells), max 5 positions each.
 
 ### 3. Opening Range Breakout (SPY 0DTE options)
 
@@ -214,7 +233,14 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
   stocks' 10% step stop, a +50% target, VWAP exit, re-entry (new
   high/low or VWAP pullback), a daily loss limit, and the options.cafe
   rules (+100%/−50%/3:30pm: PF 1.11–1.16, fragile). All remain in
-  settings, switched off.
+  settings, switched off. Re-tested 2026-11-03 after the full-premium
+  losses of Oct 2 and Oct 7 ([scripts/orb_loss_cut_test.py](scripts/orb_loss_cut_test.py),
+  chosen on the first 60% of sessions, judged on the rest): time stops
+  (sell at 11:00–14:00 if still below entry) and −40% to −70% premium
+  stops all scored below the current rules on the first 60% (PF 1.57),
+  and none beat them on the rest (1.53). A 12:00–13:00 time stop held up
+  better only if options are 25% pricier than estimated (PF 1.26–1.33 vs
+  1.12) — the case the IV pause above already guards against.
 - One position per symbol at a time, max 10 contracts; exits checked
   every 60s, and **every 5s once its profit lock is active** (since
   2026-10-13, when an option fell through its $0.99 lock to $0.91 between
@@ -356,8 +382,8 @@ only if it agrees → bracket order → stop / target / 3:55 flatten.**
 
 ### How the strategies stay out of each other's way
 
-- MA-crossover and RSI(2) watchlists don't overlap; RSI(2)'s scanner
-  excludes the MA watchlist. Both use client ID 1, so they run one after
+- MA-crossover and RSI(2) watchlists don't overlap; RSI(2)'s S&P 500
+  screen excludes the MA watchlist. Both use client ID 1, so they run one after
   the other in the same 4:30pm task (`run_rsi2_scheduled.ps1`), never at
   the same time.
 - **Manual trades are never touched.** MA-crossover and RSI(2) record
@@ -487,7 +513,10 @@ The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
 - **IBKR top movers check** (read-only): `python -m scripts.check_top_movers`
 - **Backtests:** `scripts/backtest_report.py`, `rsi2_backtest_report.py`,
   `options_backtest_report.py`, `iron_condor_backtest_report.py`,
-  `stock_orb_backtest.py` (Stock ORB on 60 days of S&P 500 5-min bars)
+  `stock_orb_backtest.py` (Stock ORB on 60 days of S&P 500 5-min bars),
+  `orb_loss_cut_test.py` (ORB time stops and premium stops),
+  `rsi2_loss_cut_test.py` (RSI(2) stops, exits and filters on 15 years of the S&P 500),
+  `step_lock_test.py` (the stocks' step-up profit lock, MA-crossover)
 - **Time Machine** (any planned day trade, by hand; never places an order):
   `python -m tradingbot.vendor.timemachine run --symbol TSLA --date 2026-10-19
   --entry 364.18 --stop 358.32 --target 370.04 --entry-time "10:15 AM" --until 15:55`

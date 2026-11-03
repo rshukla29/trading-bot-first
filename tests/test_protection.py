@@ -117,16 +117,20 @@ def test_snapshot_flags_unprotected_bot_positions_only():
 from tradingbot.protection import plan_stop_raise  # noqa: E402
 
 
+LOCK = (0.30, 0.15, 0.15, 0.01)  # +30% -> +15%, then 15% steps; 1% floor buffer
+
+
 def test_plan_stop_raise_moves_up_in_steps():
-    # cost $10, initial stop $9: +11% -> $11, +21% -> $12
-    assert plan_stop_raise(10.0, 11.10, 9.00, 0.10, 0.01) == 11.00
-    assert plan_stop_raise(10.0, 12.10, 11.00, 0.10, 0.01) == 12.00
+    # cost $10, initial stop $9: +30% -> $11.50, +45% -> $13.00, +60% -> $14.50
+    assert plan_stop_raise(10.0, 13.00, 9.00, *LOCK) == 11.50
+    assert plan_stop_raise(10.0, 14.50, 11.50, *LOCK) == 13.00
+    assert plan_stop_raise(10.0, 16.20, 13.00, *LOCK) == 14.50
 
 
 def test_plan_stop_raise_never_lowers_or_repeats():
-    assert plan_stop_raise(10.0, 11.50, 11.00, 0.10, 0.01) is None  # already at the +10% step
-    assert plan_stop_raise(10.0, 11.10, 12.00, 0.10, 0.01) is None  # price fell back: stop stays at 12
-    assert plan_stop_raise(10.0, 10.50, 9.00, 0.10, 0.01) is None   # below +11%: keep -10%
+    assert plan_stop_raise(10.0, 14.00, 11.50, *LOCK) is None  # still the +30% step
+    assert plan_stop_raise(10.0, 13.00, 13.00, *LOCK) is None  # price fell back: stop stays at 13
+    assert plan_stop_raise(10.0, 12.90, 9.00, *LOCK) is None   # below +30%: no profit lock yet
 
 
 # --- orphan stops & pending exits (2026-09-28 BAC incident) ------------------
@@ -190,16 +194,16 @@ def test_bracket_waits_for_ibkr_acknowledgement_and_flags_a_lost_order():
 
 def test_stop_lifted_to_max_loss_from_real_cost():
     # LLY 2026-10-20: cost 1265.93, stop 1116.31 (priced off the signal close) = -11.8%.
-    assert plan_stop_raise(1265.93, 1250.0, 1116.31, 0.10, 0.01, max_loss_pct=0.10) == 1139.34
+    assert plan_stop_raise(1265.93, 1250.0, 1116.31, *LOCK, max_loss_pct=0.10) == 1139.34
 
 
 def test_stop_floor_never_loosens_or_fires_on_the_spot():
     # LRCX: stop 258.23 is tighter than cost x 0.9 (248.36) -> leave it.
-    assert plan_stop_raise(275.96, 270.0, 258.23, 0.10, 0.01, max_loss_pct=0.10) is None
+    assert plan_stop_raise(275.96, 270.0, 258.23, *LOCK, max_loss_pct=0.10) is None
     # Price already at the floor: lifting the stop would sell immediately -> leave it.
-    assert plan_stop_raise(1265.93, 1140.0, 1116.31, 0.10, 0.01, max_loss_pct=0.10) is None
-    # The step rule still wins once it's higher.
-    assert plan_stop_raise(10.0, 11.10, 9.00, 0.10, 0.01, max_loss_pct=0.10) == 11.00
+    assert plan_stop_raise(1265.93, 1140.0, 1116.31, *LOCK, max_loss_pct=0.10) is None
+    # The profit lock still wins once it's higher.
+    assert plan_stop_raise(10.0, 13.00, 9.00, *LOCK, max_loss_pct=0.10) == 11.50
 
 
 # --- P&L by strategy (daily / weekly / monthly reports) ----------------------
@@ -240,3 +244,19 @@ def test_strategy_pnl_splits_by_strategy_and_never_double_counts(tmp_path):
     assert round(df["realized"].sum(), 2) == 189.0
     html = "\n".join(_render_strategy_pnl_section(date(2026, 10, 20), date(2026, 10, 20), "today"))
     assert "P&amp;L by strategy" in html   # renders (reads settings.db_path; content checked above)
+
+
+def test_step_stop_floors_rsi2_at_its_own_stop(tmp_path, monkeypatch):
+    from tradingbot import run_step_stop_bot
+    from tradingbot.config import settings
+    from tradingbot.journal import Journal
+    monkeypatch.setattr(settings, "stop_loss_pct", 0.10)
+    monkeypatch.setattr(settings, "rsi2_stop_loss_pct", 0.15)
+    j = Journal(str(tmp_path / "j.db"))
+    j.claim_stock("V", "ma_crossover")
+    j.claim_stock("ADM", "rsi2")
+    pct = run_step_stop_bot.stop_pct_by_symbol(j)
+    assert pct == {"V": 0.10, "ADM": 0.15}
+    # A 15% RSI(2) stop at $85 on a $100 cost is left alone, not lifted to the 10% floor.
+    assert plan_stop_raise(100.0, 98.0, 85.0, *LOCK, max_loss_pct=pct["ADM"]) is None
+    assert plan_stop_raise(100.0, 98.0, 85.0, *LOCK, max_loss_pct=pct["V"]) == 90.0

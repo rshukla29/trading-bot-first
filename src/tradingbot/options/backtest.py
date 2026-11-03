@@ -121,6 +121,8 @@ def run_options_backtest(
     confirm_bars: int = 1,
     fib_target_ext: float | None = None,
     fib_lock_ext: float | None = None,
+    time_stop: time | None = None,
+    time_stop_min_gain_pct: float = 0.0,
 ) -> OptionsBacktestResult:
     """Intraday-only long-options backtest: opening-range-breakout entries,
     Black-Scholes-simulated premiums (see options/pricing.py — no real
@@ -167,6 +169,9 @@ def run_options_backtest(
     fib_target_ext exits when SPY reaches that extension (e.g. 1.618);
     fib_lock_ext, once SPY has reached that extension, exits if it falls
     back to the range edge it broke out of.
+    Time stop (off by default): at or after `time_stop`, exit ("time_stop")
+    while the premium is below entry x (1 + time_stop_min_gain_pct) — a 0DTE
+    option that hasn't worked by then mostly just decays.
     Pricing: by default options are priced at realized 5-min vol x
     iv_premium_multiplier. vol_override (annualized vol per bar, aligned to
     `bars`, known at each bar's close) replaces that — e.g. a VIX-based
@@ -261,6 +266,9 @@ def run_options_backtest(
                 exit_reason = "eod_flatten"
             elif use_stop_loss and premium <= open_trade.entry_premium * (1 - stop_loss_pct_of_premium):
                 exit_reason = "stop_loss"
+            elif (time_stop is not None and now.time() >= time_stop
+                  and premium < open_trade.entry_premium * (1 + time_stop_min_gain_pct)):
+                exit_reason = "time_stop"
             elif step_stop is not None and premium <= step_stop:
                 exit_reason = "step_stop"
             elif ladder is not None and premium <= ladder:

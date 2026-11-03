@@ -105,7 +105,7 @@ def main() -> None:
         # Every owned position must have a working stop; anything already
         # through its 10% level without one is sold (see protection.py).
         cancel_orphan_stops(client.ib, {s for s, p in held.items() if p.position > 0})
-        stop_audit_sold = ensure_protective_stops(client.ib, journal, rsi2_positions, settings.stop_loss_pct, "run_rsi2_bot")
+        stop_audit_sold = ensure_protective_stops(client.ib, journal, rsi2_positions, settings.rsi2_stop_loss_pct, "run_rsi2_bot")
         for symbol in stop_audit_sold:
             rsi2_positions.pop(symbol)
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
@@ -193,18 +193,18 @@ def main() -> None:
                 continue
 
             qty = position_size(
-                equity, signal.price, settings.risk_pct_per_trade, settings.stop_loss_pct,
+                equity, signal.price, settings.risk_pct_per_trade, settings.rsi2_stop_loss_pct,
                 settings.max_position_value,
             )
             if qty <= 0:
                 logger.info("Computed position size 0 for %s, skipping", symbol)
                 continue
 
-            place_bracket_buy(client.ib, symbol, qty, signal.price, settings.stop_loss_pct)
+            place_bracket_buy(client.ib, symbol, qty, signal.price, settings.rsi2_stop_loss_pct)
             journal.claim_stock(symbol, STRATEGY)
             journal.log_order(
                 symbol, "BUY", qty, "MKT+STP", broker="IBKR", status="submitted",
-                stop_price=round(signal.price * (1 - settings.stop_loss_pct), 2),
+                stop_price=round(signal.price * (1 - settings.rsi2_stop_loss_pct), 2),
             )
             rsi2_positions[symbol] = None  # mark as filled-in-this-run to respect max_positions
             logger.info("BUY %s x%d @ ~%.2f (%s)", symbol, qty, signal.price, signal.reason)

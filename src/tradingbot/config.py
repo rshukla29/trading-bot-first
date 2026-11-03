@@ -50,11 +50,23 @@ class Settings(BaseSettings):
     # small/mid-cap the way it would size one in a stable blue-chip.
     max_position_value: float = 2000.0
 
-    # Stepped profit-locking stop (risk.step_trailing_stop): at +11% gain the
-    # stop moves to +10%, at +21% to +20%, etc. — never lowered. Applied to
-    # MA-crossover and RSI(2) stock positions by run_step_stop_bot.py
-    # (every ~60s during market hours) and to ORB option premium.
+    # Step-up profit lock for MA-crossover and RSI(2) stock positions
+    # (run_step_stop_bot.py, every ~60s during market hours; risk.ladder_stop):
+    # nothing until the stock is up stock_lock_trigger_pct, then the stop
+    # sits stock_lock_trail_pct below the highest stock_lock_step_pct step
+    # reached — +30% -> stop +15%, +45% -> +30%, +60% -> +45%. Never lowered.
+    # Since 2026-11-03 (owner's rule), replacing +11% -> +10% in 10% steps:
+    # scripts/step_lock_test.py (MA-crossover, its watchlist, 2010-2026) —
+    # PF 2.58 / 1.95 on the first 60% / last 40% vs 2.24 / 1.56 for the old
+    # lock, which sold 115 winners early (4 trades ever got to +30% under
+    # it, 23 now). RSI(2) trades rarely get to +30% (5-day average hold).
     step_stop_enabled: bool = True
+    stock_lock_trigger_pct: float = 0.30
+    stock_lock_step_pct: float = 0.15
+    stock_lock_trail_pct: float = 0.15
+    # 10% step stop on ORB option premium (risk.step_trailing_stop), used
+    # only when options_step_stop_enabled; step_stop_buffer_pct is also the
+    # stock bot's margin before it lifts a stop to the max-loss floor.
     step_stop_pct: float = 0.10
     step_stop_buffer_pct: float = 0.01
 
@@ -200,6 +212,14 @@ class Settings(BaseSettings):
     rsi2_fib_lookback: int = 0  # 0 disables the fib retracement confirmation
     rsi2_fib_zone_low: float = 0.382
     rsi2_fib_zone_high: float = 0.618
+    # RSI(2)'s own stop below the entry (MA-crossover keeps stop_loss_pct).
+    # 15% since 2026-11-03: scripts/rsi2_loss_cut_test.py (S&P 500, 2011-2026,
+    # live rules as a portfolio) — PF 1.24 / 1.21 on the first 60% / last 40%
+    # of the days vs 1.20 / 1.16 with 10%; the 10% stop's 196 stop-outs lost
+    # $39.7k, most of them dips that would have recovered. Wider still (20%,
+    # none) wasn't better on both halves, and the backtest can't see stocks
+    # that crashed out of the index, so 15% keeps a disaster stop.
+    rsi2_stop_loss_pct: float = 0.15
 
     # Expand RSI2's entry universe daily with IBKR's top-movers scanner
     # (gainers/losers/most-active), on top of the fixed rsi2_watchlist —
@@ -207,7 +227,11 @@ class Settings(BaseSettings):
     # those 10 names on a given day. Movers overlapping the MA-crossover
     # watchlist are excluded (see ibkr/scanner.py). Price/volume filters
     # keep the scan to liquid, real candidates instead of penny stocks.
-    rsi2_scan_top_movers: bool = True
+    # OFF since 2026-11-03: the RSI(2) rules are backtested on S&P 500 stocks
+    # only (IBKR's mover lists aren't archived, so the scan can't be tested),
+    # and live its 4 non-S&P picks lost -$720 (CBIO -$577, FRNM -$203) vs
+    # -$105 for 12 S&P 500 picks.
+    rsi2_scan_top_movers: bool = False
     rsi2_scan_rows: int = 15
     rsi2_scan_min_price: float = 10.0
     rsi2_scan_min_volume: int = 500_000

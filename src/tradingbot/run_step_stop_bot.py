@@ -1,7 +1,8 @@
 """Intraday stop manager for the daily stock bots' positions (MA-crossover,
-RSI(2)): raises each position's broker-side stop in 10% steps as it moves
-into profit (see risk.step_trailing_stop). Bought at $10: +11% -> stop
-$11.00, +21% -> $12.00, and so on. Stops are only ever raised.
+RSI(2)): raises each position's broker-side stop with the step-up profit
+lock (risk.ladder_stop, settings stock_lock_*). Bought at $10: +30%
+($13.00) -> stop $11.50, +45% -> $13.00, +60% -> $14.50, and so on. Stops
+are only ever raised.
 
 Runs 9:30am-4:00pm ET, checking every ~60s, so an intraday spike that
 fades before the close still locks in its step. At startup it also runs
@@ -59,6 +60,14 @@ def owned_positions(client: IBKRClient, journal: Journal) -> dict:
     }
 
 
+def stop_pct_by_symbol(journal: Journal) -> dict[str, float]:
+    """Each owned symbol's max loss below cost: RSI(2) has its own stop
+    (rsi2_stop_loss_pct), MA-crossover uses stop_loss_pct."""
+    pct = {s: settings.stop_loss_pct for s in journal.owned_stocks("ma_crossover")}
+    pct.update({s: settings.rsi2_stop_loss_pct for s in journal.owned_stocks("rsi2")})
+    return pct
+
+
 def main() -> None:
     if not settings.step_stop_enabled:
         logger.info("STEP_STOP_ENABLED=false — nothing to do")
@@ -76,7 +85,11 @@ def main() -> None:
             ib.sleep(max(0.0, wait_s))
 
         positions = owned_positions(client, journal)
-        ensure_protective_stops(ib, journal, positions, settings.stop_loss_pct, SOURCE)
+        stop_pct = stop_pct_by_symbol(journal)
+        for pct in sorted(set(stop_pct.values())):
+            group = {s: p for s, p in positions.items() if stop_pct.get(s, settings.stop_loss_pct) == pct}
+            if group:
+                ensure_protective_stops(ib, journal, group, pct, SOURCE)
         logger.info("Step-stop manager starting for %s", sorted(positions))
 
         tickers = {}
@@ -84,6 +97,7 @@ def main() -> None:
         flat_last_tick: set[str] = set()
         while _now_et().time() < MARKET_CLOSE:
             positions = owned_positions(client, journal)
+            stop_pct = stop_pct_by_symbol(journal)
             held = {p.contract.symbol for p in client.positions() if p.position > 0 and p.contract.secType == "STK"}
             # A stop only counts as orphaned once its symbol has looked flat
             # on two consecutive ticks: right at the open, a bracket BUY can
@@ -115,8 +129,9 @@ def main() -> None:
 
                 current = max(t.order.auxPrice for t in stops)
                 new_stop = plan_stop_raise(
-                    pos.avgCost, price, current, settings.step_stop_pct, settings.step_stop_buffer_pct,
-                    max_loss_pct=settings.stop_loss_pct,
+                    pos.avgCost, price, current, settings.stock_lock_trigger_pct, settings.stock_lock_step_pct,
+                    settings.stock_lock_trail_pct, settings.step_stop_buffer_pct,
+                    max_loss_pct=stop_pct.get(symbol, settings.stop_loss_pct),
                 )
                 if new_stop is None:
                     continue

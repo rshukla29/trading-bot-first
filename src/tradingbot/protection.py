@@ -25,7 +25,7 @@ from ib_async import IB, Stock, StopOrder
 from tradingbot.ibkr.data import fetch_daily_bars
 from tradingbot.ibkr.orders import cancel_stop_orders, place_market_sell
 from tradingbot.journal import Journal
-from tradingbot.risk import step_trailing_stop
+from tradingbot.risk import ladder_stop
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +48,14 @@ def check_protection(
 
 
 def plan_stop_raise(
-    avg_cost: float, price: float, current_stop: float, step_pct: float, buffer_pct: float,
-    max_loss_pct: float | None = None,
+    avg_cost: float, price: float, current_stop: float, trigger_pct: float, step_pct: float, trail_pct: float,
+    buffer_pct: float, max_loss_pct: float | None = None,
 ) -> float | None:
-    """New (higher) stop level from the 10% step rule, or None to leave
-    the stop alone. Never returns a level at or below the current stop.
+    """New (higher) stop level from the step-up profit lock
+    (risk.ladder_stop: once up trigger_pct, the stop sits trail_pct below
+    the highest step_pct step reached — 30/15/15: +30% -> +15%, +45% ->
+    +30%, ...), or None to leave the stop alone. Never returns a level at
+    or below the current stop.
 
     max_loss_pct: also lift a stop that sits further below the real fill
     cost than the documented max loss. Bracket stops are priced off the
@@ -60,7 +63,7 @@ def plan_stop_raise(
     cost 1265.93 with its stop at 1116.31 (-11.8%), INTC -14.2%. Skipped
     while the price is within the buffer of that floor, so lifting the stop
     can't trigger it on the spot."""
-    candidates = [step_trailing_stop(avg_cost, price, step_pct, buffer_pct)]
+    candidates = [ladder_stop(avg_cost, price, trigger_pct, step_pct, trail_pct)]
     if max_loss_pct:
         floor = round(avg_cost * (1 - max_loss_pct), 2)
         if price > floor * (1 + buffer_pct):
