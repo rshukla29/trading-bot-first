@@ -192,6 +192,12 @@ class Settings(BaseSettings):
     # disappears when options cost ~25% more than assumed.
     orb_iv_pause_ratio: float = 1.25
     orb_iv_check_trades: int = 10
+    # Skip a single ORB entry when the option's ask is priced above this
+    # multiple of the VIX-calibrated estimate (implied vols); 0 disables.
+    # 2026-11-09: the 11-06 741C (1.55x) lost its whole premium; every other
+    # entry under the current rules was 0.61-1.24x. A guard, not backtested
+    # (no historical option quotes).
+    orb_entry_max_iv_ratio: float = 1.25
     options_use_stop_loss: bool = False
     options_step_stop_enabled: bool = False
     options_rate: float = 0.04

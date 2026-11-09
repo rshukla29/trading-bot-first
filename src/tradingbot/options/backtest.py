@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import time, timedelta
+from datetime import time
 
 import pandas as pd
 
@@ -123,6 +123,7 @@ def run_options_backtest(
     fib_lock_ext: float | None = None,
     time_stop: time | None = None,
     time_stop_min_gain_pct: float = 0.0,
+    spread_width: float | None = None,
 ) -> OptionsBacktestResult:
     """Intraday-only long-options backtest: opening-range-breakout entries,
     Black-Scholes-simulated premiums (see options/pricing.py — no real
@@ -172,6 +173,13 @@ def run_options_backtest(
     Time stop (off by default): at or after `time_stop`, exit ("time_stop")
     while the premium is below entry x (1 + time_stop_min_gain_pct) — a 0DTE
     option that hasn't worked by then mostly just decays.
+    spread_width (off by default): trade a debit spread instead of a single
+    option — buy the strike, sell the one spread_width further out of the
+    money (calls: strike + width, puts: strike - width). Every premium
+    (entry, exits, stops, marks) is the spread's net value; slippage and
+    commission are charged on both legs.
+    dte_days counts trading days (weekends skipped: a Friday 1DTE expires
+    Monday at 16:00; holidays aren't modelled).
     Pricing: by default options are priced at realized 5-min vol x
     iv_premium_multiplier. vol_override (annualized vol per bar, aligned to
     `bars`, known at each bar's close) replaces that — e.g. a VIX-based
@@ -181,6 +189,16 @@ def run_options_backtest(
     trade off starting_equity so variants are compared per trade rather
     than by how much an early lead snowballs.
     """
+    legs = 2 if spread_width else 1
+    slippage_per_share *= legs
+    commission_per_contract *= legs
+
+    def price(spot_, strike_, t_, vol_, right_):
+        p = bs_price(spot_, strike_, t_, rate, vol_, right_)
+        if spread_width:
+            p -= bs_price(spot_, strike_ + (spread_width if right_ == "C" else -spread_width), t_, rate, vol_, right_)
+        return p
+
     bars_per_year = (TRADING_MINUTES_PER_DAY / strategy.bar_minutes) * TRADING_DAYS_PER_YEAR
     # Shifted by one bar: price bar i using volatility measured through bar
     # i-1 only. Without the shift, a bar's own huge return (a breakout or a
@@ -218,7 +236,7 @@ def run_options_backtest(
 
         if open_trade is not None:
             t_years = _time_to_expiry_years(now, open_trade.expiry)
-            premium = bs_price(spot, open_trade.strike, t_years, rate, vol, open_trade.right)
+            premium = price(spot, open_trade.strike, t_years, vol, open_trade.right)
             open_trade.peak_premium = max(open_trade.peak_premium, premium)
             step_stop = (
                 step_trailing_stop(open_trade.entry_premium, open_trade.peak_premium, step_stop_pct, step_stop_buffer_pct)
@@ -338,11 +356,11 @@ def run_options_backtest(
                 direction = 1 if right == "C" else -1
                 raw_strike = spot * (1 + direction * otm_pct)
                 strike = round(raw_strike / strike_increment) * strike_increment
-                expiry = (now.normalize() + timedelta(days=dte_days)).replace(
+                expiry = (now.normalize() + pd.offsets.BDay(dte_days)).replace(
                     hour=16, minute=0, tzinfo=now.tzinfo
                 )
                 t_years = _time_to_expiry_years(now, expiry)
-                mid = bs_price(spot, strike, t_years, rate, vol, right)
+                mid = price(spot, strike, t_years, vol, right)
                 entry_premium = mid + slippage_per_share
                 if mid > 0.01:
                     sizing_equity = equity if compound else starting_equity
@@ -358,7 +376,7 @@ def run_options_backtest(
         unrealized = 0.0
         if open_trade is not None:
             t_years = _time_to_expiry_years(now, open_trade.expiry)
-            mark = bs_price(spot, open_trade.strike, t_years, rate, vol, open_trade.right)
+            mark = price(spot, open_trade.strike, t_years, vol, open_trade.right)
             unrealized = (
                 (mark - open_trade.entry_premium) * open_trade.contracts * CONTRACT_MULTIPLIER + open_trade.partial_pnl
             )

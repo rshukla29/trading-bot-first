@@ -139,6 +139,14 @@ def recover_open_position(ib, journal: Journal, symbol: str) -> dict | None:
     row = journal.open_orb_position_row(symbol)
     if row is None:
         return None
+    if row["expiry"] < _now_et().strftime("%Y%m%d"):
+        # Expired unsold (2026-11-06: no bid at 3:55, left to expire). The
+        # contract can't be priced any more and an "open" row blocks the day.
+        pnl = (row["realized_pnl"] or 0.0) - row["entry_premium"] * row["contracts"] * 100
+        journal.close_orb_position(row["id"], datetime.now(timezone.utc).isoformat(), 0.0, "expired", pnl)
+        logger.warning("%s: ORB %s%s %s expired unsold — booked at $0 (pnl %.2f)",
+                       symbol, row["strike"], row["right"], row["expiry"], pnl)
+        return None
     contract = _rehydrate_option(ib, row["conid"])
     logger.warning(
         "Recovered open ORB position from journal: %s %s%s x%d (entry_premium=%.2f) — resuming monitoring",
@@ -350,10 +358,17 @@ def check_entry(
         # short (e.g. a credit spread's short leg) would mix the two.
         logger.warning("%s: %s already has a position (another strategy) — skipping", symbol, contract.localSymbol)
         return None
-    _, _, mid = get_quote(ib, contract)
+    _, ask, mid = get_quote(ib, contract)
     if mid <= 0.01:
         logger.warning("%s: quoted premium %.3f too small, skipping", symbol, mid)
         return None
+    if settings.orb_entry_max_iv_ratio:
+        iv = iv_vs_model(ib, ask, signal.underlying_price, contract.strike, right)
+        if iv is not None and iv[0] / iv[1] > settings.orb_entry_max_iv_ratio:
+            logger.warning("%s: skipping %s at ask %.2f — implied vol %.1f%% is %.2fx the VIX-calibrated %.1f%% "
+                           "(limit %.2fx)", symbol, contract.localSymbol, ask, iv[0] * 100, iv[0] / iv[1],
+                           iv[1] * 100, settings.orb_entry_max_iv_ratio)
+            return None
 
     contracts = int((equity * settings.options_risk_pct_per_trade) // (mid * CONTRACT_MULTIPLIER))
     if contracts > settings.options_max_contracts_per_trade:
@@ -432,19 +447,28 @@ def fetch_intraday_bars_contract(ib, contract) -> pd.DataFrame:
     return df if df is not None else pd.DataFrame()
 
 
-def record_entry_iv(ib, journal: Journal, position_id: int, fill: float, spot: float, strike: float, right: str) -> None:
-    """Store the fill's implied vol next to the VIX-calibrated estimate, so
-    drift between real option prices and the backtest's pricing is
-    visible (and can pause entries — see iv_pause_active)."""
+def iv_vs_model(ib, price: float, spot: float, strike: float, right: str) -> tuple[float, float, float] | None:
+    """(implied vol of a 0DTE option at `price`, the backtest's
+    VIX-calibrated vol, VIX), or None without a VIX level."""
     vix = latest_vix(ib)
     if vix is None:
-        return
+        return None
     now = _now_et()
     close = now.replace(hour=16, minute=0, second=0, microsecond=0)
     minutes_left = max(1.0, (close - now).total_seconds() / 60)
     t_years = minutes_left / (365.25 * 24 * 60)
-    fill_iv = implied_vol(fill, spot, strike, t_years, settings.options_rate, right)
-    model_iv = vix_calibrated_vol(vix, minutes_left)
+    return (implied_vol(price, spot, strike, t_years, settings.options_rate, right),
+            vix_calibrated_vol(vix, minutes_left), vix)
+
+
+def record_entry_iv(ib, journal: Journal, position_id: int, fill: float, spot: float, strike: float, right: str) -> None:
+    """Store the fill's implied vol next to the VIX-calibrated estimate, so
+    drift between real option prices and the backtest's pricing is
+    visible (and can pause entries — see iv_pause_active)."""
+    iv = iv_vs_model(ib, fill, spot, strike, right)
+    if iv is None:
+        return
+    fill_iv, model_iv, vix = iv
     journal.set_orb_entry_iv(position_id, fill_iv, model_iv)
     logger.info("Fill implied vol %.1f%% vs VIX-model %.1f%% (VIX %.2f) — ratio %.2f",
                 fill_iv * 100, model_iv * 100, vix, fill_iv / model_iv)

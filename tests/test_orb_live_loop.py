@@ -7,6 +7,7 @@ broken", so the entry was skipped (live took 4 of 16 backtest signals).
 These tests replay what IBKR returns at each tick and assert the loop
 judges only completed bars and catches a mid-bar breakout.
 """
+import sqlite3
 from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -15,7 +16,7 @@ import pandas as pd
 import pytest
 
 import tradingbot.run_orb_bot as orb
-from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy
+from tradingbot.options.orb_strategy import OpeningRangeBreakoutStrategy, OptionSignal
 
 ET = ZoneInfo("America/New_York")
 DAY = "2026-09-22"
@@ -208,3 +209,56 @@ def test_no_entry_before_first_entry_time(harness, monkeypatch):
     assert calls == []
     tick("10:00:09")
     assert calls and calls[-1][0] == "10:00:09"
+
+
+def test_expired_unsold_position_is_booked_at_zero_on_startup(tmp_path, monkeypatch):
+    """2026-11-06: the 741C had no bid at 3:55 and expired; on Monday the
+    'open' row would have failed setup and skipped ORB for the day."""
+    from tradingbot.journal import Journal
+
+    j = Journal(str(tmp_path / "j.db"))
+    pid = j.open_orb_position("SPY", "2026-11-06T14:55:25+00:00", "20261106", 741.0, "C", 123, 3.02, 10,
+                              734.58, 738.99)
+    monkeypatch.setattr(orb, "_now_et", lambda: datetime(2026, 11, 9, 9, 25, tzinfo=ET))
+    monkeypatch.setattr(orb, "_rehydrate_option", lambda ib, conid: (_ for _ in ()).throw(AssertionError("priced")))
+    assert orb.recover_open_position(None, j, "SPY") is None
+    assert j.open_orb_position_row("SPY") is None
+    with sqlite3.connect(j.db_path) as c:
+        assert c.execute("SELECT exit_reason, realized_pnl FROM orb_positions WHERE id=?", (pid,)).fetchone() \
+            == ("expired", -3020.0)
+
+
+def _entry_setup(monkeypatch, iv):
+    """check_entry on a confirmed call breakout, with the option quote and
+    the implied-vol check stubbed; returns the list of orders placed."""
+    idx = pd.date_range("2026-11-06 09:30", periods=5, freq="5min", tz=ET)
+    bars = pd.DataFrame({"open": 737.0, "high": 739.5, "low": 734.6, "close": [736, 737, 738, 739.5, 739.8],
+                         "volume": 1e6}, index=idx)
+    strat = SimpleNamespace(
+        generate_signal=lambda s, b: OptionSignal(s, "HOLD", 739.8, b.index[-1], "x"),
+        confirmed_breakout=lambda b, n, e: "C", passes_entry_filters=lambda *a: True,
+        range_for_day=lambda b, d: (734.58, 738.99))
+    contract = SimpleNamespace(conId=7, localSymbol="SPY 261106C00741000", strike=741.0,
+                               lastTradeDateOrContractMonth="20261106")
+    monkeypatch.setattr(orb, "select_orb_contract", lambda *a: contract)
+    monkeypatch.setattr(orb, "held_qty", lambda ib, conid: 0)
+    monkeypatch.setattr(orb, "get_quote", lambda ib, c: (2.98, 3.02, 3.00))
+    monkeypatch.setattr(orb, "iv_vs_model", lambda *a: iv)
+    placed = []
+    monkeypatch.setattr(orb, "enter_orb_trade", lambda ib, c, n: placed.append(n) or (_ for _ in ()).throw(
+        RuntimeError("stop after the order")))
+    journal = SimpleNamespace(log_signal=lambda *a, **k: None)
+    return lambda: orb.check_entry(None, journal, "SPY", strat, None, 1_000_000, bars, {"C": 0, "P": 0}), placed
+
+
+def test_entry_skipped_when_the_option_is_priced_far_above_the_model(monkeypatch):
+    # 2026-11-06: the 741C's implied vol was 39.6% vs the model's 25.6% (1.55x)
+    run, placed = _entry_setup(monkeypatch, (0.396, 0.256, 23.93))
+    assert run() is None and placed == []
+
+
+def test_entry_goes_ahead_when_the_option_is_priced_near_the_model(monkeypatch):
+    run, placed = _entry_setup(monkeypatch, (0.27, 0.256, 23.93))
+    with pytest.raises(RuntimeError):
+        run()
+    assert placed == [orb.settings.options_max_contracts_per_trade]

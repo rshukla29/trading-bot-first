@@ -201,7 +201,11 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
   - the breakout bar closed on **VWAP's side** (calls above, puts below);
   - it's **before 12:00**;
   - recent fills aren't priced more than **1.25×** the VIX-calibrated
-    estimate (`ORB_IV_PAUSE_RATIO`) — the edge depends on option prices.
+    estimate (`ORB_IV_PAUSE_RATIO`) — the edge depends on option prices;
+  - **this** option's ask isn't priced above **1.25×** that estimate
+    (`ORB_ENTRY_MAX_IV_RATIO`, since 2026-11-09; 0 turns it off). A guard,
+    not backtested: the 11-06 741C at 1.55× lost its whole premium, and
+    every other entry under these rules was 0.61–1.24×.
   One call and one put per day at most; no re-entries.
 - **Exits** (first one hit):
   - **Step-up profit lock:** once the option is up 50%, its stop moves to
@@ -240,8 +244,15 @@ Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
   stops all scored below the current rules on the first 60% (PF 1.57),
   and none beat them on the rest (1.53). A 12:00–13:00 time stop held up
   better only if options are 25% pricier than estimated (PF 1.26–1.33 vs
-  1.12) — the case the IV pause above already guards against.
-- One position per symbol at a time, max 10 contracts; exits checked
+  1.12) — the case the IV pause above already guards against. Re-tested
+  2026-11-09 after the 11-06 full loss ([scripts/orb_structure_test.py](scripts/orb_structure_test.py)):
+  debit spreads ($2/$3/$5 wide) scored PF 0.95–1.30 on the last 40%, with
+  about the same loss on a failed breakout; 1–2 day options cut
+  full-premium losses from 22% of trades to 1–3%, but winners shrank as
+  much (PF 1.00–1.16 on the first 60%, net about a third). Same-day single
+  options stay; risk is cut with contracts instead.
+- One position per symbol at a time, max 5 contracts (10 until
+  2026-11-09: `OPTIONS_MAX_CONTRACTS_PER_TRADE`); exits checked
   every 60s, and **every 5s once its profit lock is active** (since
   2026-10-13, when an option fell through its $0.99 lock to $0.91 between
   60s checks), using streaming quotes. Entry bars
