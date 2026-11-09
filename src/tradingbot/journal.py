@@ -412,6 +412,30 @@ class Journal:
                 (exit_date, exit_cost, exit_reason, realized_pnl, position_id),
             )
 
+    def close_condor_part(self, position_id: int, contracts: int, exit_date: str, exit_cost: float,
+                          exit_reason: str, realized_pnl: float) -> None:
+        """Partial close: `contracts` of the condor are booked as their own
+        closed row (same legs and entry, so their P&L is reported), and the
+        open row keeps the rest. 2026-11-06: 4 of 10 closed, the row still
+        said 10, and the next close would have sent 4 too many."""
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO condor_positions
+                   (symbol, entry_date, expiry, call_short_strike, call_long_strike, put_short_strike,
+                    put_long_strike, call_short_conid, call_long_conid, put_short_conid, put_long_conid,
+                    credit_received, contracts, status, exit_date, exit_cost, exit_reason, realized_pnl)
+                   SELECT symbol, entry_date, expiry, call_short_strike, call_long_strike, put_short_strike,
+                          put_long_strike, call_short_conid, call_long_conid, put_short_conid, put_long_conid,
+                          credit_received, ?, 'closed', ?, ?, ?, ?
+                   FROM condor_positions WHERE id=?""",
+                (contracts, exit_date, exit_cost, exit_reason, realized_pnl, position_id),
+            )
+            conn.execute("UPDATE condor_positions SET contracts=contracts-? WHERE id=?", (contracts, position_id))
+
+    def update_condor_contracts(self, position_id: int, contracts: int) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE condor_positions SET contracts=? WHERE id=?", (contracts, position_id))
+
     def open_orb_position(
         self,
         symbol: str,

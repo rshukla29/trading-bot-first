@@ -57,6 +57,7 @@ from tradingbot.options.live_condor import (
     wait_for_fill,
 )
 from tradingbot.options.pricing import realized_volatility
+from tradingbot.position_guard import held_qty
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("ib_async").setLevel(logging.WARNING)  # its own wrapper logs every tick/portfolio update at INFO
@@ -128,35 +129,60 @@ def manage_position(ib, journal: Journal, symbol: str, pos) -> None:
                     symbol, pos["id"], cost, credit, days_to_expiry)
         return
 
+    # Close only what IBKR actually holds: the smallest leg position, capped
+    # at the journal's count (an earlier partial close the journal missed
+    # would otherwise send extra contracts that open new legs).
+    contracts = pos["contracts"]
+    held = min(abs(int(held_qty(ib, pos[k]))) for k in
+               ("call_short_conid", "call_long_conid", "put_short_conid", "put_long_conid"))
+    if held < contracts:
+        logger.warning("%s: position %d: journal says %d contracts, IBKR holds %d — closing %d",
+                       symbol, pos["id"], contracts, held, held)
+        contracts = held
+        journal.update_condor_contracts(pos["id"], held)
+    now = datetime.now(timezone.utc).isoformat()
+    if contracts == 0:
+        journal.close_condor_position(pos["id"], now, 0.0, "already_flat", 0.0)
+        logger.warning("%s: position %d already flat at IBKR — marked closed", symbol, pos["id"])
+        return
+
     # Step from the mid toward the natural price, re-quoting each attempt
     # (mid-only pricing left a condor unclosed for days).
-    remaining, cost_sum = pos["contracts"], 0.0
+    trades = []
     for attempt in range(3):
         ladder = condor_close_ladder(ib, legs)
         limit = ladder[min(attempt, len(ladder) - 1)]
-        trade, _ = close_condor(ib, symbol, legs, remaining, limit)
+        trade, _ = close_condor(ib, symbol, legs, contracts - _filled(trades)[0], limit)
+        trades.append(trade)
         if not wait_for_fill(ib, trade, timeout=60):
             ib.cancelOrder(trade.order)
             ib.sleep(2)
-        got = int(trade.orderStatus.filled)
-        if got:
-            cost_sum += abs(trade.orderStatus.avgFillPrice) * got
-            remaining -= got
-        if remaining == 0:
+        if _filled(trades)[0] >= contracts:
             break
-    if remaining:
-        logger.warning("%s: close for position %d: %d of %d contracts still open after 3 attempts "
-                       "(%s) — will retry next run", symbol, pos["id"], remaining, pos["contracts"], exit_reason)
+    filled, cost_sum = _filled(trades)   # read again at the end: a fill can land after its cancel
+    if filled == 0:
+        logger.warning("%s: close for position %d: none of %d contracts filled after 3 attempts (%s) — "
+                       "will retry next run", symbol, pos["id"], contracts, exit_reason)
         return
 
-    actual_cost = cost_sum / pos["contracts"]
-    realized_pnl = (credit - actual_cost) * pos["contracts"] * CONTRACT_MULTIPLIER
-    journal.close_condor_position(
-        pos["id"], datetime.now(timezone.utc).isoformat(), actual_cost, exit_reason, realized_pnl,
-    )
-    journal.log_order(symbol, "CLOSE_CONDOR", pos["contracts"], "COMBO", broker="IBKR", status="filled")
+    actual_cost = cost_sum / filled
+    realized_pnl = (credit - actual_cost) * filled * CONTRACT_MULTIPLIER
+    journal.log_order(symbol, "CLOSE_CONDOR", filled, "COMBO", broker="IBKR", status="filled")
+    if filled < contracts:
+        journal.close_condor_part(pos["id"], filled, now, actual_cost, exit_reason, realized_pnl)
+        logger.warning("%s: position %d: closed %d of %d contracts (%s), cost=%.2f, pnl=%.2f — "
+                       "the other %d retry next run", symbol, pos["id"], filled, contracts, exit_reason,
+                       actual_cost, realized_pnl, contracts - filled)
+        return
+    journal.close_condor_position(pos["id"], now, actual_cost, exit_reason, realized_pnl)
     logger.info("%s: CLOSED position %d (%s), actual cost=%.2f, pnl=%.2f",
                 symbol, pos["id"], exit_reason, actual_cost, realized_pnl)
+
+
+def _filled(trades) -> tuple[int, float]:
+    """(contracts filled, sum of fill price x contracts) over close orders."""
+    n = sum(int(t.orderStatus.filled or 0) for t in trades)
+    return n, sum(abs(t.orderStatus.avgFillPrice or 0.0) * int(t.orderStatus.filled or 0) for t in trades)
 
 
 def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) -> None:
