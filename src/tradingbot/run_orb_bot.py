@@ -116,6 +116,40 @@ def _quote(ib, contract) -> tuple[float, float, float]:
                      f"bid={t.bid} ask={t.ask}")
 
 
+FALLBACK_WARN_EVERY = 600.0  # seconds between "no live quote" warnings per contract
+_fallback_warned: dict[object, float] = {}
+
+
+def _bar_price(ib, contract) -> float:
+    """Close of the latest 1-min historical bar (trades for the stock,
+    bid/ask midpoint for an option)."""
+    from ib_async import util
+    what = "TRADES" if getattr(contract, "secType", "") == "STK" else "MIDPOINT"
+    df = util.df(ib.reqHistoricalData(contract, "", "1800 S", "1 min", what, True, formatDate=2))
+    if df is None or df.empty:
+        raise ValueError(f"No live quote and no recent bars for {getattr(contract, 'localSymbol', '') or contract}")
+    return float(df["close"].iloc[-1])
+
+
+def _price(ib, contract) -> float:
+    """Live mid, or the latest 1-min bar's close when IBKR sends no live
+    quote. 2026-11-09: error 10197 ("no market data during competing live
+    session" — the live account was logged in elsewhere) left SPY at
+    bid=nan ask=nan all day; historical bars kept working, but every exit
+    check crashed, so the position went unwatched from 9:55 to the close."""
+    try:
+        return _quote(ib, contract)[2]
+    except ValueError as exc:
+        price = _bar_price(ib, contract)
+        key = getattr(contract, "conId", None) or id(contract)
+        now = _now_et().timestamp()
+        if now - _fallback_warned.get(key, 0.0) >= FALLBACK_WARN_EVERY:
+            _fallback_warned[key] = now
+            logger.warning("%s — using the last 1-min bar close %.2f instead (is the live IBKR account "
+                           "logged in elsewhere? error 10197)", exc, price)
+        return price
+
+
 def stop_streams(ib, *contracts) -> None:
     for c in contracts:
         t = _streams.pop(getattr(c, "conId", None), None)
@@ -178,8 +212,8 @@ def latest_bar_vs_vwap(ib, symbol: str) -> tuple[float | None, float | None]:
 
 def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: dict) -> bool:
     """Returns True if the position was closed this call."""
-    _, _, spot_mid = _quote(ib, underlying)
-    _, _, premium_mid = _quote(ib, position["contract"])
+    spot_mid = _price(ib, underlying)
+    premium_mid = _price(ib, position["contract"])
 
     # Step stop is based on the highest premium seen, so a spike to +21%
     # that fades still exits at +20%. Peak is in-memory only: after a

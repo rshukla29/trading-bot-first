@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import time
 
-from ib_async import IB, LimitOrder, Option, Trade
+from ib_async import IB, LimitOrder, MarketOrder, Option, Trade
 
 from tradingbot.options.live_chain import get_quote, nearest_expiry, qualify_nearest_available
 
@@ -102,8 +102,16 @@ def exit_orb_trade(ib: IB, contract: Option, contracts: int, at_bid: bool = Fals
     clamped to what's actually held. `quote`: run_orb_bot passes its
     streaming quote, since get_quote cancels the shared market-data
     subscription (2026-10-15: "cancelMktData: No reqId found" after a close;
-    after a partial fill the bot would have watched a frozen price)."""
-    bid, _, mid = quote(ib, contract)
+    after a partial fill the bot would have watched a frozen price).
+    Without any live quote it sells at market."""
+    try:
+        bid, _, mid = quote(ib, contract)
+    except ValueError as exc:
+        # No live quote (e.g. IBKR error 10197 while the live account is
+        # logged in elsewhere): sell at market, as run_expiry_guard does,
+        # rather than leave the position open.
+        logger.warning("%s — closing %s x%d at market", exc, contract.localSymbol, contracts)
+        return ib.placeOrder(contract, MarketOrder("SELL", contracts, tif="DAY")), float("nan")
     price = bid if at_bid else mid
     order = LimitOrder("SELL", contracts, round(price, 2), tif="DAY")
     trade = ib.placeOrder(contract, order)
