@@ -477,8 +477,11 @@ by itself at 8am on weekdays on the **Bot controls** tab. It's rebuilt:
 - at 8:00am by the control server and by the premarket snapshot;
 - at 4:30pm by the postmarket snapshot (and after the 4:50pm review);
 - whenever you double-click the **Trading dashboard** desktop shortcut
-  ([scripts/open_dashboard.ps1](scripts/open_dashboard.ps1)), which opens it
-  through the server when it's running, else as a file.
+  ([scripts/open_dashboard.ps1](scripts/open_dashboard.ps1) →
+  `run_dashboard --open`), which always opens it through the server: if
+  the server isn't running it starts one in the background
+  (`--open --now --idle 30`), so the buttons work at the weekend too. Only
+  if that fails does it open the file.
 
 An open dashboard tab reloads itself whenever it's rebuilt, so a tab left
 open overnight shows the new day once the server starts at 8am; no second
@@ -560,8 +563,19 @@ press the buttons (cross-site requests and DNS rebinding are refused).
 **Hours.** The `BotControlServer` task runs it Monday–Friday from 8am (and
 at Windows logon, if that's between 8am and 6pm) to 6pm New York time
 ([scripts/run_control_server.ps1](scripts/run_control_server.ps1); by hand:
-`python -m tradingbot.run_control_server [--open] [--until 18:00]`). Outside
-those hours the buttons are offline and each bot keeps the last mode.
+`python -m tradingbot.run_control_server [--open] [--now] [--until 18:00] [--idle 30]`).
+Outside those hours each bot keeps the last mode, and the **Trading
+dashboard** desktop shortcut starts a server on demand: `--now` opens the
+page straight away, and `--idle 30` stops it after 30 minutes with no
+dashboard tab checking in, except during Mon–Fri 8am–6pm, when it stands
+in for the scheduled one (whose 8am start then finds the port taken,
+rebuilds the dashboard and lets an open tab refresh itself). `/api/ping`
+answers "up?" without counting as a page checking in.
+
+**Load.** About 90 MB of memory (it builds the dashboard in-process). The task list (one PowerShell call, about
+0.5 s of CPU) is cached for 60 s. A dashboard tab in the background skips
+the 5-second refresh and sends one light request a minute (`?light=1`, the
+dashboard build only) so the 8am start can update it.
 
 The panel is [control_panel.html](src/tradingbot/control_panel.html):
 inlined into the dashboard at build time and served on its own at

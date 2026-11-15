@@ -85,8 +85,8 @@ if ($SkipTasks) {
 }
 
 Step "Desktop shortcut for the dashboard"
-# Double-click: rebuilds the dashboard from the latest data and opens it (through the
-# control server when it's running, so the Start / Pause / Stop buttons work).
+# Double-click: rebuilds the dashboard from the latest data and opens it through the
+# control server, starting one if needed, so the Start / Pause / Stop buttons work any day.
 $desktop = [Environment]::GetFolderPath("Desktop")
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop "Trading dashboard.lnk"))
 $link.TargetPath = "powershell.exe"

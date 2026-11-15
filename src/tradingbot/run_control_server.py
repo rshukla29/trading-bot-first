@@ -22,6 +22,7 @@ buttons through your browser.
 
     python -m tradingbot.run_control_server
     python -m tradingbot.run_control_server --open --until 18:00
+    python -m tradingbot.run_control_server --open --now --idle 30
 
 --open rebuilds the dashboard and opens it
 in the browser, or, if a dashboard page is still open from before, lets that
@@ -29,6 +30,12 @@ page reload itself instead of opening another; --until stops the server at
 that time (New York), leaving the browser alone. The BotControlServer
 task runs it that way Monday-Friday at 8am and at logon, only between 8am
 and 6pm (scripts/run_control_server.ps1).
+
+The desktop shortcut (run_dashboard --open) starts it the second way when
+it isn't running, at any hour: --now opens the page straight away, and
+--idle stops it after that many minutes with no dashboard page open,
+except during Mon-Fri 8am-6pm, when it stands in for the scheduled one.
+/api/ping answers "up?" without counting as a page checking in.
 """
 from __future__ import annotations
 
@@ -334,6 +341,9 @@ class Handler(BaseHTTPRequestHandler):
                     else "The dashboard hasn't been built yet (8am, by the control server and the premarket snapshot).")
             html = STANDALONE.replace("__META__", meta).replace("__PANEL__", panel_html())
             self._send(HTTPStatus.OK, html.encode("utf-8"), "text/html; charset=utf-8")
+        elif path == "/api/ping":  # "are you up, and is a page open?" — not itself a page checking in
+            last = self.server.last_poll
+            self._json(HTTPStatus.OK, {"since_poll": round(clock.monotonic() - last, 1) if last else None})
         elif path == "/api/state":
             self.server.last_poll = clock.monotonic()
             # ?light=1: a background tab only asking whether the dashboard was rebuilt
@@ -416,12 +426,27 @@ def make_server(port: int | None = None) -> ThreadingHTTPServer:
 OPEN_PAGE_WAIT = 150.0  # seconds; a background tab checks once a minute, and browsers may delay that to the next minute
 
 
-def open_dashboard(port: int, server: ThreadingHTTPServer | None = None, wait: float = OPEN_PAGE_WAIT) -> None:
+def page_checked_in(port: int, since: float) -> bool:
+    """Has a dashboard page polled the server on `port` (another process)
+    since `since` (time.monotonic)? Asks /api/ping, which doesn't count as a poll."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=3) as r:
+            age = json.load(r).get("since_poll")
+    except (OSError, ValueError):
+        return False
+    return age is not None and age <= clock.monotonic() - since
+
+
+def open_dashboard(port: int, server: ThreadingHTTPServer | None = None, wait: float = OPEN_PAGE_WAIT,
+                   remote: bool = False) -> None:
     """Rebuild the dashboard (blank for a new account until its first
     report), then open it
     in the browser through this server, unless a dashboard page is already
     open: that page checks in within about a minute, sees the new build and
-    reloads itself, so no second tab is opened."""
+    reloads itself, so no second tab is opened. remote=True: the server is
+    another process already on `port` (e.g. one started from the desktop
+    shortcut), asked over /api/ping."""
     started = clock.monotonic()
     url = f"http://127.0.0.1:{port}/"
     try:
@@ -432,14 +457,38 @@ def open_dashboard(port: int, server: ThreadingHTTPServer | None = None, wait: f
     # The redirect to the dashboard keeps the #: it opens on the Bot controls
     # tab (or /controls, if there's no dashboard at all).
     url += "#controls"
-    if server is not None:
+    if server is not None or remote:
         while clock.monotonic() - started < wait:
-            if server.last_poll >= started:
+            if (server.last_poll >= started) if server is not None else page_checked_in(port, started):
                 logger.info("A dashboard page is already open — it refreshes itself; not opening another")
                 return
             clock.sleep(1.0)
     import webbrowser
     webbrowser.open(url)
+
+
+SERVICE_START, SERVICE_END = time(8, 0), time(18, 0)  # the BotControlServer task's hours (New York)
+
+
+def in_service_hours(now: datetime) -> bool:
+    """Monday-Friday 8am-6pm New York: when the scheduled server is meant to run."""
+    return now.weekday() < 5 and SERVICE_START <= now.time() < SERVICE_END
+
+
+def stop_when_idle(server: ThreadingHTTPServer, minutes: float, poll: float = 30.0, now=lambda: datetime.now(ET)) -> None:
+    """Shut down after `minutes` with no dashboard page checking in, but never
+    during the scheduled hours: a server started from the desktop shortcut
+    (e.g. on a weekend) then simply stands in for the 8am one, and closes once
+    the day is over and no tab is open."""
+    started = clock.monotonic()
+    while True:
+        clock.sleep(poll)
+        if in_service_hours(now()):
+            continue
+        if clock.monotonic() - max(started, server.last_poll) >= minutes * 60:
+            logger.info("No dashboard page open for %g minutes — stopping the control server", minutes)
+            server.shutdown()
+            return
 
 
 def stop_at(server: ThreadingHTTPServer, until: time, poll: float = 30.0) -> None:
@@ -457,22 +506,29 @@ def _arg(name: str) -> str | None:
 
 def main() -> None:
     until = datetime.strptime(_arg("--until"), "%H:%M").time() if _arg("--until") else None
+    idle = float(_arg("--idle")) if _arg("--idle") else None
     want_open = "--open" in sys.argv[1:]
+    wait = 0.0 if "--now" in sys.argv[1:] else OPEN_PAGE_WAIT  # --now: someone just asked for the page
     try:
         server = make_server()
     except OSError:
-        # Already running (the 8am start and a logon start can overlap): just open the page.
+        # Already running (the 8am start and a logon start can overlap, or one
+        # was started from the desktop shortcut): rebuild and open the page,
+        # unless a dashboard tab is open and refreshes itself.
         logger.info("Control server already running on port %d", settings.control_port)
         if want_open:
-            open_dashboard(settings.control_port)
+            open_dashboard(settings.control_port, wait=wait, remote=True)
         return
     port = server.server_address[1]
-    logger.info("Control server on http://127.0.0.1:%d/ (strategies: %s)%s", port, ", ".join(control.available()),
-                f", stopping at {until:%H:%M}" if until else "")
+    logger.info("Control server on http://127.0.0.1:%d/ (strategies: %s)%s%s", port, ", ".join(control.available()),
+                f", stopping at {until:%H:%M}" if until else "",
+                f", stopping after {idle:g} idle minutes outside Mon-Fri 8am-6pm" if idle else "")
     if want_open:
-        threading.Thread(target=open_dashboard, args=(port, server), daemon=True).start()
+        threading.Thread(target=open_dashboard, args=(port, server, wait), daemon=True).start()
     if until:
         threading.Thread(target=stop_at, args=(server, until), daemon=True).start()
+    if idle:
+        threading.Thread(target=stop_when_idle, args=(server, idle), daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

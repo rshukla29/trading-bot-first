@@ -265,6 +265,84 @@ def test_light_state_skips_the_task_lookup(server, monkeypatch):
     assert status == 200 and set(st) == {"dashboard"}
 
 
+def test_ping_answers_without_counting_as_a_page(server):
+    req, _, _ = server
+    assert req("GET", "/api/ping") == (200, {"since_poll": None})
+    req("GET", "/api/state?light=1")
+    status, body = req("GET", "/api/ping")
+    assert status == 200 and 0 <= body["since_poll"] < 5
+
+
+def test_service_hours_are_weekdays_8am_to_6pm():
+    from datetime import datetime
+    from tradingbot.run_control_server import ET, in_service_hours
+    assert in_service_hours(datetime(2026, 11, 16, 8, 0, tzinfo=ET))       # Monday 8am
+    assert not in_service_hours(datetime(2026, 11, 16, 18, 0, tzinfo=ET))  # Monday 6pm
+    assert not in_service_hours(datetime(2026, 11, 15, 12, 0, tzinfo=ET))  # Sunday
+
+
+def _idle_run(monkeypatch, now, polls):
+    """Run stop_when_idle with a fake clock: each sleep moves 10 minutes on."""
+    from tradingbot import run_control_server as srv
+    t = {"now": 0.0}
+    monkeypatch.setattr(srv.clock, "monotonic", lambda: t["now"])
+    stopped = []
+
+    def sleep(_):
+        t["now"] += 600
+        if t["now"] > 600 * polls:
+            raise StopIteration  # still running after `polls` ticks
+    monkeypatch.setattr(srv.clock, "sleep", sleep)
+    server = SimpleNamespace(last_poll=0.0, shutdown=lambda: stopped.append(t["now"]))
+    try:
+        srv.stop_when_idle(server, 30, now=lambda: now)
+    except StopIteration:
+        pass
+    return stopped
+
+
+def test_shortcut_server_stops_after_30_idle_minutes_at_the_weekend(monkeypatch):
+    from datetime import datetime
+    from tradingbot.run_control_server import ET
+    assert _idle_run(monkeypatch, datetime(2026, 11, 15, 12, 0, tzinfo=ET), polls=10) == [1800]
+
+
+def test_shortcut_server_keeps_running_during_the_scheduled_hours(monkeypatch):
+    from datetime import datetime
+    from tradingbot.run_control_server import ET
+    assert _idle_run(monkeypatch, datetime(2026, 11, 16, 9, 0, tzinfo=ET), polls=10) == []
+
+
+def test_dashboard_shortcut_starts_the_server_when_it_is_down(tmp_path, monkeypatch):
+    """At the weekend the desktop shortcut starts the control server (which
+    opens the page itself) instead of opening the file with dead buttons."""
+    from tradingbot import run_dashboard as rd
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rd.sys, "argv", ["run_dashboard", "--open"])
+    up = iter([None, None, "http://127.0.0.1:8765/"])
+    monkeypatch.setattr(rd, "control_server_url", lambda: next(up))
+    monkeypatch.setattr(rd.time, "sleep", lambda s: None)
+    started, opened = [], []
+    monkeypatch.setattr(rd.subprocess, "Popen", lambda args, **k: started.append(args))
+    monkeypatch.setattr(rd.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(rd, "build", lambda: tmp_path / "dashboard.html")
+    rd.main()
+    assert started[0][1:] == ["-m", "tradingbot.run_control_server", "--open", "--now", "--idle", "30"]
+    assert opened == []
+
+
+def test_dashboard_shortcut_uses_a_running_server(tmp_path, monkeypatch):
+    from tradingbot import run_dashboard as rd
+    monkeypatch.setattr(rd.sys, "argv", ["run_dashboard", "--open"])
+    monkeypatch.setattr(rd, "control_server_url", lambda: "http://127.0.0.1:8765/")
+    monkeypatch.setattr(rd.subprocess, "Popen", lambda *a, **k: pytest.fail("started a second server"))
+    opened = []
+    monkeypatch.setattr(rd.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(rd, "build", lambda: tmp_path / "dashboard.html")
+    rd.main()
+    assert opened == ["http://127.0.0.1:8765/"]
+
+
 def test_server_stops_itself_at_the_set_time(monkeypatch):
     from datetime import time as dtime
     from tradingbot import run_control_server as srv

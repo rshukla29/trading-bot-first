@@ -212,7 +212,7 @@ You're set. The bots start by themselves on the next weekday.
 | 9:25am – 4:00pm | The bots trade. Check the Bot controls tab any time: each strategy shows Running / Paused / Stopped, today's profit or loss and what's open |
 | 4:30pm | The postmarket report is saved and the open dashboard updates itself |
 | 4:50pm | With Claude Code, a written review appears on the dashboard |
-| 6:00pm | The control server stops. The dashboard stays open but its buttons are offline until 8am the next weekday |
+| 6:00pm | The control server stops. The dashboard stays open but its buttons are offline until 8am the next weekday (or until you double-click **Trading dashboard**) |
 
 The dashboard shows the account value, profit and loss per day, week,
 month and strategy, every trade, the open positions, links to every report,
@@ -231,10 +231,15 @@ Market holidays need nothing: the bots find the market closed and stop.
 The dashboard opens by itself at 8am on weekdays (or open
 **http://127.0.0.1:8765** in your browser, or use the desktop shortcut) and
 starts on the **Bot controls** tab. An open dashboard updates itself when
-new data arrives (8am and 4:30pm). The buttons work Monday to Friday
-from 8am to 6pm, while the control server runs; outside those hours each
-bot keeps the last choice you made. Each strategy has three buttons;
+new data arrives (8am and 4:30pm). Each strategy has three buttons;
 the bar at the top does the same for all of them at once.
+
+**At the weekend, in the evening or before 8am** (for example to press
+**Start all** on a Sunday so the bots trade on Monday), double-click
+**Trading dashboard** on your desktop. It starts the control server, so
+the dashboard opens with working buttons. Make your choice and close the
+tab; the server closes itself about 30 minutes later. Nothing trades
+until the bots' usual times on the next weekday.
 
 - **Start**: trades as usual.
 - **Pause**: no new trades. Anything already open is still looked after:
@@ -261,9 +266,10 @@ Good to know:
 - **When live prices aren't working** (for example on a new account, or
   while your real account is logged in somewhere), press **Pause all**
   before 9:30am and **Start all** once prices are back.
-- If the Bot controls tab says it **can't reach the control server**
-  between 8am and 6pm, start the `BotControlServer` task in Task Scheduler
-  (right-click → Run) or run **scripts\install.ps1** again.
+- If the Bot controls tab says it **can't reach the control server**,
+  double-click **Trading dashboard** on your desktop. If that doesn't help,
+  start the `BotControlServer` task in Task Scheduler (right-click → Run)
+  or run **scripts\install.ps1** again.
 - If it says **a bot's start time is off**, run
   **scripts\register_tasks.ps1** (right-click → Run with PowerShell).
 
@@ -353,7 +359,7 @@ for the message below.
 | `Error 162 ... different IP address` | Another login took over the price feed | Same as above |
 | Bot controls says **a bot's start time is off** | A task's time drifted from `scripts\schedule.json` (e.g. after a daylight-saving change) | Run **scripts\register_tasks.ps1** (right-click → Run with PowerShell) or the installer again |
 | The dashboard didn't open at 8am | The PC was asleep or off, or `BotControlServer` is disabled | Open http://127.0.0.1:8765; if it doesn't load, right-click the `BotControlServer` task → Run, or run the installer again |
-| Bot controls says it **can't reach the control server** | The server is off (outside 8am–6pm on weekdays, or it stopped) | Between 8am and 6pm: run the `BotControlServer` task. Outside those hours that's normal |
+| Bot controls says it **can't reach the control server** | The server is off (outside 8am–6pm on weekdays, or it stopped) | Double-click **Trading dashboard** on your desktop: it starts the server and reopens the dashboard. Still not working: run the `BotControlServer` task |
 | `Error 326 ... client id is already in use` | The same bot was started twice | Close the extra window; it fixes itself the next day |
 | Orders are rejected as "read-only" | TWS's Read-Only API box is ticked | Untick it (step 7) |
 | A log file is empty or missing | The task didn't start, or the installer didn't finish | Run **scripts\install.ps1** again |
@@ -385,7 +391,8 @@ for the message below.
   never uploaded.
 - **Scheduled task (Task Scheduler):** a Windows feature that starts a
   program at a set time. The installer creates one per bot.
-- **Control server:** a small program on your PC (weekdays 8am–6pm) that
+- **Control server:** a small program on your PC (weekdays 8am–6pm, or
+  whenever you double-click Trading dashboard) that
   shows the dashboard at http://127.0.0.1:8765 and carries out the Start /
   Pause / Stop buttons. Only this PC can use it.
 - **Bot controls:** the dashboard tab with the Start / Pause / Stop buttons.
