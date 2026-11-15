@@ -1,0 +1,19 @@
+{
+  "_comment": "When each bot runs, New York time, Monday-Friday. scripts/register_tasks.ps1 (run by install.ps1) creates the Task Scheduler tasks from this; the control server warns on the Bot controls tab when a task's next run doesn't match. A task whose script isn't in this copy of the repo is skipped.",
+  "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+  "tasks": [
+    {"name": "SnapshotPremarketBot", "ny": "08:00", "script": "run_snapshot_premarket.ps1"},
+    {"name": "BotControlServer", "ny": "08:00", "script": "run_control_server.ps1", "at_logon": true},
+    {"name": "StepStopTradingBot", "ny": "09:25", "script": "run_step_stop_scheduled.ps1"},
+    {"name": "ORBTradingBot", "ny": "09:30", "script": "run_orb_scheduled.ps1"},
+    {"name": "StockOrbTradingBot", "ny": "09:30", "script": "run_stock_orb_scheduled.ps1"},
+    {"name": "TrendJoinTradingBot", "ny": "09:50", "script": "run_trend_join_scheduled.ps1"},
+    {"name": "CreditOrbTradingBot", "ny": "10:20", "script": "run_credit_orb_scheduled.ps1"},
+    {"name": "IronCondorTradingBot", "ny": "15:45", "script": "run_iron_condor_scheduled.ps1"},
+    {"name": "ExpiryGuardBot", "ny": "15:57", "script": "run_expiry_guard_scheduled.ps1"},
+    {"name": "SP500ScanBot", "ny": "16:15", "script": "run_sp500_scan_scheduled.ps1"},
+    {"name": "RSI2TradingBot", "ny": "16:30", "script": "run_rsi2_scheduled.ps1"},
+    {"name": "SnapshotPostmarketBot", "ny": "16:30", "script": "run_snapshot_postmarket.ps1"},
+    {"name": "DailyReviewBot", "ny": "16:50", "script": "run_daily_review_scheduled.ps1"}
+  ]
+}

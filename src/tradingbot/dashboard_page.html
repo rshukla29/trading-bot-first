@@ -311,7 +311,7 @@ function columnChart(el, points, {labelFmt = fmtShort} = {}) {
 const legend = names => `<div class="legend">${names.map(n => `<span><span class="line" style="background:${color(n)}"></span>${esc(n)}</span>`).join("")}</div>`;
 
 // ------------------------------------------------------------ tabs
-const TABS = [["controls", "Controls"], ["overview", "Overview"], ["strategies", "Strategies"], ["periods", "Daily · weekly · monthly"],
+const TABS = [["controls", "Bot controls"], ["overview", "Overview"], ["strategies", "Strategies"], ["periods", "Daily · weekly · monthly"],
   ["trades", "Trades"], ["positions", "Open positions"], ["timemachine", "Time Machine"],
   ["reports", "Reports"], ["reviews", "Daily reviews"], ["health", "Bot health"]];
 const drawn = {};

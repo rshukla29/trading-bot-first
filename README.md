@@ -26,9 +26,15 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 
 ### Daily schedule (ET, Mon–Fri — Windows Task Scheduler)
 
+The times live in one file, [scripts/schedule.json](scripts/schedule.json)
+(New York time). [scripts/register_tasks.ps1](scripts/register_tasks.ps1)
+creates the tasks from it (the installer runs it), and the Bot controls tab
+warns if a task's next run ever drifts from it (see [Scheduling](#4-scheduling)).
+
 | Time | Task | What happens |
 |---|---|---|
-| 9:00am | `SnapshotPremarketBot` | Premarket report |
+| 8:00am | `SnapshotPremarketBot` | Premarket report, then rebuilds the dashboard |
+| 8:00am → 6:00pm | `BotControlServer` | Control server on `http://127.0.0.1:8765`: rebuilds the dashboard and opens it on the **Bot controls** tab (a tab still open from yesterday reloads itself instead), serves the Start / Pause / Stop buttons, stops itself at 6pm (the browser stays open). Also starts at Windows logon inside those hours |
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
 | 9:30am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout (filtered), step-up lock; entries 9:45–12:00, flat by 3:55pm |
 | 9:30am → 4:00pm | `StockOrbTradingBot` | S&P 500 opening-range breakouts; Time Machine check before each entry (trades only if it leans toward the target); entries 9:45–3:30 (max 3), stop/target at IBKR, flat by 3:55pm |
@@ -36,9 +42,9 @@ Run any of them manually with `python -m tradingbot.<entrypoint>`.
 | 10:20am → 4:00pm | `CreditOrbTradingBot` | 60-min range; entry 10:30–12:00; spread bought back 3:50pm |
 | 3:45pm | `IronCondorTradingBot` | Manage / open SPY iron condors |
 | 3:57pm | `ExpiryGuardBot` | Safety net: closes any option expiring today still open (normally nothing) |
-| 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
-| 4:30pm | `SnapshotPostmarketBot` | Postmarket report (+ weekly on Fridays, monthly on the last trading day) |
 | 4:15pm | `SP500ScanBot` | Saves the S&P 500 scan (movers, unusual volume, strategy buy signals) to `scans/YYYY/MM/DD/` |
+| 4:30pm | `RSI2TradingBot` | RSI(2), then MA-crossover (stop audit first in each) |
+| 4:30pm | `SnapshotPostmarketBot` | Postmarket report (+ weekly on Fridays, monthly on the last trading day), then rebuilds the dashboard (an open tab reloads itself) |
 | 4:50pm | `DailyReviewBot` | Daily review: facts script + Claude Code (read-only) writes recommendations to `analysis/daily/YYYY/MM/DD/` |
 
 ### Strategy workflow
@@ -50,13 +56,13 @@ charts; the details for each are in the numbered sections below.
 ```mermaid
 flowchart LR
   subgraph PRE["Before the open"]
-    P1["9:00 premarket snapshot"] --> P2["9:25 step-stop manager starts"]
+    P1["8:00 premarket snapshot · control server opens the dashboard"] --> P2["9:25 step-stop manager starts"]
   end
   subgraph DAY["Market hours"]
     D1["9:30 ORB options · Stock ORB"] --> D2["9:50 Trend Join"] --> D3["10:20 Credit ORB"] --> D4["3:45 iron condor"] --> D5["3:50–3:55 intraday bots flat"] --> D6["3:57 expiry guard"]
   end
   subgraph POST["After the close"]
-    A1["4:15 S&P 500 scan"] --> A2["4:30 RSI(2) then MA-crossover · postmarket snapshot"] --> A3["4:50 daily review"]
+    A1["4:15 S&P 500 scan"] --> A2["4:30 RSI(2) then MA-crossover · postmarket snapshot"] --> A3["4:50 daily review"] --> A4["6:00 control server stops"]
   end
   PRE --> DAY --> POST
 ```
@@ -77,7 +83,7 @@ flowchart LR
 flowchart LR
   subgraph S3["3 · ORB SPY 0DTE options — 9:30am"]
     direction LR
-    c1["15-min opening range"] --> c2{"Two 5-min closes outside<br/>→ call or put"} --> c3{"Range ≥ 0.2% · VWAP side<br/>9:45–12:00 · fill IV ≤ 1.25× model<br/>1 call + 1 put a day"} --> c4["Buy 0DTE option<br/>≤ 10 contracts"] --> c5["Exit: +50% profit lock in 25% steps<br/>· 200% Fib target · 3:55 flatten"]
+    c1["15-min opening range"] --> c2{"Two 5-min closes outside<br/>→ call or put"} --> c3{"Range ≥ 0.2% · VWAP side<br/>9:45–12:00 · fill IV ≤ 1.25× model<br/>1 call + 1 put a day"} --> c4["Buy 0DTE option<br/>≤ 5 contracts"] --> c5["Exit: +50% profit lock in 25% steps<br/>· 200% Fib target · 3:55 flatten"]
   end
   subgraph S4["4 · Iron condor SPY — 3:45pm"]
     direction LR
@@ -421,15 +427,18 @@ only if it agrees → bracket order → stop / target / 3:55 flatten.**
 
 ## Reports
 
-`run_snapshot` writes HTML to [reports/](reports/) and commits it locally
-(no push), in a year/month/day tree:
+`run_snapshot` writes HTML to `REPORTS_DIR` and commits it locally (no
+push), in a year/month/day tree. Each paper account has its own folder
+(see [Switching to a new paper account](#switching-to-a-new-paper-account));
+the current one is `reports/DUR356762/`, and the old account's reports stay
+in `reports/2026/...`:
 
 ```
-reports/2026/09/28/snapshot_2026-09-28_premarket.html   (daily, per day)
-reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per month)
+reports/DUR356762/2026/11/16/snapshot_2026-11-16_premarket.html   (daily, per day)
+reports/DUR356762/2026/11/weekly_2026-11-20.html                  (weekly/monthly, per month)
 ```
 
-- **Daily** — 9:00am premarket and 4:30pm postmarket: open orders, open
+- **Daily** — 8:00am premarket and 4:30pm postmarket: open orders, open
   positions with unrealized P&L (average price per share, options too),
   positions closed today (average bought and sold price per share and net
   P&L — the bought price is worked out from IBKR's realized P&L, so it
@@ -461,18 +470,31 @@ reports/2026/09/weekly_2026-09-25.html                  (weekly/monthly, per mon
 
 ## Dashboard
 
-`reports/dashboard.html` puts everything on one page. The **Trading
-dashboard** desktop shortcut (created by [scripts/install.ps1](scripts/install.ps1))
-runs [scripts/open_dashboard.ps1](scripts/open_dashboard.ps1): it rebuilds
-the page from the latest data, then opens it. Opening the file itself shows
-the last build (its time is at the top); it is also rebuilt automatically
-after the 4:30pm snapshot and the 4:50pm review. Read-only and offline: it reads the journal, `reports/`,
-`analysis/` and `logs/`, never IBKR, and the data is embedded in the file
-(no server). Not committed (`.gitignore`); every number in it is already
-in the journal and the reports.
+`<REPORTS_DIR>/dashboard.html` puts everything on one page. Normally you see
+it through the control server at **http://127.0.0.1:8765**, which opens it
+by itself at 8am on weekdays on the **Bot controls** tab. It's rebuilt:
+
+- at 8:00am by the control server and by the premarket snapshot;
+- at 4:30pm by the postmarket snapshot (and after the 4:50pm review);
+- whenever you double-click the **Trading dashboard** desktop shortcut
+  ([scripts/open_dashboard.ps1](scripts/open_dashboard.ps1)), which opens it
+  through the server when it's running, else as a file.
+
+An open dashboard tab reloads itself whenever it's rebuilt, so a tab left
+open overnight shows the new day once the server starts at 8am; no second
+tab is opened. Opened as a file (`file://`) everything works except the
+Bot controls tab, which then says how to reach the server.
+
+The page is read-only apart from the Bot controls tab: it reads the
+journal, the reports, `analysis/` and `logs/`, never IBKR, and the data is
+embedded in the file. Not committed (`.gitignore`); every number in it is
+already in the journal and the reports. `ACCOUNT_START_DATE` hides logs,
+reviews, studies and reports dated before the current paper account's first
+day (the files stay where they are).
 
 | Tab | Shows |
 |---|---|
+| Bot controls | Start / Pause / Stop for each strategy and for all at once, with each one's status, today's P&L, open positions and next run (see [Bot controls](#bot-controls-start--pause--stop)) |
 | Overview | Account value and P&L since the start, realized today / this week / this month / all time, largest drop, account value and realized P&L per day (hover for the breakdown), the latest review's summary, and anything that needs attention (a bot's own errors in its latest log, a condor expiring within a week, no snapshot for days) |
 | Strategies | Per strategy for a chosen period: trades, win rate, realized, average win / loss, profit factor, best / worst, and a running total chart |
 | Daily · weekly · monthly | Realized P&L per day, week or month, split by strategy, with links to that period's snapshot / weekly / monthly reports |
@@ -488,6 +510,62 @@ Built by [dashboard.py](src/tradingbot/dashboard.py) (data) and
 `python -m tradingbot.run_dashboard [--open]` by hand. Its realized P&L per
 strategy is the reports' own ([strategy_pnl.py](src/tradingbot/strategy_pnl.py));
 [tests/test_dashboard.py](tests/test_dashboard.py) checks they match.
+
+## Bot controls (Start / Pause / Stop)
+
+The first dashboard tab, served by a small local server. A status bar at
+the top shows the overall state ("All strategies running", "Paused: no new
+trades", ...) with **Start all / Pause all / Stop all**; below it, one card
+per strategy with its status, today's realized P&L, open positions, next
+run and its own three buttons. The expiry guard and step stop are listed as
+always on: they protect open positions and have no buttons.
+
+| Button | New trades | Open positions | Next scheduled start |
+|---|---|---|---|
+| **Start** | yes | managed as usual | runs |
+| **Pause** | no | still managed: stops, profit locks, targets, the 3:55 flatten | runs, stays paused |
+| **Stop** → keep positions | no | managed until they close, then the bot exits | exits straight away |
+| **Stop** → close at market | no | closed now with the bot's own exit code, then it exits | exits straight away |
+
+Stop on a strategy with open positions asks which of the two you want. A
+choice lasts until you press Start (no daily reset).
+
+**How the bots obey.** [control.py](src/tradingbot/control.py) keeps one
+mode per strategy in `data/control.json` (`CONTROL_PATH`, gitignored,
+written atomically). Every trading bot reads it each tick: no entry unless
+the mode is *run*; on *stop* it exits once flat; on *stop + close* it closes
+through its own exit path (ORB `check_exit`, credit ORB `close_spread`,
+condor `manage_position`, Stock ORB and Trend Join `flatten`). RSI(2) and
+MA-crossover stocks are sold by the step-stop bot during market hours —
+only client 1 can cancel their stops — or by their own 4:30pm run
+([stock_close.py](src/tradingbot/stock_close.py)); only symbols the
+strategy owns in `stock_ownership` are ever sold. **If the control file
+can't be read, every strategy counts as paused**: a broken file never lets
+a paused bot trade.
+
+**The server** ([run_control_server.py](src/tradingbot/run_control_server.py),
+Python standard library only) listens on `127.0.0.1:CONTROL_PORT` (8765)
+and never places orders. It serves the dashboard, `/controls` (the panel on
+its own, if there's no dashboard yet), `/api/state` and `POST /api/control`,
+plus files under `reports/` and `analysis/` only. While the market is open
+a button press also starts the bot that has to act: Start on an all-day bot
+that isn't running, or Stop + close on one that isn't (the step-stop bot for
+RSI(2) / MA-crossover; the condor bot, which has its own client ID).
+
+**Security.** Bound to 127.0.0.1, so other computers can't reach it. A POST
+must carry this server's Host and Origin, a JSON body and an
+`X-Bot-Control: 1` header, so another website open in your browser can't
+press the buttons (cross-site requests and DNS rebinding are refused).
+
+**Hours.** The `BotControlServer` task runs it Monday–Friday from 8am (and
+at Windows logon, if that's between 8am and 6pm) to 6pm New York time
+([scripts/run_control_server.ps1](scripts/run_control_server.ps1); by hand:
+`python -m tradingbot.run_control_server [--open] [--until 18:00]`). Outside
+those hours the buttons are offline and each bot keeps the last mode.
+
+The panel is [control_panel.html](src/tradingbot/control_panel.html):
+inlined into the dashboard at build time and served on its own at
+`/controls`. Tests: [tests/test_control.py](tests/test_control.py).
 
 ## Daily review (4:50pm)
 
@@ -566,6 +644,31 @@ for TWS paper, 4002 for Gateway paper). Every strategy parameter above is
 configurable there — see `.env.example` for the full list. Never commit
 `.env` — it's gitignored.
 
+Account-level settings:
+
+| Setting | What it does |
+|---|---|
+| `DB_PATH` | The journal (SQLite). One per paper account, e.g. `data/journal_DUR356762.db` |
+| `REPORTS_DIR` | Where reports and the dashboard go, e.g. `reports/DUR356762` |
+| `ACCOUNT_START_DATE` | The account's first day; the dashboard hides older logs, reviews and studies |
+| `ACCOUNT_STARTING_BALANCE` | Baseline for YTD P&L in the reports |
+| `CONTROL_PORT` / `CONTROL_PATH` | The control server's port (8765) and the Start / Pause / Stop file |
+
+### Switching to a new paper account
+
+Nothing old is moved or deleted; the new account gets its own journal and
+reports folder.
+
+1. Close everything on the old account (or let it close), then log TWS in
+   with the new paper user. TWS keeps API settings per user: set them again
+   (step 3 below) and check the precautionary order size limit.
+2. Share market data with the new paper user (step 3, item 4) and log out
+   of TWS and back in.
+3. In `.env`: `DB_PATH=data/journal_<account>.db`,
+   `REPORTS_DIR=reports/<account>`, `ACCOUNT_START_DATE=<first trading
+   day>`, and `ACCOUNT_STARTING_BALANCE` if it isn't $1,000,000.
+4. The next 8am run builds the new (empty) reports and dashboard.
+
 ### 3. IBKR paper account
 
 1. Log into a paper trading account in TWS or IB Gateway.
@@ -580,23 +683,51 @@ configurable there — see `.env.example` for the full list. Never commit
    NYSE/Nasdaq stocks arrive ~15 minutes late (`Error 10089`). Don't stay
    logged into the live account (TWS, IBKR Desktop, mobile app) during market
    hours: the shared data then goes to that session and the paper bots get
-   `Error 10197 No market data during competing live session`.
+   `Error 10197 No market data during competing live session`. A paper user
+   only gets the subscriptions of the live username it belongs to; after
+   switching sharing on, log TWS out and in. Until it works, IBKR answers
+   `Error 10168` / `2186` (stocks) and `354` (options), and the ORB bot falls
+   back to 1-minute historical bars for its exits.
+5. Order size: TWS's **Global Configuration → Presets → Precautionary
+   Settings** caps the size of each order (a new user starts at 5). The
+   condor bot sends up to `CREDIT_SPREAD_MAX_CONTRACTS_PER_TRADE` (10)
+   contracts at once; anything above the cap is rejected with `Error 383`.
 
 ### 4. Scheduling
 
 Each scheduled bot has a wrapper in [scripts/](scripts/)
 (`run_*_scheduled.ps1`) registered in Windows Task Scheduler; logs go to
 `logs/<bot>_<date>.log`. The wrappers find the repo folder themselves, so
-the repo can live anywhere. [scripts/install.ps1](scripts/install.ps1)
-creates all the tasks (Mon–Fri, New York times converted to the PC's time
-zone; re-running it replaces them).
+the repo can live anywhere.
+
+- **One source of truth:** [scripts/schedule.json](scripts/schedule.json)
+  lists every task, its New York time and its script. To change a time,
+  edit it there and run
+  `powershell -ExecutionPolicy Bypass -File scripts\register_tasks.ps1`
+  (the installer runs the same script). Tasks whose script isn't in this
+  copy of the repo are skipped.
+- **Daylight saving:** [register_tasks.ps1](scripts/register_tasks.ps1)
+  converts each New York time to the PC's clock and stores it **without a
+  UTC offset**, so the task follows the clock through every change.
+  (`New-ScheduledTaskTrigger` on its own stores today's offset, e.g.
+  `09:25-04:00`, which pins the task to UTC: after the 2026-11-01 change six
+  bots ran an hour early.) A PC outside New York time whose clock changes on
+  different dates than the US needs the script run again after each change.
+- **Drift warning:** the control server compares each task's next run with
+  `schedule.json` and shows "A bot's start time is off" on the Bot controls
+  tab when one differs by more than a minute.
 
 ## Safety
 
 - Every bot refuses to trade on an account whose ID doesn't start with
   `DU` (IBKR paper) unless `LIVE_TRADING=true` is set in `.env`.
 - Every signal, order, and position is logged to `data/journal.db` (SQLite).
-- Hard caps: $2,000 per stock position, 10 contracts per options trade.
+- Hard caps: $2,000 per stock position; 5 contracts per ORB trade
+  (`OPTIONS_MAX_CONTRACTS_PER_TRADE`), 10 per condor and credit spread.
+- **Start / Pause / Stop** from the dashboard (see [Bot controls](#bot-controls-start--pause--stop)):
+  an unreadable control file pauses every strategy; the server only listens
+  on 127.0.0.1 and refuses requests from other websites; *close at market*
+  only ever sells a strategy's own positions.
 - Bots never manage, sell or add to manual positions (see ownership above).
 - **Stop audit:** every MA/RSI(2) run first checks that each position it
   owns has a working stop covering the full quantity. Missing → a GTC

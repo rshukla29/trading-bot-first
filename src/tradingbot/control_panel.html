@@ -1,5 +1,5 @@
 <!-- Start / Pause / Stop panel (control.py). Inlined into the dashboard's
-     Controls tab by dashboard.py, and served on its own at /controls by
+     Bot controls tab by dashboard.py, and served on its own at /controls by
      run_control_server.py. Talks to the control server's /api; opened as
      a file it shows how to reach the server instead. -->
 <style>
@@ -71,6 +71,7 @@
 .cp-log { margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted, #898781); }
 .cp-log li { margin: 2px 0; }
 .cp-offline { border: 1px dashed var(--axis, #c3c2b7); border-radius: 12px; padding: 16px; font-size: 14px; }
+.cp-warn { border-style: solid; border-color: var(--cp-pause); background: var(--cp-pause-soft); }
 .cp-offline code { background: var(--surface-2, #f3f2ee); padding: 1px 6px; border-radius: 4px; }
 #cp-dialog { border: 1px solid var(--ring, rgba(0,0,0,.1)); border-radius: 14px; padding: 22px; max-width: 480px; width: calc(100% - 32px);
   background: var(--surface, #fff); color: var(--ink, #0b0b0b); box-shadow: 0 24px 60px rgba(0,0,0,.35); }
@@ -90,6 +91,7 @@
 </style>
 <div id="cp-root" aria-live="polite" data-port="{{CONTROL_PORT}}">
   <div class="cp-offline" id="cp-offline" hidden></div>
+  <div class="cp-offline cp-warn" id="cp-sched" role="alert" hidden></div>
   <div class="cp-bar" id="cp-bar" data-state="off">
     <div class="cp-state">
       <span class="cp-light" aria-hidden="true"></span>
@@ -171,6 +173,10 @@
   function render() {
     if (!S) return;
     q("#cp-offline").hidden = true;
+    const sw = S.schedule_warnings || [];
+    q("#cp-sched").hidden = !sw.length;
+    q("#cp-sched").innerHTML = sw.length ? `<b>A bot's start time is off.</b> ${sw.map(e).join("; ")}. ` +
+      `Run <code>scripts\register_tasks.ps1</code> (or the installer) to fix it.` : "";
     const [state, title] = summary(S.strategies);
     q("#cp-bar").dataset.state = state;
     q("#cp-title").textContent = title;
@@ -195,12 +201,25 @@
     root.querySelectorAll(".cp-big").forEach(b => b.disabled = busy);
   }
 
+  // A tab left open (e.g. overnight, after the 6pm stop) reloads itself
+  // once the dashboard has been rebuilt: the 8am start, or the snapshots.
+  let seenBuild;  // the dashboard build this page showed first; undefined until the first answer
+  function refreshIfRebuilt() {
+    const d = S.dashboard || {};
+    if (seenBuild === undefined) { seenBuild = d.build; return false; }
+    if (!d.build || d.build === seenBuild || q("#cp-dialog").open) return false;
+    if (location.pathname.endsWith("dashboard.html")) location.reload();  // keeps #controls
+    else location.href = d.url + "#controls";                            // /controls -> the first dashboard
+    return true;
+  }
+
   async function load() {
     if (!SERVED) return offline("file");
     try {
       const r = await fetch("/api/state", {cache: "no-store"});
       if (!r.ok) throw new Error(r.status);
-      S = await r.json(); render();
+      S = await r.json();
+      if (!refreshIfRebuilt()) render();
     } catch (err) { offline("down"); }
   }
 
@@ -240,6 +259,8 @@
       pending = null;
     }
   });
+  // Browsers slow down or freeze timers in background tabs: check as soon as the tab is looked at.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
   load();
   timer = setInterval(load, 5000);
 })();

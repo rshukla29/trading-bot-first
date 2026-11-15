@@ -68,7 +68,8 @@ def test_available_hides_bots_missing_from_this_repo(monkeypatch):
 def server(monkeypatch, tmp_path):
     from tradingbot import run_control_server as srv
     started = []
-    monkeypatch.setattr(srv, "task_info", lambda names, fresh=False: {n: {"state": "Ready", "next": "Mon 9:30am"} for n in names})
+    monkeypatch.setattr(srv, "task_info", lambda fresh=False: {n: {"state": "Ready", "next": "Mon 9:30am", "next_at": ""}
+                                                             for n in srv.all_task_names()})
     monkeypatch.setattr(srv, "start_task", lambda name: started.append(name) or True)
     monkeypatch.setattr(srv, "market_open", lambda now=None: True)
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "none.db"))
@@ -208,3 +209,81 @@ def test_close_owned_sells_only_the_strategys_own_stocks(tmp_path, monkeypatch):
     monkeypatch.setattr(stock_close, "place_market_sell", lambda ib, s, q: sold.append((s, q)) or object())
     out = stock_close.close_owned(None, j, "rsi2", {"KO": 40, "XOM": 10, "ASTX": 100})
     assert out == ["KO"] and sold == [("KO", 40)]                 # never XOM (other bot) or ASTX (manual)
+
+
+# ---------------------------------------------------------------- daily schedule
+
+def test_open_dashboard_rebuilds_and_opens_on_bot_controls(tmp_path, monkeypatch):
+    """Rebuilds even for a brand-new account (a blank dashboard), then opens
+    it on the Bot controls tab."""
+    import webbrowser
+    from tradingbot import dashboard
+    from tradingbot import run_control_server as srv
+    monkeypatch.setattr(settings, "reports_dir", str(tmp_path / "reports"))
+    opened, built = [], []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(dashboard, "build", lambda *a, **k: built.append(1) or "dashboard.html")
+    srv.open_dashboard(8765)
+    assert built == [1] and opened == ["http://127.0.0.1:8765/#controls"]
+
+
+def test_open_dashboard_lets_an_open_page_refresh_itself(tmp_path, monkeypatch):
+    """A dashboard tab left open from yesterday checks in after the 8am start:
+    it reloads itself, so no second tab is opened. No page: open one."""
+    import webbrowser
+    from tradingbot import dashboard
+    from tradingbot import run_control_server as srv
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(dashboard, "build", lambda *a, **k: "dashboard.html")
+    monkeypatch.setattr(srv.clock, "sleep", lambda s: None)
+    page_open = SimpleNamespace(last_poll=float("inf"))     # a poll arrived after the start
+    srv.open_dashboard(8765, page_open, wait=5)
+    assert opened == []
+    no_page = SimpleNamespace(last_poll=0.0)
+    srv.open_dashboard(8765, no_page, wait=0.01)
+    assert opened == ["http://127.0.0.1:8765/#controls"]
+
+
+def test_state_tells_the_page_when_the_dashboard_was_rebuilt(server, tmp_path, monkeypatch):
+    req, _, _ = server
+    monkeypatch.setattr(settings, "reports_dir", str(tmp_path / "rep"))
+    assert req("GET", "/api/state")[1]["dashboard"] == {"url": None, "build": None}
+    (tmp_path / "rep").mkdir()
+    (tmp_path / "rep" / "dashboard.html").write_text("x", encoding="utf-8")
+    d = req("GET", "/api/state")[1]["dashboard"]
+    assert d["url"].endswith("rep/dashboard.html") and d["build"]
+
+
+def test_server_stops_itself_at_the_set_time(monkeypatch):
+    from datetime import time as dtime
+    from tradingbot import run_control_server as srv
+    clock = iter([dtime(17, 59), dtime(18, 0)])
+    monkeypatch.setattr(srv, "datetime", SimpleNamespace(now=lambda tz=None: SimpleNamespace(time=lambda: next(clock))))
+    stopped = []
+    srv.stop_at(SimpleNamespace(shutdown=lambda: stopped.append(True)), dtime(18, 0), poll=0)
+    assert stopped == [True]
+
+
+def test_schedule_warning_when_a_task_drifts_an_hour():
+    """2026-11-01: triggers pinned to a UTC offset ran an hour early after
+    the clocks changed. The Bot controls tab must say so."""
+    from tradingbot import run_control_server as srv
+    from datetime import datetime
+    plan = [{"name": "StepStopTradingBot", "ny": "09:25"}, {"name": "ORBTradingBot", "ny": "09:30"},
+            {"name": "NotInstalled", "ny": "10:00"}]
+    local = lambda ny_iso: datetime.fromisoformat(ny_iso).replace(tzinfo=srv.ET).astimezone().replace(tzinfo=None)
+    tasks = {"StepStopTradingBot": {"next_at": local("2026-11-16T08:25:00").isoformat()},   # an hour early
+             "ORBTradingBot": {"next_at": local("2026-11-16T09:30:00").isoformat()}}
+    warnings = srv.schedule_warnings(tasks, plan)
+    assert len(warnings) == 1 and warnings[0].startswith("StepStopTradingBot runs at 8:25am, should be 9:25am")
+
+
+def test_schedule_file_matches_the_scripts():
+    """Every task in scripts/schedule.json points at a real script."""
+    from tradingbot import run_control_server as srv
+    plan = srv.schedule()
+    assert {t["name"] for t in plan} >= {"SnapshotPremarketBot", "BotControlServer", "ORBTradingBot"}
+    for t in plan:
+        assert (srv.SCHEDULE.parent / t["script"]).exists() or t["name"] == "StockOrbTradingBot", t
+        assert len(t["ny"]) == 5 and t["ny"][2] == ":"

@@ -77,57 +77,11 @@ Ok "All tests passed"
 if ($SkipTasks) {
     Step "Skipping Task Scheduler (-SkipTasks)"
 } else {
-    Step "Creating the scheduled tasks (Mon-Fri)"
-    # Name = New York time, script. Scripts that aren't in this copy of the repo are skipped.
-    $tasks = [ordered]@{
-        SnapshotPremarketBot  = "09:00", "run_snapshot_premarket.ps1"
-        StepStopTradingBot    = "09:25", "run_step_stop_scheduled.ps1"
-        ORBTradingBot         = "09:30", "run_orb_scheduled.ps1"
-        StockOrbTradingBot    = "09:30", "run_stock_orb_scheduled.ps1"
-        TrendJoinTradingBot   = "09:50", "run_trend_join_scheduled.ps1"
-        CreditOrbTradingBot   = "10:20", "run_credit_orb_scheduled.ps1"
-        IronCondorTradingBot  = "15:45", "run_iron_condor_scheduled.ps1"
-        ExpiryGuardBot        = "15:57", "run_expiry_guard_scheduled.ps1"
-        SP500ScanBot          = "16:15", "run_sp500_scan_scheduled.ps1"
-        RSI2TradingBot        = "16:30", "run_rsi2_scheduled.ps1"
-        SnapshotPostmarketBot = "16:30", "run_snapshot_postmarket.ps1"
-        DailyReviewBot        = "16:50", "run_daily_review_scheduled.ps1"
-    }
-    $ny = [TimeZoneInfo]::FindSystemTimeZoneById("Eastern Standard Time")
-    $days = "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 72) -StartWhenAvailable
-    foreach ($name in $tasks.Keys) {
-        $nyTime, $script = $tasks[$name]
-        $path = Join-Path $repo "scripts\$script"
-        if (-not (Test-Path $path)) { continue }
-        $nyClock = [datetime]::SpecifyKind([datetime]::Today.Add([timespan]$nyTime), "Unspecified")
-        $local = [TimeZoneInfo]::ConvertTime($nyClock, $ny, [TimeZoneInfo]::Local)
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-            -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$path`""
-        $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At $local
-        Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-        Ok ("{0,-22} {1} New York = {2} on this PC" -f $name, $nyTime, $local.ToString("HH:mm"))
-    }
-
-    # The dashboard's Start / Pause / Stop buttons: a small server on
-    # 127.0.0.1 (run_control_server.py), started at logon and restarted if it stops.
-    $cs = Join-Path $repo "scripts\run_control_server.ps1"
-    if (Test-Path $cs) {
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-            -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$cs`""
-        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-        $csSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable `
-            -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-        Register-ScheduledTask -TaskName BotControlServer -Action $action -Trigger $trigger -Settings $csSettings -Force | Out-Null
-        Stop-ScheduledTask -TaskName BotControlServer -ErrorAction SilentlyContinue
-        Start-ScheduledTask -TaskName BotControlServer
-        Ok "BotControlServer       at logon = dashboard buttons on http://127.0.0.1:8765"
-    }
-
-    if ([TimeZoneInfo]::Local.Id -ne $ny.Id) {
-        Write-Host "   This PC isn't on New York time. If your clock changes for daylight saving on"
-        Write-Host "   different dates than the US, run this again after each change."
-    }
+    Step "Creating the scheduled tasks (Mon-Fri, from scripts\schedule.json)"
+    & (Join-Path $repo "scripts\register_tasks.ps1")
+    # The control server: does nothing outside Mon-Fri 8am-6pm.
+    Stop-ScheduledTask -TaskName BotControlServer -ErrorAction SilentlyContinue
+    Start-ScheduledTask -TaskName BotControlServer -ErrorAction SilentlyContinue
 }
 
 Step "Desktop shortcut for the dashboard"

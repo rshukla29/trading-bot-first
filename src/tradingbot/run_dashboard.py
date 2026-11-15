@@ -5,7 +5,7 @@ reviews and logs. Read-only; no IBKR connection. See dashboard.py.
     python -m tradingbot.run_dashboard --open    # build and open it in the browser
 
 --open goes through the control server (run_control_server.py) when it's
-running, so the Controls tab's buttons work; otherwise it opens the file.
+running, so the Bot controls tab's buttons work; otherwise it opens the file.
 """
 from __future__ import annotations
 
