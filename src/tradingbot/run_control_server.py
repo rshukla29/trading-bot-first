@@ -62,7 +62,7 @@ DISPLAY_TO_ID = {"ORB (SPY 0DTE options)": "orb", "ORB credit spreads": "credit_
                  "Trend Join": "trend_join", "Stock ORB": "stock_orb", "RSI(2)": "rsi2", "MA-crossover": "ma_crossover"}
 STATIC_ROOTS = ("reports", "analysis")
 MAX_BODY = 4096
-TASK_CACHE_SECONDS = 10.0
+TASK_CACHE_SECONDS = 60.0  # each refresh starts PowerShell (~0.5s CPU); next-run times don't change minute to minute
 SCHEDULE = Path(__file__).resolve().parents[2] / "scripts" / "schedule.json"
 
 
@@ -336,7 +336,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, html.encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/api/state":
             self.server.last_poll = clock.monotonic()
-            self._json(HTTPStatus.OK, state_payload())
+            # ?light=1: a background tab only asking whether the dashboard was rebuilt
+            light = "light=1" in urlsplit(self.path).query
+            self._json(HTTPStatus.OK, {"dashboard": dashboard_info()} if light else state_payload())
         else:
             self._static(path)
 
@@ -411,7 +413,7 @@ def make_server(port: int | None = None) -> ThreadingHTTPServer:
     return server
 
 
-OPEN_PAGE_WAIT = 75.0  # seconds; a background browser tab may only run its timers once a minute
+OPEN_PAGE_WAIT = 150.0  # seconds; a background tab checks once a minute, and browsers may delay that to the next minute
 
 
 def open_dashboard(port: int, server: ThreadingHTTPServer | None = None, wait: float = OPEN_PAGE_WAIT) -> None:

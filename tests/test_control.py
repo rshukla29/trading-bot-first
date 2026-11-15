@@ -255,6 +255,16 @@ def test_state_tells_the_page_when_the_dashboard_was_rebuilt(server, tmp_path, m
     assert d["url"].endswith("rep/dashboard.html") and d["build"]
 
 
+def test_light_state_skips_the_task_lookup(server, monkeypatch):
+    """A background tab's once-a-minute check only gets the dashboard build:
+    no PowerShell task query, but it still counts as a page checking in."""
+    from tradingbot import run_control_server as srv
+    req, _, _ = server
+    monkeypatch.setattr(srv, "task_info", lambda *a, **k: (_ for _ in ()).throw(AssertionError("task lookup")))
+    status, st = req("GET", "/api/state?light=1")
+    assert status == 200 and set(st) == {"dashboard"}
+
+
 def test_server_stops_itself_at_the_set_time(monkeypatch):
     from datetime import time as dtime
     from tradingbot import run_control_server as srv

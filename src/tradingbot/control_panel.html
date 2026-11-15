@@ -223,6 +223,22 @@
     } catch (err) { offline("down"); }
   }
 
+  // In a background tab: once a minute, a light check that only asks whether
+  // the dashboard was rebuilt (so the 8am start updates this tab instead of
+  // opening a new one). The full refresh runs as soon as the tab is looked at.
+  let lastLight = 0;
+  async function lightCheck() {
+    if (!SERVED || Date.now() - lastLight < 60000) return;
+    lastLight = Date.now();
+    try {
+      const r = await fetch("/api/state?light=1", {cache: "no-store"});
+      if (!r.ok) return;
+      const d = (await r.json()).dashboard;
+      if (seenBuild !== undefined && d && d.build && d.build !== seenBuild) { S = {...S, dashboard: d}; refreshIfRebuilt(); }
+    } catch (err) { /* the server is off (after 6pm): try again next minute */ }
+  }
+  function tick() { if (document.hidden) lightCheck(); else load(); }
+
   async function send(body) {
     busy = true; render();
     try {
@@ -262,6 +278,6 @@
   // Browsers slow down or freeze timers in background tabs: check as soon as the tab is looked at.
   document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
   load();
-  timer = setInterval(load, 5000);
+  timer = setInterval(tick, 5000);
 })();
 </script>
