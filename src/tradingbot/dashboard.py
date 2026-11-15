@@ -28,6 +28,7 @@ from tradingbot.journal import closed_trade_multiplier, closed_trade_prices
 from tradingbot.strategy_pnl import ET, JOURNAL_STRATEGIES, STOCK_BOTS, _et_date, _stock_owner, _table_exists
 
 TEMPLATE = Path(__file__).with_name("dashboard_page.html")
+CONTROL_PANEL = Path(__file__).with_name("control_panel.html")
 STRATEGIES = [n for n, _, _ in JOURNAL_STRATEGIES] + list(STOCK_BOTS.values()) + ["Manual / other"]
 HEALTH_DAYS = 15
 
@@ -160,11 +161,11 @@ def tm_checks(conn) -> list[dict]:
 _REPORT = re.compile(r"(snapshot|weekly|monthly)_(\d{4}-\d{2}-\d{2})(?:_(premarket|postmarket))?\.html$")
 
 
-def report_files(reports_dir: Path, page_dir: Path) -> list[dict]:
+def report_files(reports_dir: Path, page_dir: Path, since: str = "") -> list[dict]:
     out = []
     for p in reports_dir.rglob("*.html"):
         m = _REPORT.search(p.name)
-        if m:
+        if m and m.group(2) >= since:
             kind = m.group(3) or m.group(1)
             out.append(dict(date=m.group(2), kind=kind, href=_rel(p, page_dir)))
     out.sort(key=lambda r: (r["date"], r["kind"]), reverse=True)
@@ -176,10 +177,12 @@ def _rel(p: Path, base: Path) -> str:
     return Path(os.path.relpath(p.resolve(), base.resolve())).as_posix()
 
 
-def reviews(analysis_dir: Path, page_dir: Path) -> list[dict]:
+def reviews(analysis_dir: Path, page_dir: Path, since: str = "") -> list[dict]:
     out = []
     for p in (analysis_dir / "daily").rglob("review_*.md") if (analysis_dir / "daily").exists() else []:
         d = p.stem.removeprefix("review_")
+        if d < since:
+            continue
         text = demojibake(p.read_text(encoding="utf-8-sig", errors="replace"))
         facts = p.with_name(f"facts_{d}.md")
         out.append(dict(date=d, html=markdown(text), summary=_summary(text), href=_rel(p, page_dir),
@@ -188,12 +191,14 @@ def reviews(analysis_dir: Path, page_dir: Path) -> list[dict]:
     return out
 
 
-def studies(analysis_dir: Path, page_dir: Path) -> list[dict]:
-    """One-off analyses: every folder in analysis/ other than daily/, with its README if any."""
+def studies(analysis_dir: Path, page_dir: Path, since: str = "") -> list[dict]:
+    """One-off analyses: every folder in analysis/ other than daily/, with its
+    README if any. With `since`, only folders named from that date on
+    (YYYY-MM-DD_...)."""
     out = []
     if analysis_dir.exists():
         for d in sorted(analysis_dir.iterdir(), reverse=True):
-            if d.is_dir() and d.name != "daily":
+            if d.is_dir() and d.name != "daily" and (not since or d.name[:10] >= since):
                 readme = d / "README.md"
                 out.append(dict(name=d.name, href=_rel(readme if readme.exists() else d, page_dir)))
     return out
@@ -234,12 +239,13 @@ def _strip_log(line: str) -> str:
     return re.sub(r"^(python\.exe : )?\d{4}-\d{2}-\d{2} [\d:,]+ ERROR ", "", line)
 
 
-def bot_health(logs_dir: Path, today: date, days: int = HEALTH_DAYS) -> dict:
-    """For the last `days` dates with any log: per bot, ran / warnings / errors."""
+def bot_health(logs_dir: Path, today: date, days: int = HEALTH_DAYS, since: str = "") -> dict:
+    """For the last `days` dates with any log (none before `since`): per bot,
+    ran / warnings / errors."""
     by_day: dict[str, dict[str, dict]] = {}
     pat = re.compile(r"^(?P<bot>[a-z0-9_]+)_(?P<d>\d{4}-\d{2}-\d{2})\.log$")
     files = [(m, p) for p in logs_dir.glob("*.log") if (m := pat.match(p.name))] if logs_dir.exists() else []
-    dates = sorted({m["d"] for m, _ in files if m["d"] <= today.isoformat()}, reverse=True)[:days]
+    dates = sorted({m["d"] for m, _ in files if since <= m["d"] <= today.isoformat()}, reverse=True)[:days]
     keep = set(dates)
     for m, p in files:
         if m["d"] not in keep:
@@ -353,7 +359,10 @@ def markdown(md: str) -> str:
 # ---------------------------------------------------------------- page
 
 def collect(db_path: str, reports_dir: Path, analysis_dir: Path, logs_dir: Path, page_dir: Path,
-            starting_balance: float, today: date | None = None) -> dict:
+            starting_balance: float, today: date | None = None, since: str = "") -> dict:
+    """`since` (YYYY-MM-DD): the account's first day — reports, reviews,
+    studies and bot logs dated earlier belong to a previous account and are
+    left out (the files themselves stay where they are)."""
     today = today or datetime.now(ET).date()
     conn = sqlite3.connect(db_path)
     try:
@@ -364,8 +373,8 @@ def collect(db_path: str, reports_dir: Path, analysis_dir: Path, logs_dir: Path,
     data.update(
         generated=datetime.now(ET).strftime("%Y-%m-%d %H:%M ET"), today=today.isoformat(),
         starting_balance=starting_balance, strategies=STRATEGIES,
-        reports=report_files(reports_dir, page_dir), reviews=reviews(analysis_dir, page_dir),
-        studies=studies(analysis_dir, page_dir), health=bot_health(logs_dir, today),
+        reports=report_files(reports_dir, page_dir, since), reviews=reviews(analysis_dir, page_dir, since),
+        studies=studies(analysis_dir, page_dir, since), health=bot_health(logs_dir, today, since=since),
     )
     return data
 
@@ -373,7 +382,10 @@ def collect(db_path: str, reports_dir: Path, analysis_dir: Path, logs_dir: Path,
 def render(data: dict) -> str:
     # Every "<" as <: nothing in the data can close the <script> it sits in.
     payload = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")
-    return TEMPLATE.read_text(encoding="utf-8").replace("/*__DATA__*/null", payload)
+    from tradingbot.config import settings
+    panel = CONTROL_PANEL.read_text(encoding="utf-8").replace("{{CONTROL_PORT}}", str(settings.control_port))
+    return (TEMPLATE.read_text(encoding="utf-8").replace("<!--__CONTROLS__-->", panel)
+            .replace("/*__DATA__*/null", payload))
 
 
 def build(out_path: Path | None = None, today: date | None = None) -> Path:
@@ -382,7 +394,7 @@ def build(out_path: Path | None = None, today: date | None = None) -> Path:
     out_path = out_path or reports_dir / "dashboard.html"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     data = collect(settings.db_path, reports_dir, Path("analysis"), Path("logs"), out_path.parent,
-                   settings.account_starting_balance, today)
+                   settings.account_starting_balance, today, settings.account_start_date)
     out_path.write_text(render(data), encoding="utf-8")
     return out_path
 

@@ -1,0 +1,246 @@
+<!-- Start / Pause / Stop panel (control.py). Inlined into the dashboard's
+     Controls tab by dashboard.py, and served on its own at /controls by
+     run_control_server.py. Talks to the control server's /api; opened as
+     a file it shows how to reach the server instead. -->
+<style>
+#cp-root {
+  --cp-run: #0f7b3e; --cp-run-ink: #ffffff;
+  --cp-pause: #f2b53a; --cp-pause-ink: #2a1d02;
+  --cp-stop: #5c6470; --cp-stop-ink: #ffffff;
+  --cp-danger: #c0392b; --cp-danger-ink: #ffffff;
+  --cp-run-soft: rgba(15,123,62,.10); --cp-pause-soft: rgba(242,181,58,.16); --cp-stop-soft: rgba(92,100,112,.12);
+  display: flex; flex-direction: column; gap: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  #cp-root { --cp-run: #2fb67a; --cp-run-ink: #03190f; --cp-stop: #6b7380;
+    --cp-run-soft: rgba(47,182,122,.14); --cp-pause-soft: rgba(242,181,58,.14); --cp-stop-soft: rgba(139,149,163,.14); }
+}
+#cp-root button { font: inherit; }
+#cp-root button:focus-visible { outline: 2px solid var(--accent, #2a78d6); outline-offset: 2px; }
+.cp-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 18px 20px; border-radius: 14px; border: 1px solid var(--ring, rgba(0,0,0,.1)); }
+.cp-bar[data-state="run"] { background: var(--cp-run-soft); }
+.cp-bar[data-state="pause"] { background: var(--cp-pause-soft); }
+.cp-bar[data-state="stop"], .cp-bar[data-state="off"] { background: var(--cp-stop-soft); }
+.cp-state { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.cp-light { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+.cp-bar[data-state="run"] .cp-light { background: var(--cp-run); box-shadow: 0 0 0 6px var(--cp-run-soft); }
+.cp-bar[data-state="pause"] .cp-light { background: var(--cp-pause); box-shadow: 0 0 0 6px var(--cp-pause-soft); }
+.cp-bar[data-state="stop"] .cp-light, .cp-bar[data-state="off"] .cp-light { background: var(--cp-stop); box-shadow: 0 0 0 6px var(--cp-stop-soft); }
+.cp-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2, #52514e); }
+.cp-title { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.cp-sub { font-size: 12px; color: var(--muted, #898781); margin-top: 2px; }
+.cp-all { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-big { min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; font-weight: 700 !important; letter-spacing: .02em;
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.cp-big:hover:not(:disabled) { filter: brightness(1.08); }
+.cp-big:disabled, .cp-seg:disabled { cursor: default; }
+.cp-big:disabled { opacity: .45; }
+.cp-big.run { background: var(--cp-run); color: var(--cp-run-ink); }
+.cp-big.pause { background: var(--cp-pause); color: var(--cp-pause-ink); }
+.cp-big.stop { background: var(--cp-danger); color: var(--cp-danger-ink); }
+.cp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(270px, 100%), 1fr)); gap: 12px; }
+.cp-card { background: var(--surface, #fff); border: 1px solid var(--ring, rgba(0,0,0,.1)); border-radius: 12px; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px; }
+.cp-card[data-mode="pause"] { border-color: var(--cp-pause); }
+.cp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.cp-name { font-size: 16px; font-weight: 600; }
+.cp-desc { font-size: 12px; color: var(--muted, #898781); }
+.cp-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  white-space: nowrap; color: var(--ink, #0b0b0b); }
+.cp-pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.cp-pill.run { background: var(--cp-run-soft); } .cp-pill.run::before { background: var(--cp-run); }
+.cp-pill.pause { background: var(--cp-pause-soft); } .cp-pill.pause::before { background: var(--cp-pause); }
+.cp-pill.stop { background: var(--cp-stop-soft); } .cp-pill.stop::before { background: var(--cp-stop); }
+.cp-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.cp-stats .k { font-size: 12px; color: var(--ink-2, #52514e); }
+.cp-stats .v { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cp-note { font-size: 12px; color: var(--muted, #898781); min-height: 1.45em; }
+.cp-note.warn { color: var(--ink, #0b0b0b); }
+.cp-segs { display: flex; gap: 6px; }
+.cp-seg { flex: 1; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 9px;
+  border: 1px solid var(--grid, #e1e0d9); background: var(--surface-2, #f3f2ee); color: var(--ink, #0b0b0b); font-weight: 600 !important;
+  cursor: pointer; }
+.cp-seg:hover:not(:disabled) { border-color: var(--axis, #c3c2b7); }
+.cp-seg.on.run { background: var(--cp-run); border-color: var(--cp-run); color: var(--cp-run-ink); }
+.cp-seg.on.pause { background: var(--cp-pause); border-color: var(--cp-pause); color: var(--cp-pause-ink); }
+.cp-seg.on.stop { background: var(--cp-stop); border-color: var(--cp-stop); color: var(--cp-stop-ink); }
+.cp-seg:disabled:not(.on) { opacity: .45; }
+.cp-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--ink-2, #52514e); }
+.cp-safety { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cp-log { margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted, #898781); }
+.cp-log li { margin: 2px 0; }
+.cp-offline { border: 1px dashed var(--axis, #c3c2b7); border-radius: 12px; padding: 16px; font-size: 14px; }
+.cp-offline code { background: var(--surface-2, #f3f2ee); padding: 1px 6px; border-radius: 4px; }
+#cp-dialog { border: 1px solid var(--ring, rgba(0,0,0,.1)); border-radius: 14px; padding: 22px; max-width: 480px; width: calc(100% - 32px);
+  background: var(--surface, #fff); color: var(--ink, #0b0b0b); box-shadow: 0 24px 60px rgba(0,0,0,.35); }
+#cp-dialog::backdrop { background: rgba(0,0,0,.5); }
+#cp-dialog h2 { margin: 0 0 8px; font-size: 18px; }
+#cp-dialog p { margin: 0 0 16px; font-size: 14px; line-height: 1.5; color: var(--ink-2, #52514e); }
+.cp-choices { display: flex; flex-direction: column; gap: 8px; }
+.cp-choice { min-height: 48px; padding: 8px 14px; border-radius: 10px; text-align: left; cursor: pointer; border: 1px solid var(--grid, #e1e0d9);
+  background: var(--surface-2, #f3f2ee); color: var(--ink, #0b0b0b); }
+.cp-choice b { display: block; font-size: 14px; }
+.cp-choice span { font-size: 12px; color: var(--ink-2, #52514e); }
+.cp-choice.danger { background: var(--cp-danger); border-color: var(--cp-danger); color: var(--cp-danger-ink); }
+.cp-choice.danger span { color: var(--cp-danger-ink); opacity: .9; }
+.cp-choice.plain { text-align: center; background: transparent; }
+.cp-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink, #0b0b0b); color: var(--page, #fff);
+  padding: 10px 16px; border-radius: 10px; font-size: 13px; z-index: 50; max-width: calc(100% - 32px); }
+</style>
+<div id="cp-root" aria-live="polite" data-port="{{CONTROL_PORT}}">
+  <div class="cp-offline" id="cp-offline" hidden></div>
+  <div class="cp-bar" id="cp-bar" data-state="off">
+    <div class="cp-state">
+      <span class="cp-light" aria-hidden="true"></span>
+      <div><div class="cp-eyebrow">Trading · paper</div><div class="cp-title" id="cp-title">Loading…</div>
+        <div class="cp-sub" id="cp-sub"></div></div>
+    </div>
+    <div class="cp-all">
+      <button type="button" class="cp-big run" data-act="run" data-id="all"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>Start all</button>
+      <button type="button" class="cp-big pause" data-act="pause" data-id="all"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>Pause all</button>
+      <button type="button" class="cp-big stop" data-act="stop" data-id="all"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>Stop all</button>
+    </div>
+  </div>
+  <div class="cp-grid" id="cp-grid"></div>
+  <div class="cp-foot">
+    <div class="cp-safety" id="cp-safety"></div>
+    <ul class="cp-log" id="cp-log"></ul>
+  </div>
+  <dialog id="cp-dialog" aria-labelledby="cp-dlg-title">
+    <h2 id="cp-dlg-title"></h2>
+    <p id="cp-dlg-body"></p>
+    <div class="cp-choices">
+      <button type="button" class="cp-choice" data-choice="keep"><b>Stop, keep positions</b><span>No new trades. The bot keeps managing what's open (stops, targets) until it closes, then stops.</span></button>
+      <button type="button" class="cp-choice danger" data-choice="close"><b>Stop and close positions at market</b><span>The bot sells or buys back its own positions now. Manual positions are never touched.</span></button>
+      <button type="button" class="cp-choice plain" data-choice="cancel">Cancel</button>
+    </div>
+  </dialog>
+</div>
+<script>
+(function () {
+  const root = document.getElementById("cp-root");
+  if (!root) return;
+  const q = s => root.querySelector(s);
+  const e = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const usd = v => v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + "$" + Math.abs(v).toLocaleString("en-US", {maximumFractionDigits: 0});
+  const LABEL = {run: "Running", pause: "Paused", stop: "Stopped"};
+  const VERB = {run: "Start", pause: "Pause", stop: "Stop"};
+  const SERVED = location.protocol === "http:" || location.protocol === "https:";
+  const SERVER_URL = "http://127.0.0.1:" + (root.dataset.port || "8765") + "/";
+  let S = null, busy = false, pending = null, timer = null;
+
+  const ICON = {
+    run: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>',
+    pause: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><line x1="8" y1="5" x2="8" y2="19"/><line x1="16" y1="5" x2="16" y2="19"/></svg>',
+    stop: '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>'
+  };
+
+  function toast(msg) {
+    const t = document.createElement("div");
+    t.className = "cp-toast"; t.setAttribute("role", "status"); t.textContent = msg;
+    document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
+  }
+
+  function offline(why) {
+    const box = q("#cp-offline");
+    box.hidden = false;
+    box.innerHTML = why === "file"
+      ? `The buttons work through the control server. Open the dashboard from <a href="${SERVER_URL}">${SERVER_URL}</a> (the desktop shortcut does this), or start the <code>BotControlServer</code> task if that link doesn't load.`
+      : `Can't reach the control server at <a href="${SERVER_URL}">${SERVER_URL}</a>. Is the <code>BotControlServer</code> task running? Retrying every few seconds.`;
+    root.querySelectorAll("[data-act]").forEach(b => b.disabled = true);
+    if (!S) { q("#cp-title").textContent = "Controls offline"; q("#cp-bar").dataset.state = "off"; }
+  }
+
+  function summary(list) {
+    const n = m => list.filter(s => s.mode === m).length;
+    const run = n("run"), pause = n("pause"), stop = n("stop");
+    if (run === list.length) return ["run", "All strategies running"];
+    if (stop === list.length) return ["stop", "Everything stopped"];
+    if (run === 0) return ["pause", "Paused: no new trades"];
+    return ["run", `${run} of ${list.length} running · ${pause} paused · ${stop} stopped`];
+  }
+
+  function noteFor(s) {
+    if (s.close) return ["warn", "Closing its positions at market…"];
+    if (s.mode === "stop" && s.positions.length) return ["warn", "Stopped: managing open positions until they close"];
+    if (s.task_state === "Running") return ["", "Bot running now" + (s.since ? " · changed " + s.since_text : "")];
+    return ["", (s.next_run ? "Next run " + s.next_run : "Not scheduled") + (s.since ? " · changed " + s.since_text : "")];
+  }
+
+  function render() {
+    if (!S) return;
+    q("#cp-offline").hidden = true;
+    const [state, title] = summary(S.strategies);
+    q("#cp-bar").dataset.state = state;
+    q("#cp-title").textContent = title;
+    q("#cp-sub").textContent = (S.market_open ? "Market open" : "Market closed") + " · updated " + S.updated;
+    q("#cp-grid").innerHTML = S.strategies.map(s => {
+      const [nc, note] = noteFor(s);
+      const pos = s.positions.length ? s.positions.map(p => p.label).join(", ") : "None";
+      const seg = m => `<button type="button" class="cp-seg ${s.mode === m ? "on " + m : ""}" data-act="${m}" data-id="${e(s.id)}"
+        ${s.mode === m || busy ? "disabled" : ""} aria-pressed="${s.mode === m}">${ICON[m]}${VERB[m]}</button>`;
+      return `<div class="cp-card" data-mode="${s.mode}">
+        <div class="cp-head"><div><div class="cp-name">${e(s.name)}</div><div class="cp-desc">${e(s.sub)}</div></div>
+          <span class="cp-pill ${s.mode}">${LABEL[s.mode]}</span></div>
+        <div class="cp-stats"><div><div class="k">Today</div><div class="v">${usd(s.today_pnl)}</div></div>
+          <div><div class="k">Open</div><div class="v">${e(pos)}</div></div></div>
+        <div class="cp-note ${nc}">${e(note)}</div>
+        <div class="cp-segs" role="group" aria-label="${e(s.name)} controls">${seg("run")}${seg("pause")}${seg("stop")}</div>
+      </div>`;
+    }).join("");
+    q("#cp-safety").innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg> Always on:' +
+      S.safety.map(b => `<span class="cp-pill ${b.state === "Disabled" ? "stop" : "run"}">${e(b.name)}${b.state === "Disabled" ? " (task disabled!)" : ""}</span>`).join("");
+    q("#cp-log").innerHTML = S.log.slice(0, 4).map(l => `<li>${e(l.at_text)} · ${e(l.text)}</li>`).join("");
+    root.querySelectorAll(".cp-big").forEach(b => b.disabled = busy);
+  }
+
+  async function load() {
+    if (!SERVED) return offline("file");
+    try {
+      const r = await fetch("/api/state", {cache: "no-store"});
+      if (!r.ok) throw new Error(r.status);
+      S = await r.json(); render();
+    } catch (err) { offline("down"); }
+  }
+
+  async function send(body) {
+    busy = true; render();
+    try {
+      const r = await fetch("/api/control", {method: "POST", cache: "no-store",
+        headers: {"Content-Type": "application/json", "X-Bot-Control": "1"}, body: JSON.stringify(body)});
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      S = j; if (j.message) toast(j.message);
+    } catch (err) { toast("Couldn't change it: " + err.message); }
+    busy = false; render();
+  }
+
+  function act(id, mode) {
+    if (!S) return;
+    if (mode !== "stop") return send({strategy: id, mode});
+    const ids = id === "all" ? S.strategies.filter(s => s.mode !== "stop").map(s => s.id) : [id];
+    const withPos = S.strategies.filter(s => ids.includes(s.id) && s.positions.length);
+    if (!withPos.length) return send({strategy: id, mode: "stop", close: false});
+    pending = id;
+    const one = ids.length === 1;
+    q("#cp-dlg-title").textContent = one ? `Stop ${withPos[0].name}?` : `Stop ${ids.length} strategies?`;
+    q("#cp-dlg-body").textContent = withPos.map(s => `${s.name} has ${s.positions.map(p => p.label).join(", ")}`).join("; ") +
+      ". What should happen to the open positions?";
+    q("#cp-dialog").showModal();
+  }
+
+  root.addEventListener("click", ev => {
+    const b = ev.target.closest("[data-act]");
+    if (b && !b.disabled) act(b.dataset.id, b.dataset.act);
+    const c = ev.target.closest("[data-choice]");
+    if (c) {
+      q("#cp-dialog").close();
+      if (c.dataset.choice !== "cancel" && pending) send({strategy: pending, mode: "stop", close: c.dataset.choice === "close"});
+      pending = null;
+    }
+  });
+  load();
+  timer = setInterval(load, 5000);
+})();
+</script>

@@ -40,6 +40,7 @@ from datetime import date, datetime, timezone
 
 from ib_async import Contract
 
+from tradingbot import control
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
@@ -75,13 +76,13 @@ def _rehydrate_option(ib, conid: int):
 QUOTE_RETRY_SECONDS = 5
 
 
-def manage_open_positions(ib, journal: Journal, symbol: str) -> None:
+def manage_open_positions(ib, journal: Journal, symbol: str, force_reason: str | None = None) -> None:
     """Each open condor on its own: a failure on one (2026-10-27 and 11-02:
     no quote for a far call leg) is logged and the others are still
     checked."""
     for pos in journal.open_condor_positions(symbol):
         try:
-            manage_position(ib, journal, symbol, pos)
+            manage_position(ib, journal, symbol, pos, force_reason=force_reason)
         except Exception:
             logger.exception("%s: position %d: management failed, will retry next run", symbol, pos["id"])
 
@@ -100,7 +101,8 @@ def current_cost(ib, legs: CondorLegs) -> float | None:
     return None
 
 
-def manage_position(ib, journal: Journal, symbol: str, pos) -> None:
+def manage_position(ib, journal: Journal, symbol: str, pos, force_reason: str | None = None) -> None:
+    """`force_reason`: close now whatever the rules say (dashboard Stop + close)."""
     legs = CondorLegs(
         call_short=_rehydrate_option(ib, pos["call_short_conid"]),
         call_long=_rehydrate_option(ib, pos["call_long_conid"]),
@@ -123,6 +125,8 @@ def manage_position(ib, journal: Journal, symbol: str, pos) -> None:
         exit_reason = "stop_loss"
     elif days_to_expiry <= settings.credit_spread_dte_forced_close:
         exit_reason = "dte_forced_close"
+    if force_reason:
+        exit_reason = force_reason
 
     if exit_reason is None:
         logger.info("%s: position %d holding (cost=%.2f credit=%.2f dte=%d)",
@@ -258,19 +262,31 @@ def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) ->
 def main() -> None:
     journal = Journal(settings.db_path)
 
+    gate = control.Gate("iron_condor", logger)
+    symbols = settings.credit_spread_symbol_list
+    if gate.stopped() and not any(journal.open_condor_positions(s) for s in symbols):
+        logger.warning("Iron condor is stopped from the dashboard and has no open condor — nothing to do")
+        gate.close_done()
+        return
+
     with IBKRClient(settings, client_id=settings.condor_client_id) as client:
         equity = client.net_liquidation()
         logger.info("Equity: %.2f", equity)
+        force = "manual_stop" if gate.wants_close() else None
 
-        for symbol in settings.credit_spread_symbol_list:
+        for symbol in symbols:
             try:
-                manage_open_positions(client.ib, journal, symbol)
+                manage_open_positions(client.ib, journal, symbol, force_reason=force)
             except Exception:
                 logger.exception("%s: error during condor management, skipping", symbol)
+            if not gate.entries_allowed():
+                continue  # paused or stopped from the dashboard (control.py)
             try:
                 maybe_open_new_position(client.ib, journal, symbol, equity)
             except Exception:
                 logger.exception("%s: error during condor entry, skipping", symbol)
+        if force and not any(journal.open_condor_positions(s) for s in symbols):
+            gate.close_done()
 
 
 if __name__ == "__main__":

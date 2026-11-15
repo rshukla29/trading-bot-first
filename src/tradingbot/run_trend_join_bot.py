@@ -37,6 +37,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from ib_async import IB, MarketOrder, Stock, StopOrder, Trade
 
+from tradingbot import control
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
@@ -339,6 +340,11 @@ def main() -> None:
         ib = client.ib
         ib.reqMarketDataType(3)  # live where subscribed, delayed otherwise
         positions = recover_positions(ib, client, journal)
+        gate = control.Gate("trend_join", logger)
+        if gate.stopped() and not positions:
+            logger.warning("Trend Join is stopped from the dashboard and has no open position — not running today")
+            gate.close_done()
+            return
         candidates: list[GapCandidate] = []
         volume_history: dict[str, pd.DataFrame] = {}
         last_bar_bucket = None
@@ -358,15 +364,17 @@ def main() -> None:
                 except Exception:
                     logger.exception("Prefilter failed — keeping previous candidate list")
 
+            close_now = gate.wants_close()
             for pos in list(positions):
                 try:
-                    if manage(ib, journal, pos, flatten_time):
+                    if (close_now and flatten(ib, journal, pos, "manual_stop")) or manage(ib, journal, pos, flatten_time):
                         positions.remove(pos)
                 except Exception:
                     logger.exception("%s: error managing position (will retry next tick)", pos.symbol)
 
             bucket = (now.hour * 60 + now.minute) // bm
-            if entry_start <= now.time() <= entry_end and bucket != last_bar_bucket and candidates:
+            if (entry_start <= now.time() <= entry_end and bucket != last_bar_bucket and candidates
+                    and gate.entries_allowed()):
                 last_bar_bucket = bucket
                 traded = journal.trend_join_symbols_traded_on(today)
                 excluded = excluded_symbols(client, journal, today)
@@ -389,6 +397,10 @@ def main() -> None:
                         excluded.add(pos.symbol)
 
             if now.time() >= flatten_time and not positions:
+                break
+            if gate.stopped() and not positions:
+                gate.close_done()
+                logger.warning("Trend Join stopped from the dashboard and flat — exiting")
                 break
             ib.sleep(TICK_SECONDS)
 

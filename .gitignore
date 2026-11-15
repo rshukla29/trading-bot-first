@@ -11,3 +11,6 @@ data/*.csv
 data/*.pkl
 scans/
 reports/dashboard.html
+reports/*/dashboard.html
+data/control.json
+data/control.tmp

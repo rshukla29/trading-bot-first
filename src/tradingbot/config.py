@@ -386,6 +386,16 @@ class Settings(BaseSettings):
     credit_spread_symbols: str = "SPY"
 
     db_path: str = "data/journal.db"
+    # First day of the current paper account (YYYY-MM-DD). The dashboard
+    # leaves out reports, daily reviews, studies and bot logs dated earlier
+    # (they belong to a previous account; the files are kept). Empty = all.
+    account_start_date: str = ""
+
+    # Start / Pause / Stop per strategy (control.py), set from the
+    # dashboard through run_control_server.py, which listens on this port
+    # on 127.0.0.1 only.
+    control_path: str = "data/control.json"
+    control_port: int = 8765
 
     # Daily pre/post-market snapshot (run_snapshot.py): open orders,
     # per-position unrealized P&L, account realized/unrealized/daily P&L,

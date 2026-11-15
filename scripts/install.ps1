@@ -108,6 +108,22 @@ if ($SkipTasks) {
         Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
         Ok ("{0,-22} {1} New York = {2} on this PC" -f $name, $nyTime, $local.ToString("HH:mm"))
     }
+
+    # The dashboard's Start / Pause / Stop buttons: a small server on
+    # 127.0.0.1 (run_control_server.py), started at logon and restarted if it stops.
+    $cs = Join-Path $repo "scripts\run_control_server.ps1"
+    if (Test-Path $cs) {
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$cs`""
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+        $csSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable `
+            -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+        Register-ScheduledTask -TaskName BotControlServer -Action $action -Trigger $trigger -Settings $csSettings -Force | Out-Null
+        Stop-ScheduledTask -TaskName BotControlServer -ErrorAction SilentlyContinue
+        Start-ScheduledTask -TaskName BotControlServer
+        Ok "BotControlServer       at logon = dashboard buttons on http://127.0.0.1:8765"
+    }
+
     if ([TimeZoneInfo]::Local.Id -ne $ny.Id) {
         Write-Host "   This PC isn't on New York time. If your clock changes for daylight saving on"
         Write-Host "   different dates than the US, run this again after each change."
@@ -115,7 +131,8 @@ if ($SkipTasks) {
 }
 
 Step "Desktop shortcut for the dashboard"
-# Double-click: rebuilds reports\dashboard.html from the latest data and opens it.
+# Double-click: rebuilds the dashboard from the latest data and opens it (through the
+# control server when it's running, so the Start / Pause / Stop buttons work).
 $desktop = [Environment]::GetFolderPath("Desktop")
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop "Trading dashboard.lnk"))
 $link.TargetPath = "powershell.exe"

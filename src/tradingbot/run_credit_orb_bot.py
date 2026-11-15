@@ -35,6 +35,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from ib_async import LimitOrder, Stock
 
+from tradingbot import control
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
@@ -295,6 +296,11 @@ def main() -> None:
         ib.qualifyContracts(underlying)
         chain = get_real_chain(ib, symbol)
         pos = recover(ib, journal)
+        gate = control.Gate("credit_orb", logger)
+        if gate.stopped() and pos is None:
+            logger.warning("Credit ORB is stopped from the dashboard and has no open spread — not running today")
+            gate.close_done()
+            return
         traded = journal.credit_orb_traded_on(_now_et().date().isoformat())
         last_bar, last_mark = None, 0.0
         logger.info("Credit ORB loop starting (%s, range %dm, entries until %s, max loss $%.0f)",
@@ -303,14 +309,17 @@ def main() -> None:
         while _now_et().time() < MARKET_CLOSE:
             now = _now_et()
             try:
-                if pos is not None:
+                if pos is not None and gate.wants_close():
+                    if close_spread(ib, journal, pos, symbol, "manual_stop"):
+                        pos = None
+                elif pos is not None:
                     if now.time() >= close_time:
                         if close_spread(ib, journal, pos, symbol, "close_1550"):
                             pos = None
                     elif now.timestamp() - last_mark >= MARK_EVERY_SECONDS:
                         record_mark(ib, journal, pos, underlying)
                         last_mark = now.timestamp()
-                elif not traded and now.time() < cfg.entry_end:
+                elif not traded and now.time() < cfg.entry_end and gate.entries_allowed():
                     bars = completed_bars(
                         fetch_intraday_bars(ib, symbol, cfg.bar_minutes, duration="1 D"), pd.Timestamp(now), cfg.bar_minutes,
                     )
@@ -329,6 +338,10 @@ def main() -> None:
                             logger.info("%s: no qualifying breakout yet (%s)", symbol, last_bar.strftime("%H:%M"))
             except Exception:
                 logger.exception("Credit ORB tick failed — retrying next tick")
+            if pos is None and gate.stopped():
+                gate.close_done()
+                logger.warning("Credit ORB stopped from the dashboard and flat — exiting")
+                break
             ib.sleep(TICK_SECONDS)
 
         if pos is not None:

@@ -31,10 +31,12 @@ from zoneinfo import ZoneInfo
 
 from ib_async import Stock
 
+from tradingbot import control
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.journal import Journal
 from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops, plan_stop_raise
+from tradingbot.stock_close import close_owned
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logging.getLogger("ib_async").setLevel(logging.WARNING)
@@ -96,6 +98,15 @@ def main() -> None:
         warned_no_stop: set[str] = set()
         flat_last_tick: set[str] = set()
         while _now_et().time() < MARKET_CLOSE:
+            # Dashboard "Stop and close positions at market" for RSI(2) / MA
+            # crossover: this process holds client 1, the only client that
+            # can cancel those positions' stops, so it does the selling.
+            for strategy in STRATEGIES:
+                if control.wants_close(strategy):
+                    held_qty = {p.contract.symbol: p.position for p in client.positions()
+                                if p.position > 0 and p.contract.secType == "STK"}
+                    close_owned(ib, journal, strategy, held_qty)
+                    control.close_done(strategy)
             positions = owned_positions(client, journal)
             stop_pct = stop_pct_by_symbol(journal)
             held = {p.contract.symbol for p in client.positions() if p.position > 0 and p.contract.secType == "STK"}

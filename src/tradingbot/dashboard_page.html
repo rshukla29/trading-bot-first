@@ -113,6 +113,7 @@ td.num, th.num { font-variant-numeric: tabular-nums; }
   </div>
 </header>
 <main>
+  <section id="tab-controls" hidden><!--__CONTROLS__--></section>
   <section id="tab-overview"></section>
   <section id="tab-strategies" hidden></section>
   <section id="tab-periods" hidden></section>
@@ -310,7 +311,7 @@ function columnChart(el, points, {labelFmt = fmtShort} = {}) {
 const legend = names => `<div class="legend">${names.map(n => `<span><span class="line" style="background:${color(n)}"></span>${esc(n)}</span>`).join("")}</div>`;
 
 // ------------------------------------------------------------ tabs
-const TABS = [["overview", "Overview"], ["strategies", "Strategies"], ["periods", "Daily · weekly · monthly"],
+const TABS = [["controls", "Controls"], ["overview", "Overview"], ["strategies", "Strategies"], ["periods", "Daily · weekly · monthly"],
   ["trades", "Trades"], ["positions", "Open positions"], ["timemachine", "Time Machine"],
   ["reports", "Reports"], ["reviews", "Daily reviews"], ["health", "Bot health"]];
 const drawn = {};
@@ -337,6 +338,7 @@ const tipFor = (title, trades) => {
 };
 
 const VIEWS = {
+  controls() {},  // the Start / Pause / Stop panel is built in (control_panel.html) and updates itself
   overview(el) {
     const b = D.balances, last = b[b.length - 1];
     const total = last ? last.value - D.starting_balance : null;

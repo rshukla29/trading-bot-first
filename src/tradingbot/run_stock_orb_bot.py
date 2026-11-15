@@ -41,6 +41,7 @@ import pandas as pd
 import yfinance as yf
 from ib_async import IB, LimitOrder, MarketOrder, Stock, StopOrder, Trade
 
+from tradingbot import control
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
@@ -384,6 +385,11 @@ def main() -> None:
         ib = client.ib
         ib.reqMarketDataType(3)
         positions = recover_positions(ib, client, journal)
+        gate = control.Gate("stock_orb", logger)
+        if gate.stopped() and not positions:
+            logger.warning("Stock ORB is stopped from the dashboard and has no open position — not running today")
+            gate.close_done()
+            return
         last_scan = None
         logger.info("Stock ORB live loop starting (%d recovered positions, %d symbols)", len(positions), len(universe))
 
@@ -391,9 +397,11 @@ def main() -> None:
             now = pd.Timestamp(_now_et())
             today = now.date().isoformat()
 
+            close_now = gate.wants_close()
             for pos in list(positions):
                 try:
-                    if check_exits(journal, pos) or (now.time() >= flatten_time and flatten(ib, journal, pos, "eod_flatten")):
+                    if check_exits(journal, pos) or (close_now and flatten(ib, journal, pos, "manual_stop")) or (
+                            now.time() >= flatten_time and flatten(ib, journal, pos, "eod_flatten")):
                         positions.remove(pos)
                 except Exception:
                     logger.exception("%s: error managing position (will retry)", pos.symbol)
@@ -401,7 +409,7 @@ def main() -> None:
             boundary = now.floor(f"{bm}min")
             bar_end = boundary.time()  # the bar that just completed ends here
             if (boundary != last_scan and (now - boundary).total_seconds() >= SCAN_DELAY_SECONDS
-                    and entry_start <= bar_end <= entry_end):
+                    and entry_start <= bar_end <= entry_end and gate.entries_allowed()):
                 last_scan = boundary
                 if len(journal.stock_orb_rows_on(today)) < settings.stock_orb_max_trades_per_day:
                     try:
@@ -424,6 +432,10 @@ def main() -> None:
                         logger.exception("Scan failed — will retry on the next bar")
 
             if now.time() >= flatten_time and not positions:
+                break
+            if gate.stopped() and not positions:
+                gate.close_done()
+                logger.warning("Stock ORB stopped from the dashboard and flat — exiting")
                 break
             ib.sleep(TICK_SECONDS)
 

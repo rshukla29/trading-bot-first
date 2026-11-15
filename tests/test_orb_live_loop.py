@@ -187,7 +187,7 @@ def test_position_checked_every_60s_until_lock_then_every_tick(monkeypatch):
     checks = []
     monkeypatch.setattr(orb, "_now_et", lambda: NS(timestamp=lambda: t["now"]))
 
-    def fake_check_exit(ib, journal, symbol, underlying, position):
+    def fake_check_exit(ib, journal, symbol, underlying, position, force_reason=None):
         checks.append(t["now"] - base)
         if t["now"] - base >= 120:            # lock becomes active on the check at 120s
             position["lock_active"] = True

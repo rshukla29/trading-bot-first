@@ -55,6 +55,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from tradingbot import control
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
@@ -65,6 +66,7 @@ from tradingbot.journal import Journal
 from tradingbot.ownership import resolve_ownership
 from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops
 from tradingbot.sp500_scanner import screen_rsi2_buys
+from tradingbot.stock_close import close_owned
 from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
 
@@ -109,6 +111,14 @@ def main() -> None:
         for symbol in stop_audit_sold:
             rsi2_positions.pop(symbol)
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
+        gate = control.Gate(STRATEGY, logger)
+        if gate.wants_close():
+            close_owned(client.ib, journal, STRATEGY, {s: p.position for s, p in held.items()})
+            gate.close_done()
+            return
+        if gate.stopped() and not rsi2_positions:
+            logger.warning("RSI(2) is stopped from the dashboard and has no open position — nothing to do")
+            return
 
         movers: list[str] = []
         scan_today = should_scan_movers_today(datetime.now(ET))
@@ -182,6 +192,10 @@ def main() -> None:
                     "%s: BUY blocked, volume %.1fx normal (>%0.1fx threshold) — likely news-driven, not a technical dip",
                     symbol, spike_ratio, settings.rsi2_volume_spike_multiplier,
                 )
+                continue
+
+            if not gate.entries_allowed():
+                logger.info("%s: BUY skipped — RSI(2) is %s from the dashboard", symbol, gate.mode())
                 continue
 
             if kill_switch.is_tripped():

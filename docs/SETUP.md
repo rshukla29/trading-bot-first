@@ -115,6 +115,9 @@ GitHub, do so in the window that opens.
    - runs the bots' self-tests (all must pass);
    - creates the scheduled tasks that start each bot at the right time on
      weekdays, converted to your PC's time zone;
+   - starts the **control server** (task `BotControlServer`, starts each
+     time you log in to Windows) behind the dashboard's Start / Pause /
+     Stop buttons;
    - puts a **Trading dashboard** shortcut on your desktop.
 4. If you see a red **PROBLEM**, the line says what to fix. Fix it and run
    the installer again. Running it twice is safe.
@@ -193,7 +196,31 @@ on the dashboard).
 
 Market holidays need nothing: the bots find the market closed and stop.
 
-### Stopping the bots
+### Starting, pausing and stopping a strategy
+
+Open the dashboard (desktop shortcut, or **http://127.0.0.1:8765** in your
+browser) and go to the **Controls** tab. Each strategy has three buttons;
+the bar at the top does the same for all of them at once.
+
+- **Start**: trades as usual.
+- **Pause**: no new trades. Anything already open is still looked after:
+  stops, profit locks, targets and the 3:55pm close all keep working.
+- **Stop**: no new trades, and the bot stays off on the following days. If
+  the strategy has open positions you choose:
+  - **keep positions**: the bot keeps looking after them until they close,
+    then stops;
+  - **close positions at market**: the bot sells (or buys back) its own
+    positions right away. Your own manual trades are never touched.
+
+A choice stays until you press **Start** again; it doesn't reset
+overnight. The expiry guard and step stop protect open positions and
+can't be switched off. The buttons only work from the dashboard on this PC
+(http://127.0.0.1:8765): other computers and other websites can't use them.
+If the Controls tab says it can't reach the control server, run
+**scripts\install.ps1** again or start the `BotControlServer` task in Task
+Scheduler.
+
+### Turning off a scheduled task
 
 Press the Windows key, type **Task Scheduler**, open it, and click **Task
 Scheduler Library**. The bots' tasks end in **Bot** (for example

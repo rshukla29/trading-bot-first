@@ -63,7 +63,8 @@ def test_page_embeds_the_data_safely(tmp_path):
                    1_000_000.0, date(2026, 10, 30))
     data["trades"][0]["reason"] = "</script><script>alert(1)</script>"
     page = render(data)
-    assert page.count("</script>") == page.count("<script>") == 1
+    # Two real scripts (the controls panel's and the page's own); the trade text adds none.
+    assert page.count("</script>") == page.count("<script>") == 2
     embedded = json.loads(re.search(r"const D = (\{.*?\});\n", page, re.S).group(1))
     assert embedded["trades"][0]["reason"] == "</script><script>alert(1)</script>"
 
@@ -93,3 +94,25 @@ def test_bot_health_separates_ibkr_notices_from_errors(tmp_path):
     tj, ic = h["cells"]["2026-11-02"]["trend_join"], h["cells"]["2026-11-02"]["iron_condor"]
     assert (tj["errors"], tj["warnings"]) == (0, 2)
     assert ic["errors"] == 1 and ic["first_error"] == "SPY: error during condor management, skipping"
+
+
+def test_since_leaves_out_an_earlier_account(tmp_path):
+    """New paper account from 2026-11-16: older logs, reviews, studies and
+    reports aren't shown (the files stay)."""
+    from tradingbot.dashboard import report_files, reviews, studies
+    logs = tmp_path / "logs"; logs.mkdir()
+    for d in ("2026-11-13", "2026-11-16"):
+        (logs / f"orb_{d}.log").write_text("2026-01-01 09:30:00,000 INFO ok\n", encoding="utf-8")
+    assert bot_health(logs, date(2026, 11, 16), since="2026-11-16")["dates"] == ["2026-11-16"]
+    daily = tmp_path / "analysis" / "daily" / "2026" / "11"; daily.mkdir(parents=True)
+    for d in ("2026-11-13", "2026-11-16"):
+        (daily / f"review_{d}.md").write_text("# r\n", encoding="utf-8")
+    (tmp_path / "analysis" / "2026-10-01_orb_loss_analysis").mkdir()
+    (tmp_path / "analysis" / "2026-11-20_new_study").mkdir()
+    assert [r["date"] for r in reviews(tmp_path / "analysis", tmp_path, "2026-11-16")] == ["2026-11-16"]
+    assert [s["name"] for s in studies(tmp_path / "analysis", tmp_path, "2026-11-16")] == ["2026-11-20_new_study"]
+    rep = tmp_path / "reports"; rep.mkdir()
+    for d in ("2026-11-13", "2026-11-16"):
+        (rep / f"snapshot_{d}_postmarket.html").write_text("x", encoding="utf-8")
+    assert [r["date"] for r in report_files(rep, tmp_path, "2026-11-16")] == ["2026-11-16"]
+    assert len(reviews(tmp_path / "analysis", tmp_path)) == 2   # no `since`: everything, as before

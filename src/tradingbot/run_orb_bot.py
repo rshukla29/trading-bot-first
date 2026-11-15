@@ -46,6 +46,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from ib_async import Option, Stock
 
+from tradingbot import control
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
@@ -210,8 +211,10 @@ def latest_bar_vs_vwap(ib, symbol: str) -> tuple[float | None, float | None]:
     return float(bars["close"].iloc[-1]), float(session_vwap(bars).iloc[-1])
 
 
-def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: dict) -> bool:
-    """Returns True if the position was closed this call."""
+def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: dict,
+               force_reason: str | None = None) -> bool:
+    """Returns True if the position was closed this call. `force_reason`
+    closes it now whatever the exit rules say (dashboard Stop + close)."""
     spot_mid = _price(ib, underlying)
     premium_mid = _price(ib, position["contract"])
 
@@ -268,6 +271,8 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
                                       settings.options_fib_target_ext)
         ),
     )
+    if force_reason:
+        reason = force_reason
     if reason is None:
         now_s = _now_et().timestamp()
         if now_s - position.get("last_hold_log", 0.0) < HOLDING_LOG_EVERY:
@@ -542,6 +547,9 @@ def repair_short_options(ib, journal: Journal, symbols: list[str]) -> None:
                               broker="IBKR", status="filled")
 
 
+GATE = control.Gate("orb", logger)
+
+
 def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStrategy, state: dict) -> None:
     """One monitoring tick for one symbol: manage its open position, or
     look for an entry on each newly-completed bar."""
@@ -549,15 +557,18 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
     if state["position"] is not None:
         pos = state["position"]
         now_s = _now_et().timestamp()
+        force = "manual_stop" if GATE.wants_close() else None
         # Every 60s until the profit lock is active, then every tick (5s).
-        if not pos.get("lock_active") and now_s - pos.get("last_check", 0.0) < CHECK_SECONDS_NO_LOCK:
+        if not force and not pos.get("lock_active") and now_s - pos.get("last_check", 0.0) < CHECK_SECONDS_NO_LOCK:
             return
         pos["last_check"] = now_s
-        if check_exit(ib, journal, symbol, state["underlying"], state["position"]):
+        if check_exit(ib, journal, symbol, state["underlying"], state["position"], force_reason=force):
             if hasattr(ib, "cancelMktData"):
                 stop_streams(ib, state["position"]["contract"])
             state["position"] = None
         return
+    if not GATE.entries_allowed():
+        return  # paused or stopped from the dashboard (control.py)
     # Entries are judged on completed 5-min bars, so fetch bars only once per
     # bar — a few seconds after each 5-min boundary — not every 5s tick.
     now_ts = pd.Timestamp(_now_et())
@@ -618,6 +629,11 @@ def main() -> None:
             except Exception:
                 logger.exception("%s: ORB setup failed — skipping this symbol today", symbol)
 
+        if GATE.stopped() and all(s["position"] is None for s in states):
+            logger.warning("ORB is stopped from the dashboard and has no open position — not running today")
+            GATE.close_done()
+            return
+
         now = _now_et()
         if now.time() < MARKET_OPEN:
             wait_s = (datetime.combine(now.date(), MARKET_OPEN, tzinfo=ET) - now).total_seconds()
@@ -637,6 +653,10 @@ def main() -> None:
                     # One symbol's failure (bad quote, data error) must not
                     # stop monitoring the others' open positions.
                     logger.exception("%s: ORB tick failed — will retry next tick", state["symbol"])
+            if GATE.stopped() and all(s["position"] is None for s in states):
+                GATE.close_done()
+                logger.warning("ORB stopped from the dashboard and flat — exiting")
+                break
             ib.sleep(TICK_SECONDS)
 
         for state in states:
