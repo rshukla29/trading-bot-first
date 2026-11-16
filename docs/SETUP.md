@@ -318,15 +318,34 @@ its own.
 
 ### Getting updates
 
-When the owner improves the bots, open PowerShell and paste:
+You don't need to watch for updates. When the owner publishes a new
+version:
+
+1. At 8am the next weekday, Windows shows a notification: **Trading bots
+   update: Version X is available**. The **Bot controls** tab shows a
+   blue banner with what's new.
+2. After 5:15pm, at the weekend or before 8am (New York time), press
+   **Update now** on that banner and confirm. It takes about a minute.
+   The page reloads itself and says **Updated from … to …**.
+
+Your settings (`.env`), your trades and your reports stay as they are. If
+anything goes wrong, the update puts the previous version back, and the
+banner says what happened.
+
+The button stays greyed out while the bots might be trading (weekdays 8am
+to 5:15pm). The version you have is shown at the bottom of the Bot controls
+tab.
+
+> If the banner says **files were edited on this PC**, you (or someone)
+> changed one of the bots' code files. Settings belong in `.env`, which is
+> never touched. Ask for help before undoing the edit.
+
+To update by hand instead, open PowerShell and paste:
 
 ```
 cd $HOME\Documents\trading-bot
-git pull
+powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 ```
-
-Then run **scripts\install.ps1** again (step 5). Do this after the market
-closes.
 
 ## Checklist
 

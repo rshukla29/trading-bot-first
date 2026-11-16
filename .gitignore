@@ -14,3 +14,6 @@ reports/dashboard.html
 reports/*/dashboard.html
 data/control.json
 data/control.tmp
+data/update_status.json
+data/update_result.json
+data/update_*.tmp

@@ -86,12 +86,23 @@
 .cp-choice.danger { background: var(--cp-danger); border-color: var(--cp-danger); color: var(--cp-danger-ink); }
 .cp-choice.danger span { color: var(--cp-danger-ink); opacity: .9; }
 .cp-choice.plain { text-align: center; background: transparent; }
+.cp-update { border: 1px solid var(--accent, #2a78d6); border-radius: 12px; padding: 16px 18px; display: flex; flex-wrap: wrap;
+  gap: 12px 20px; align-items: flex-start; justify-content: space-between; background: rgba(42,120,214,.07); font-size: 14px; }
+.cp-update.bad { border-color: var(--cp-danger); background: rgba(192,57,43,.07); }
+.cp-update.good { border-color: var(--cp-run); background: var(--cp-run-soft); }
+.cp-update h3 { margin: 0 0 4px; font-size: 15px; }
+.cp-update ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2, #52514e); }
+.cp-update li { margin: 2px 0; }
+.cp-update .cp-why { font-size: 12px; color: var(--muted, #898781); margin-top: 6px; }
+.cp-update .cp-big { background: var(--accent, #2a78d6); color: #fff; }
+.cp-ver { font-size: 12px; color: var(--muted, #898781); text-align: right; }
 .cp-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink, #0b0b0b); color: var(--page, #fff);
   padding: 10px 16px; border-radius: 10px; font-size: 13px; z-index: 50; max-width: calc(100% - 32px); }
 </style>
 <div id="cp-root" aria-live="polite" data-port="{{CONTROL_PORT}}">
   <div class="cp-offline" id="cp-offline" hidden></div>
   <div class="cp-offline cp-warn" id="cp-sched" role="alert" hidden></div>
+  <div class="cp-update" id="cp-update" hidden></div>
   <div class="cp-bar" id="cp-bar" data-state="off">
     <div class="cp-state">
       <span class="cp-light" aria-hidden="true"></span>
@@ -109,6 +120,7 @@
     <div class="cp-safety" id="cp-safety"></div>
     <ul class="cp-log" id="cp-log"></ul>
   </div>
+  <div class="cp-ver" id="cp-ver"></div>
   <dialog id="cp-dialog" aria-labelledby="cp-dlg-title">
     <h2 id="cp-dlg-title"></h2>
     <p id="cp-dlg-body"></p>
@@ -198,6 +210,7 @@
     q("#cp-safety").innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg> Always on:' +
       S.safety.map(b => `<span class="cp-pill ${b.state === "Disabled" ? "stop" : "run"}">${e(b.name)}${b.state === "Disabled" ? " (task disabled!)" : ""}</span>`).join("");
     q("#cp-log").innerHTML = S.log.slice(0, 4).map(l => `<li>${e(l.at_text)} · ${e(l.text)}</li>`).join("");
+    renderUpdate();
     root.querySelectorAll(".cp-big").forEach(b => b.disabled = busy);
   }
 
@@ -239,6 +252,48 @@
   }
   function tick() { if (document.hidden) lightCheck(); else load(); }
 
+  // New release banner (updates.py): what's new, and Update now while the bots are idle.
+  let updating = false;
+  function renderUpdate() {
+    const u = S.update || {}, box = q("#cp-update"), r = u.result || {};
+    q("#cp-ver").textContent = u.current ? "Version " + u.current + (u.checked_at ? " · checked for updates " + u.checked_at.slice(0, 10) : "") : "";
+    const recent = r.at && (Date.now() - new Date(r.at).getTime()) < 24 * 3600e3;
+    if (r.running || updating) {
+      box.hidden = false; box.className = "cp-update";
+      box.innerHTML = `<div><h3>Updating to ${e(r.to || u.latest)}…</h3>The bots' code is being replaced. This page reloads itself when it's done (about a minute).</div>`;
+      return;
+    }
+    if (u.available) {
+      const notes = (u.notes || []).map(n => n.items.map(i => `<li>${e(i)}</li>`).join("")).join("");
+      const why = u.busy ? "You can install it after 5:15pm, at the weekend or before 8am (New York time), while the bots are idle." : "";
+      box.hidden = false; box.className = "cp-update";
+      box.innerHTML = `<div><h3>Version ${e(u.latest)} is available</h3>You have ${e(u.current)}.` +
+        (notes ? `<ul>${notes}</ul>` : "") + (r.ok === false && recent ? `<div class="cp-why">Last try: ${e(r.message)}</div>` : "") +
+        (why ? `<div class="cp-why">${why}</div>` : "") + `</div>` +
+        `<button type="button" class="cp-big" data-update="${e(u.latest)}" ${u.busy ? "disabled" : ""}>Update now</button>`;
+      return;
+    }
+    if (recent && r.message) {
+      box.hidden = false; box.className = "cp-update " + (r.ok ? "good" : "bad");
+      box.innerHTML = `<div>${e(r.message)}</div>`;
+      return;
+    }
+    box.hidden = true;
+  }
+
+  async function update(version) {
+    if (!confirm(`Install version ${version}? The bots' code is replaced; your settings, trades and reports stay as they are. It takes about a minute.`)) return;
+    updating = true; render();
+    try {
+      const r = await fetch("/api/update", {method: "POST", cache: "no-store",
+        headers: {"Content-Type": "application/json", "X-Bot-Control": "1"}, body: JSON.stringify({version})});
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      S = j; if (j.message) toast(j.message);
+    } catch (err) { updating = false; toast("Couldn't update: " + err.message); }
+    render();
+  }
+
   async function send(body) {
     busy = true; render();
     try {
@@ -266,6 +321,8 @@
   }
 
   root.addEventListener("click", ev => {
+    const up = ev.target.closest("[data-update]");
+    if (up && !up.disabled) return update(up.dataset.update);
     const b = ev.target.closest("[data-act]");
     if (b && !b.disabled) act(b.dataset.id, b.dataset.act);
     const c = ev.target.closest("[data-choice]");

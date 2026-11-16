@@ -775,8 +775,68 @@ the repo can live anywhere.
 
 Run tests with `pytest`.
 
+## Releases and updates
+
+The version is in `pyproject.toml` and shown at the bottom of the Bot
+controls tab. Each release is a `vX.Y.Z` git tag plus a GitHub Release on
+**trading-bot-first** (the repo people install from), with its notes in
+[CHANGELOG.md](CHANGELOG.md). Ordinary commits and pushes don't notify
+anyone; only a release does.
+
+**Numbering.** X.Y.Z: Z for fixes, Y for new features, X for a change
+people must act on (for example a new required `.env` setting; say so in
+the notes).
+
+**Publishing a release (owner).**
+1. As you work, add a `- ` line under `## Unreleased` in CHANGELOG.md for
+   each change users should know about, written for them. Commit it.
+2. Try it: `.venv\Scripts\python.exe scripts\release.py 1.1.0 --dry-run`.
+3. Publish: `.venv\Scripts\python.exe scripts\release.py 1.1.0`. It shows
+   the notes and asks you to type `yes`. Then it sets the version, moves the
+   notes under `## 1.1.0 — <date>`, commits only those two files, tags
+   `v1.1.0`, pushes master and the tag to both repos, and creates the GitHub
+   Release on trading-bot-first.
+
+**What an installed copy does** ([updates.py](src/tradingbot/updates.py)):
+- Each time the control server starts (8am on weekdays, or from the desktop
+  shortcut) it runs `git fetch --tags` against the repo it was cloned from.
+  It needs no API key and sends nothing else. It then compares the newest
+  `vX.Y.Z` tag with its own version, and saves the result in
+  `data/update_status.json`.
+- If a newer version exists, the Bot controls tab shows a banner with every
+  version's notes since yours, and Windows shows one notification per new
+  version.
+- **Update now** works only while the bots are idle: not Mon–Fri
+  8am–5:15pm New York time, and not while any bot task is running. It runs
+  [scripts/update.ps1](scripts/update.ps1), which:
+  - refuses if code files were edited on that PC;
+  - fast-forwards to the tag, reinstalls the packages, checks that the code
+    loads, re-registers the tasks and restarts the control server;
+  - on any failure, goes back to the previous version;
+  - writes the outcome to `data/update_result.json`, which the banner
+    shows.
+
+  It never touches `.env`, `data/` or the reports. An open dashboard tab
+  reloads itself onto the new version. By hand:
+  `powershell -ExecutionPolicy Bypass -File scripts\update.ps1 [-Version v1.1.0]`.
+
+Tests: [tests/test_updates.py](tests/test_updates.py).
+
 ## Repositories
 
-Both private: `rshukla29/trading-bot` (origin — all commits, including
-the automatic daily report commits when pushed) and
-`rshukla29/trading-bot-first` (copy — updated only on request).
+Two identical repos, both with every strategy (including Stock ORB):
+
+- `rshukla29/trading-bot-first`: **public**. People install from it, and
+  GitHub Releases are published here.
+- `rshukla29/trading-bot`: **private** copy.
+
+Push master to both:
+
+```
+git push https://github.com/rshukla29/trading-bot-first.git master:master
+git push https://github.com/rshukla29/trading-bot.git master:master
+```
+
+(`scripts\release.py` does this for releases, tags included.) The private
+repo's history before it was made identical (2026-11-15) is kept on its
+branch `archive/before-sync-2026-11-15`.

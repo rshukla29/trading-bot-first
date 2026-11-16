@@ -7,6 +7,7 @@ can reach it, and serves:
   /controls     the controls on their own
   /api/state    each strategy's mode, open positions, today's P&L, task state
   /api/control  POST {"strategy": id | "all", "mode": run|pause|stop, "close": bool}
+  /api/update   POST {"version": "X.Y.Z"}: install the offered release (updates.py)
   /reports/..., /analysis/...   the report and review pages the dashboard links to
 
 A button press writes data/control.json (control.py); the bots read it every
@@ -54,7 +55,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
 
-from tradingbot import control
+from tradingbot import control, updates
 from tradingbot.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -197,6 +198,7 @@ def state_payload() -> dict:
         log=[{**entry, "at_text": _when(entry.get("at"))} for entry in data.get("log", [])[:20]],
         dashboard=dashboard_info(),
         schedule_warnings=schedule_warnings(tasks),
+        update=updates.payload(),
     )
 
 
@@ -225,6 +227,27 @@ def dashboard_info() -> dict:
     if not p.exists():
         return {"url": None, "build": None}
     return {"url": "/" + p.as_posix(), "build": str(p.stat().st_mtime_ns)}
+
+
+def apply_update(body: dict) -> tuple[dict, str]:
+    """The Update now button: start scripts/update.ps1 for the offered
+    version, only while no bot is (or is about to be) running."""
+    info = updates.payload()
+    if not info["available"]:
+        raise ValueError("You already have the newest version")
+    if str(body.get("version", "")).lstrip("v") != info["latest"]:
+        raise ValueError("That version isn't the one on offer — reload the page")
+    if (info.get("result") or {}).get("running"):
+        raise ValueError("An update is already running")
+    if updates.bots_busy():
+        raise ValueError("Updates can be installed after 5:15pm, at the weekend or before 8am, while the bots are idle")
+    running = [n for n, t in task_info(fresh=True).items() if t["state"] == "Running" and n != "BotControlServer"]
+    if running:
+        raise ValueError(f"Wait until these have finished: {', '.join(running)}")
+    updates.mark_running(info["current"], info["latest"])
+    updates.start_update(info["latest"])
+    logger.info("Updating %s -> %s", info["current"], info["latest"])
+    return state_payload(), f"Updating to {info['latest']}… the page reloads itself when it's done (about a minute)."
 
 
 def apply(body: dict) -> tuple[dict, str]:
@@ -384,7 +407,8 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b""  # read first: refusing unread breaks the reply on Windows
         if not self._host_ok():
             return
-        if urlsplit(self.path).path != "/api/control":
+        path = urlsplit(self.path).path
+        if path not in ("/api/control", "/api/update"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         origin = self.headers.get("Origin", "")
@@ -402,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw)
             if not isinstance(body, dict):
                 raise ValueError("expected an object")
-            payload, msg = apply(body)
+            payload, msg = apply(body) if path == "/api/control" else apply_update(body)
         except ValueError as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
@@ -491,6 +515,15 @@ def stop_when_idle(server: ThreadingHTTPServer, minutes: float, poll: float = 30
             return
 
 
+def check_for_update() -> None:
+    """Once per server start (8am on weekdays): a newer release? Then the
+    Bot controls tab shows it, and Windows shows one notification."""
+    status = updates.check()
+    if status.get("available"):
+        logger.info("Version %s is available (this is %s)", status["latest"], status["current"])
+        updates.notify_once(status)
+
+
 def stop_at(server: ThreadingHTTPServer, until: time, poll: float = 30.0) -> None:
     """Shut the server down at `until` (New York time)."""
     while datetime.now(ET).time() < until:
@@ -529,6 +562,7 @@ def main() -> None:
         threading.Thread(target=stop_at, args=(server, until), daemon=True).start()
     if idle:
         threading.Thread(target=stop_when_idle, args=(server, idle), daemon=True).start()
+    threading.Thread(target=check_for_update, daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
