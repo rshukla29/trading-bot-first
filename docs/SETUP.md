@@ -188,9 +188,17 @@ Double-click it to open it in your browser. It should show your `DU…`
 account and its balance. If you get an error instead, see
 [When something goes wrong](#when-something-goes-wrong).
 
-Then, on a weekday between 8am and 6pm New York time, open
-**http://127.0.0.1:8765** in your browser: the dashboard (or, before its
-first build, the Bot controls page) should load and list the strategies.
+Then double-click **Trading dashboard** on your desktop, open the **Bot
+health** tab and press **Run checks now**. In about 20 seconds it checks
+everything the bots need: safe settings, the scheduled tasks, that the PC
+won't sleep, the TWS connection and paper account, live prices for SPY,
+stocks and options (your market data subscriptions), price history, that
+your real account isn't logged in elsewhere, and that TWS accepts the bots'
+order size. Each problem says how to fix it; fix it and press **Run checks
+now** again until it says **Ready to trade**. (It never places an order.)
+
+> Without the dashboard, the same check in PowerShell:
+> `.venv\Scripts\python.exe -m tradingbot.run_readiness`
 
 You're set. The bots start by themselves on the next weekday.
 
@@ -208,7 +216,7 @@ You're set. The bots start by themselves on the next weekday.
 
 | Time (New York) | What you'll see |
 |---|---|
-| 8:00am | The premarket report is saved, and the dashboard opens in your browser on the **Bot controls** tab. If yesterday's dashboard tab is still open, it updates itself instead of opening a second one |
+| 8:00am | The premarket report is saved, and the dashboard opens in your browser on the **Bot controls** tab. If yesterday's dashboard tab is still open, it updates itself instead of opening a second one. The readiness check runs: the top right corner says **Ready to trade** or how many problems there are, and if something is wrong Windows shows a notification. Click it (or the **Bot health** tab) for the fix |
 | 9:25am – 4:00pm | The bots trade. Check the Bot controls tab any time: each strategy shows Running / Paused / Stopped, today's profit or loss and what's open |
 | 4:30pm | The postmarket report is saved and the open dashboard updates itself |
 | 4:50pm | With Claude Code, a written review appears on the dashboard |
@@ -265,7 +273,8 @@ Good to know:
   happens at their 4:30pm run or the next morning.
 - **When live prices aren't working** (for example on a new account, or
   while your real account is logged in somewhere), press **Pause all**
-  before 9:30am and **Start all** once prices are back.
+  before 9:30am and **Start all** once prices are back. **Bot health → Run
+  checks now** tells you straight away whether they're back.
 - If the Bot controls tab says it **can't reach the control server**,
   double-click **Trading dashboard** on your desktop. If that doesn't help,
   start the `BotControlServer` task in Task Scheduler (right-click → Run)
@@ -362,6 +371,7 @@ powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 - [ ] TWS order size limit at least 10 (Presets → Precautionary Settings)
 - [ ] Logged out of TWS and back in after market data sharing started
 - [ ] First check report shows your `DU…` account
+- [ ] Bot health → Run checks now says **Ready to trade**
 - [ ] http://127.0.0.1:8765 opens the dashboard on a weekday between 8am and 6pm
 
 ## When something goes wrong
@@ -382,6 +392,7 @@ for the message below.
 | Bot controls says **a bot's start time is off** | A task's time drifted from `scripts\schedule.json` (e.g. after a daylight-saving change) | Run **scripts\register_tasks.ps1** (right-click → Run with PowerShell) or the installer again |
 | The dashboard didn't open at 8am | The PC was asleep or off, or `BotControlServer` is disabled | Open http://127.0.0.1:8765; if it doesn't load, right-click the `BotControlServer` task → Run, or run the installer again |
 | Bot controls says it **can't reach the control server** | The server is off (outside 8am–6pm on weekdays, or it stopped) | Double-click **Trading dashboard** on your desktop: it starts the server and reopens the dashboard. Still not working: run the `BotControlServer` task |
+| The top right corner says **N problems**, or Windows says **Trading bots: not ready** | The readiness check found something missing (prices, TWS, a task…) | Open the **Bot health** tab: each failed line says how to fix it. Fix it, then press **Run checks now** |
 | **Update now** is greyed out | The bots might be trading (weekdays 8am–5:15pm New York) | Press it after 5:15pm, at the weekend or before 8am |
 | The update banner says **files were edited on this PC** | One of the bots' code files was changed by hand | Settings belong in `.env`. Ask the owner for help before undoing the edit |
 | The update banner says the **update failed** | Usually no internet, or a problem in the new version | You're still on the old version and nothing else changed. Try again later; if it keeps failing, send the owner the newest `logs\update_….log` |
@@ -425,6 +436,9 @@ for the message below.
   shows the dashboard at http://127.0.0.1:8765 and carries out the Start /
   Pause / Stop buttons. Only this PC can use it.
 - **Bot controls:** the dashboard tab with the Start / Pause / Stop buttons.
+- **Readiness check:** the list at the top of the **Bot health** tab that
+  checks everything the bots need (TWS, prices, tasks, settings). Runs at
+  8am and whenever you press **Run checks now**.
 - **Strategy:** a set of rules for when to buy and sell. The README
   describes each one.
 - **Stop (stop-loss):** a standing order to sell if the price falls to a

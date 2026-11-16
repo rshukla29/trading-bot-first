@@ -122,7 +122,7 @@ td.num, th.num { font-variant-numeric: tabular-nums; }
   <section id="tab-timemachine" hidden></section>
   <section id="tab-reports" hidden></section>
   <section id="tab-reviews" hidden></section>
-  <section id="tab-health" hidden></section>
+  <section id="tab-health" hidden><div id="rd-root"></div><div id="health-logs"></div></section>
 </main>
 <script>
 const D = /*__DATA__*/null;
@@ -546,14 +546,15 @@ const VIEWS = {
     open(0);
   },
 
-  health(el) {
-    const H = D.health;
+  health(section) {
+    // The readiness check (#rd-root) is drawn live by control_panel.html; the log table goes below it.
+    const el = section.querySelector("#health-logs"), H = D.health;
     if (!H.dates.length) { el.innerHTML = `<p class="empty">No logs found.</p>`; return; }
     const cell = c => !c ? `<span class="muted">—</span>` :
       c.errors ? `<span class="status" title="${esc(c.first_error)}"><span class="dot" style="background:var(--critical)"></span>✕ ${c.errors} error${c.errors > 1 ? "s" : ""}</span>` :
       c.warnings ? `<span class="status" title="${esc(c.last)}"><span class="dot" style="background:var(--warning)"></span>! ${c.warnings} warning${c.warnings > 1 ? "s" : ""}</span>` :
       `<span class="status" title="${esc(c.last)}"><span class="dot" style="background:var(--good)"></span>✓ ran</span>`;
-    el.innerHTML = `<div class="card"><div class="tablewrap"><table><thead><tr><th class="l">Bot</th>${H.dates.map(d => `<th class="l">${fmtShort(d)}</th>`).join("")}</tr></thead>
+    el.innerHTML = `<h2 class="rd-h2">Recent runs</h2><div class="card"><div class="tablewrap"><table><thead><tr><th class="l">Bot</th>${H.dates.map(d => `<th class="l">${fmtShort(d)}</th>`).join("")}</tr></thead>
       <tbody>${H.bots.map(b => `<tr><td class="l">${esc(b.replace(/_/g, " "))}</td>${H.dates.map(d => `<td class="l">${cell(H.cells[d][b])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
       <p class="note">From the log files in <code>logs/</code>. ✓ ran cleanly · ! warnings (usually harmless: skipped trades, IBKR notices such as a cancelled order or a brief disconnect) · ✕ errors from the bot's own code, worth a look · — no log that day (not scheduled, a holiday, or the task didn't start). Hover a cell for the log's last line.</p></div>`;
   },

@@ -180,17 +180,9 @@ def notify_once(status: dict) -> bool:
     """One Windows notification per new version. True if one was shown."""
     if not status.get("available") or status.get("notified") == status.get("latest") or sys.platform != "win32":
         return False
+    from tradingbot import notify
     text = f"Version {status['latest']} is available (you have {status['current']}). Open the dashboard's Bot controls tab to update."
-    script = (
-        "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; "
-        "$n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; "
-        "$n.Visible = $true; $n.ShowBalloonTip(15000, 'Trading bots update', $env:TB_UPDATE_TEXT, 'Info'); "
-        "Start-Sleep -Seconds 16; $n.Dispose()")
-    try:
-        subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script],
-                         env={**os.environ, "TB_UPDATE_TEXT": text}, creationflags=subprocess.CREATE_NO_WINDOW)
-    except OSError:
-        logger.exception("Couldn't show the update notification")
+    if not notify.windows_notify("Trading bots update", text):
         return False
     _write(STATUS, {**status, "notified": status["latest"]})
     return True

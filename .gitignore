@@ -17,3 +17,5 @@ data/control.tmp
 data/update_status.json
 data/update_result.json
 data/update_*.tmp
+data/readiness.json
+data/readiness.tmp

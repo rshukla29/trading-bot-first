@@ -123,10 +123,10 @@ def test_bots_busy_on_weekdays_8am_to_515pm():
 
 
 def test_one_notification_per_version(monkeypatch):
+    from tradingbot import notify
     popped = []
     monkeypatch.setattr(updates.sys, "platform", "win32")
-    monkeypatch.setattr(updates.subprocess, "Popen", lambda *a, **k: popped.append(k["env"]["TB_UPDATE_TEXT"]))
-    monkeypatch.setattr(updates.subprocess, "CREATE_NO_WINDOW", 0, raising=False)
+    monkeypatch.setattr(notify, "windows_notify", lambda title, text: popped.append(text) or True)
     status = {"available": True, "current": "1.0.0", "latest": "1.1.0", "notified": None}
     assert updates.notify_once(status)
     assert not updates.notify_once(updates.read_status())       # same version: no second one

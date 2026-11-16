@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # Claude review. Own ID so it never collides with a running bot.
     daily_review_client_id: int = 89
 
+    # readiness.py (8am and the Bot health tab's Run checks now): read-only
+    # checks plus an order what-if preview that's never sent. Own ID so it
+    # can run while any bot is connected.
+    readiness_client_id: int = 88
+
     # Risk management
     risk_pct_per_trade: float = 0.01
     stop_loss_pct: float = 0.10

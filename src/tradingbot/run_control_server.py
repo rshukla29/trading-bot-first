@@ -8,6 +8,7 @@ can reach it, and serves:
   /api/state    each strategy's mode, open positions, today's P&L, task state
   /api/control  POST {"strategy": id | "all", "mode": run|pause|stop, "close": bool}
   /api/update   POST {"version": "X.Y.Z"}: install the offered release (updates.py)
+  /api/readiness  POST {}: run the readiness check now (readiness.py)
   /reports/..., /analysis/...   the report and review pages the dashboard links to
 
 A button press writes data/control.json (control.py); the bots read it every
@@ -55,7 +56,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
 
-from tradingbot import control, updates
+from tradingbot import control, readiness, updates
 from tradingbot.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -199,6 +200,7 @@ def state_payload() -> dict:
         dashboard=dashboard_info(),
         schedule_warnings=schedule_warnings(tasks),
         update=updates.payload(),
+        readiness=readiness.payload(),
     )
 
 
@@ -227,6 +229,12 @@ def dashboard_info() -> dict:
     if not p.exists():
         return {"url": None, "build": None}
     return {"url": "/" + p.as_posix(), "build": str(p.stat().st_mtime_ns)}
+
+
+def apply_readiness(body: dict) -> tuple[dict, str]:
+    """Run checks now (Bot health tab): the readiness check in the background."""
+    started = readiness.start()
+    return state_payload(), "Running the checks… about 20 seconds." if started else "The checks are already running."
 
 
 def apply_update(body: dict) -> tuple[dict, str]:
@@ -408,7 +416,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return
         path = urlsplit(self.path).path
-        if path not in ("/api/control", "/api/update"):
+        if path not in ("/api/control", "/api/update", "/api/readiness"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         origin = self.headers.get("Origin", "")
@@ -426,7 +434,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw)
             if not isinstance(body, dict):
                 raise ValueError("expected an object")
-            payload, msg = apply(body) if path == "/api/control" else apply_update(body)
+            handler = {"/api/control": apply, "/api/update": apply_update, "/api/readiness": apply_readiness}[path]
+            payload, msg = handler(body)
         except ValueError as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
@@ -517,11 +526,13 @@ def stop_when_idle(server: ThreadingHTTPServer, minutes: float, poll: float = 30
 
 def check_for_update() -> None:
     """Once per server start (8am on weekdays): a newer release? Then the
-    Bot controls tab shows it, and Windows shows one notification."""
+    Bot controls tab shows it, and Windows shows one notification. Then the
+    readiness check, with a notification if something's wrong at 8am."""
     status = updates.check()
     if status.get("available"):
         logger.info("Version %s is available (this is %s)", status["latest"], status["current"])
         updates.notify_once(status)
+    readiness.start(notify=in_service_hours(datetime.now(ET)))
 
 
 def stop_at(server: ThreadingHTTPServer, until: time, poll: float = 30.0) -> None:

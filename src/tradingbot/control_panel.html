@@ -105,6 +105,36 @@
 .cp-mini:hover:not(:disabled) { filter: brightness(1.08); }
 .cp-mini:disabled { opacity: .5; cursor: default; }
 .cp-mini .dot { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+.cp-ready { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 10px; border-radius: 999px;
+  font-weight: 600; text-decoration: none; color: var(--ink, #0b0b0b); border: 1px solid var(--ring, rgba(0,0,0,.1)); cursor: pointer; }
+.cp-ready::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted, #898781); }
+.cp-ready.ok::before { background: var(--good, #0f7b3e); }
+.cp-ready.warn::before { background: var(--warning, #f2b53a); }
+.cp-ready.fail { border-color: var(--critical, #c0392b); }
+.cp-ready.fail::before { background: var(--critical, #c0392b); }
+/* Readiness check, on the dashboard's Bot health tab (#rd-root) */
+#rd-root [hidden] { display: none !important; }
+#rd-root:empty { display: none; }
+.rd { background: var(--surface, #fff); border: 1px solid var(--ring, rgba(0,0,0,.1)); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
+.rd-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 4px; }
+.rd-title { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.rd-title .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted, #898781); }
+.rd-title.ok .dot { background: var(--good, #0f7b3e); } .rd-title.warn .dot { background: var(--warning, #f2b53a); }
+.rd-title.fail .dot { background: var(--critical, #c0392b); }
+.rd-sub { font-size: 12px; color: var(--muted, #898781); margin-bottom: 12px; }
+.rd-btn { min-height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--accent, #2a78d6); background: var(--accent, #2a78d6);
+  color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.rd-btn:disabled { opacity: .55; cursor: default; }
+.rd-group { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2, #52514e); margin: 14px 0 4px; }
+.rd-list { list-style: none; margin: 0; padding: 0; }
+.rd-list li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 2px 8px; padding: 8px 0; border-top: 1px solid var(--grid, #e1e0d9); }
+.rd-ic { font-weight: 700; line-height: 1.4; }
+.rd-ic.pass { color: var(--good, #0f7b3e); } .rd-ic.warn { color: var(--warning, #b7791f); } .rd-ic.fail { color: var(--critical, #c0392b); }
+.rd-ic.skip { color: var(--muted, #898781); }
+.rd-name { font-weight: 600; font-size: 14px; }
+.rd-detail { font-size: 13px; color: var(--ink-2, #52514e); overflow-wrap: anywhere; }
+.rd-fix { grid-column: 2; font-size: 13px; background: var(--surface-2, #f3f2ee); border-radius: 8px; padding: 6px 10px; margin-top: 4px; }
+.rd-h2 { font-size: 15px; margin: 0 0 10px; }
 .cp-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink, #0b0b0b); color: var(--page, #fff);
   padding: 10px 16px; border-radius: 10px; font-size: 13px; z-index: 50; max-width: calc(100% - 32px); }
 </style>
@@ -173,6 +203,7 @@
       : `Can't reach the control server at <a href="${SERVER_URL}">${SERVER_URL}</a>. Is the <code>BotControlServer</code> task running? Retrying every few seconds.`;
     root.querySelectorAll("[data-act]").forEach(b => b.disabled = true);
     if (!S) { q("#cp-title").textContent = "Controls offline"; q("#cp-bar").dataset.state = "off"; }
+    readinessOffline();
   }
 
   function summary(list) {
@@ -220,6 +251,7 @@
       S.safety.map(b => `<span class="cp-pill ${b.state === "Disabled" ? "stop" : "run"}">${e(b.name)}${b.state === "Disabled" ? " (task disabled!)" : ""}</span>`).join("");
     q("#cp-log").innerHTML = S.log.slice(0, 4).map(l => `<li>${e(l.at_text)} · ${e(l.text)}</li>`).join("");
     renderUpdate();
+    renderReadiness();
     root.querySelectorAll(".cp-big").forEach(b => b.disabled = busy);
   }
 
@@ -295,7 +327,7 @@
     const top = q("#cp-top");
     if (!u.current) { top.hidden = true; return; }
     const checked = u.checked_at ? "Checked for updates " + u.checked_at.slice(0, 16).replace("T", " ") : "Not checked for updates yet";
-    let html = `<span class="cp-vtag ${u.available ? "new" : ""}" title="${e(checked)}">v${e(u.current)}</span>`;
+    let html = readyChip() + `<span class="cp-vtag ${u.available ? "new" : ""}" title="${e(checked)}">v${e(u.current)}</span>`;
     if (r.running || updating) {
       html += `<span class="cp-vtag new">Updating to v${e(r.to || u.latest)}…</span>`;
     } else if (u.available) {
@@ -308,6 +340,71 @@
     }
     top.innerHTML = html;
     top.hidden = false;
+  }
+
+  // ---- Readiness check (readiness.py): chip at the top right, full list on the Bot health tab.
+  const RD_ICON = {pass: "✓", warn: "!", fail: "✕", skip: "–"};
+  const RD_GROUP = {pc: "This PC", ibkr: "IBKR and TWS"};
+  let rdRunning = false;
+  const when = iso => { if (!iso) return ""; const d = new Date(iso);
+    return d.toLocaleString("en-US", {weekday: "short", hour: "numeric", minute: "2-digit"}); };
+
+  function rdState(R) {
+    if (!R || !R.summary) return ["", "Not checked yet"];
+    const s = R.summary, bad = s.fail + s.skip;
+    if (bad) return ["fail", `${bad} problem${bad > 1 ? "s" : ""}`];
+    if (s.warn) return ["warn", `Ready to trade · ${s.warn} warning${s.warn > 1 ? "s" : ""}`];
+    return ["ok", "Ready to trade"];
+  }
+
+  function readyChip() {
+    const R = S.readiness;
+    if (!R) return "";
+    const [cls, text] = R.running || rdRunning ? ["", "Checking…"] : rdState(R);
+    const tip = R.finished_at ? "Checked " + when(R.finished_at) + " · details on the Bot health tab" : "Details on the Bot health tab";
+    return `<a class="cp-ready ${cls}" href="#health" data-go="health" title="${e(tip)}">${e(text)}</a>`;
+  }
+
+  function renderReadiness() {
+    const box = document.getElementById("rd-root");
+    if (!box) return;
+    const R = S && S.readiness;
+    if (!R) { box.innerHTML = ""; return; }
+    const busyNow = R.running || rdRunning;
+    if (!R.running) rdRunning = false;
+    const [cls, text] = busyNow && !R.summary ? ["", "Checking…"] : rdState(R);
+    const groups = ["pc", "ibkr"].map(g => {
+      const items = (R.checks || []).filter(c => c.group === g);
+      if (!items.length) return "";
+      return `<div class="rd-group">${RD_GROUP[g]}</div><ul class="rd-list">` + items.map(c =>
+        `<li><span class="rd-ic ${c.status}" aria-label="${c.status}">${RD_ICON[c.status]}</span>` +
+        `<div><div class="rd-name">${e(c.name)}</div><div class="rd-detail">${e(c.detail)}</div></div>` +
+        (c.fix ? `<div class="rd-fix"><b>Fix:</b> ${e(c.fix)}</div>` : "") + `</li>`).join("") + `</ul>`;
+    }).join("");
+    box.innerHTML = `<div class="rd">
+      <div class="rd-head"><div class="rd-title ${busyNow ? "" : cls}"><span class="dot"></span>${busyNow ? "Checking… (about 20 seconds)" : e(text)}</div>
+        <button type="button" class="rd-btn" data-rd-run ${busyNow ? "disabled" : ""}>${busyNow ? "Checking…" : "Run checks now"}</button></div>
+      <div class="rd-sub">Is everything the bots need in place? ${R.finished_at ? "Last checked " + e(when(R.finished_at)) + "." : "Not checked yet."}
+        Runs by itself at 8am on weekdays. It never places orders.</div>${groups}</div>`;
+  }
+
+  function readinessOffline() {
+    const box = document.getElementById("rd-root");
+    if (box && !(S && S.readiness)) box.innerHTML = `<div class="rd"><div class="rd-title"><span class="dot"></span>Readiness check</div>
+      <div class="rd-sub" style="margin:6px 0 0">The checks run through the control server. Open the dashboard with the <b>Trading dashboard</b>
+      desktop shortcut (or <a href="${SERVER_URL}#health">${SERVER_URL}</a>) to see them and run them.</div></div>`;
+  }
+
+  async function runChecks() {
+    rdRunning = true; render();
+    try {
+      const r = await fetch("/api/readiness", {method: "POST", cache: "no-store",
+        headers: {"Content-Type": "application/json", "X-Bot-Control": "1"}, body: "{}"});
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      S = j; rdRunning = true; if (j.message) toast(j.message);
+    } catch (err) { rdRunning = false; toast("Couldn't run the checks: " + err.message); }
+    render();
   }
 
   async function update(version) {
@@ -349,6 +446,11 @@
     q("#cp-dialog").showModal();
   }
 
+  // Run checks now lives on the Bot health tab, outside #cp-root.
+  document.addEventListener("click", ev => {
+    const b = ev.target.closest("[data-rd-run]");
+    if (b && !b.disabled) runChecks();
+  });
   root.addEventListener("click", ev => {
     const up = ev.target.closest("[data-update]");
     if (up && !up.disabled) return update(up.dataset.update);

@@ -10,6 +10,9 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+- New readiness check on the Bot health tab: checks in about 20 seconds that everything the bots need is in place (TWS and the paper account, live prices for SPY, stocks and options, price history, the scheduled tasks, safe settings, the PC not sleeping, and that TWS accepts the bots' order size), with the fix for anything that's wrong. Press Run checks now any time; it never places orders.
+- It runs by itself at 8am on weekdays; the Bot controls tab says "Ready to trade" or how many problems there are (top right), and Windows notifies you if something's wrong.
+
 ## 1.0.1 — 2026-11-15
 
 - The version you're on is shown in the top right corner of the Bot controls tab, with a small Update button next to it when a new version is out.

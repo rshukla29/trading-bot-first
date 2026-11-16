@@ -506,7 +506,7 @@ day (the files stay where they are).
 | Time Machine | Stock ORB's checks: per day and each one with its verdict and decision |
 | Reports | Every snapshot, weekly and monthly report, by month, plus the one-off studies in `analysis/` |
 | Daily reviews | Each 4:50pm review, rendered |
-| Bot health | Each bot's log for the last 15 days: ran cleanly / warnings / errors. IBKR's own notices (a cancelled order, a brief disconnect, market data messages) count as warnings; errors are lines the bots' code logged at ERROR |
+| Bot health | The **readiness check** (see below), then each bot's log for the last 15 days: ran cleanly / warnings / errors. IBKR's own notices (a cancelled order, a brief disconnect, market data messages) count as warnings; errors are lines the bots' code logged at ERROR |
 
 Built by [dashboard.py](src/tradingbot/dashboard.py) (data) and
 [dashboard_page.html](src/tradingbot/dashboard_page.html) (the page);
@@ -582,6 +582,52 @@ dashboard build only) so the 8am start can update it.
 The panel is [control_panel.html](src/tradingbot/control_panel.html):
 inlined into the dashboard at build time and served on its own at
 `/controls`. Tests: [tests/test_control.py](tests/test_control.py).
+
+## Readiness check
+
+"Is everything the bots need in place right now?", so a missing
+subscription or a TWS setting shows up in seconds instead of as a skipped
+trade hours later. [readiness.py](src/tradingbot/readiness.py), run by
+[run_readiness.py](src/tradingbot/run_readiness.py) in its own process
+(IBKR client `READINESS_CLIENT_ID`, 88), results in `data/readiness.json`.
+
+**When.** At each control server start, so 8am on weekdays: after the
+update check, with a Windows notification if anything fails. Also from
+**Run checks now** on the Bot health tab (`POST /api/readiness`, same
+security checks as the buttons), or by hand:
+`python -m tradingbot.run_readiness [--notify]` (exit code 1 if not ready).
+Takes about 15–20 seconds.
+
+**Checks.** Each one is pass / warning / fail / skip, with the fix in
+plain words.
+
+| Group | Check | Fails when |
+|---|---|---|
+| This PC | Safe settings | `LIVE_TRADING=true`, or a live port (7496 / 4001) |
+| This PC | Trade diary | `DB_PATH`'s folder is missing or not writable |
+| This PC | Scheduled tasks | a task from `schedule.json` is missing, disabled, or its next run is off (the drift check) |
+| This PC | PC stays awake | it sleeps on mains power (warning; from `powercfg`) |
+| This PC | Claude Code | `claude` not found (warning: the review is optional) |
+| This PC | Version | the update check failed, or a newer release exists (warning) |
+| IBKR | TWS connection | can't connect to `IBKR_HOST:IBKR_PORT` (the rest are then skipped) |
+| IBKR | Paper account | not a `DU…` account, or not the one in `DB_PATH` / `REPORTS_DIR` |
+| IBKR | SPY, Nasdaq (AAPL), NYSE (JPM) prices | IBKR answers 354 / 10089 / 10090 / 10091 / 10167 / 10168 / 2186, or only delayed data; in market hours, no prices in 3 s (warning) |
+| IBKR | SPY option prices | the same codes on a far out-of-the-money SPY put (OPRA) |
+| IBKR | Price history | no 1-minute SPY bars |
+| IBKR | Real account not logged in elsewhere | error 10197 on any request |
+| IBKR | Orders allowed (10 contracts) | a **what-if preview** (never sent) of a 10-contract $0.01 option buy draws error 321 (read-only API) or 383 (size limit) |
+
+Outside market hours "live prices are flowing" can't be proven, so the
+price checks pass on "no subscription errors", which IBKR sends at any hour.
+A skip counts as not ready. If the IBKR part crashes, what it checked so
+far is kept and the rest is marked skipped.
+
+**Where.** Its full list at the top of **Bot health** (drawn live by the
+control panel script into `#rd-root`), and a chip in the top right corner
+of **Bot controls**, next to the version: Ready to trade / N problems /
+Checking…, linking to Bot health.
+
+Tests: [tests/test_readiness.py](tests/test_readiness.py).
 
 ## Daily review (4:50pm)
 
