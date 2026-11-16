@@ -1,6 +1,6 @@
 [project]
 name = "tradingbot"
-version = "1.0.1"
+version = "1.1.0"
 description = "Automated swing-trading bot: IBKR (ib_async) + Robinhood Agentic Trading (MCP)"
 requires-python = ">=3.11"
 dependencies = [
