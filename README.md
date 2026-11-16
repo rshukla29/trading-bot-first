@@ -549,8 +549,10 @@ a paused bot trade.
 **The server** ([run_control_server.py](src/tradingbot/run_control_server.py),
 Python standard library only) listens on `127.0.0.1:CONTROL_PORT` (8765)
 and never places orders. It serves the dashboard, `/controls` (the panel on
-its own, if there's no dashboard yet), `/api/state` and `POST /api/control`,
-plus files under `reports/` and `analysis/` only. While the market is open
+its own, if there's no dashboard yet), `/api/state` (`?light=1`: the
+dashboard build only), `/api/ping`, `POST /api/control` and `POST /api/update`
+(Update now; see [Releases and updates](#releases-and-updates)), plus files
+under `reports/` and `analysis/` only. While the market is open
 a button press also starts the bot that has to act: Start on an all-day bot
 that isn't running, or Stop + close on one that isn't (the step-stop bot for
 RSI(2) / MA-crossover; the condor bot, which has its own client ID).

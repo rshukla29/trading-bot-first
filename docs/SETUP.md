@@ -20,7 +20,7 @@ setting. Leave it that way.
 | 2 | An Interactive Brokers (IBKR) account. It comes with a free paper account | Free to open; IBKR may ask you to fund the real account before you can buy market data |
 | 3 | IBKR market data subscriptions (step 2) | A few dollars a month, depending on IBKR's prices |
 | 4 | Four free programs: Python, Git, IBKR's Trader Workstation, and optionally Claude Code | Free (Claude Code needs a Claude plan) |
-| 5 | Access to this code on GitHub (ask the owner if the repository is private) | — |
+| 5 | The code, from the public GitHub repository **rshukla29/trading-bot-first** (no account needed) | — |
 
 ## Step 1. Open the Interactive Brokers account
 
@@ -99,16 +99,16 @@ step says otherwise.
 
 ## Step 4. Download the code
 
-In PowerShell, paste these two lines one at a time (replace the web address
-with the GitHub address the owner gave you):
+In PowerShell, paste these two lines one at a time:
 
 ```
 cd $HOME\Documents
-git clone https://github.com/OWNER/REPOSITORY.git trading-bot
+git clone https://github.com/rshukla29/trading-bot-first.git trading-bot
 ```
 
-The code is now in **Documents\trading-bot**. If Git asks you to sign in to
-GitHub, do so in the window that opens.
+The code is now in **Documents\trading-bot**. Download it this way (not as
+a ZIP): it's how your copy finds out about new versions later (see
+[Getting updates](#getting-updates)).
 
 ## Step 5. Run the installer
 
@@ -352,7 +352,7 @@ powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 - [ ] IBKR account open; paper username and `DU…` account ID written down
 - [ ] Four market data subscriptions, Non-Professional, shared with paper
 - [ ] Python (with "Add to PATH"), Git and TWS installed; Claude Code optional
-- [ ] Code downloaded to Documents\trading-bot
+- [ ] Code downloaded to Documents\trading-bot with `git clone` (not a ZIP)
 - [ ] Installer finished with all green OKs
 - [ ] `.env` checked: `LIVE_TRADING=false`, your own stocks removed from the watchlists
 - [ ] TWS logged in to paper, API enabled, Read-Only off, port 7497, 127.0.0.1 trusted
@@ -379,6 +379,10 @@ for the message below.
 | Bot controls says **a bot's start time is off** | A task's time drifted from `scripts\schedule.json` (e.g. after a daylight-saving change) | Run **scripts\register_tasks.ps1** (right-click → Run with PowerShell) or the installer again |
 | The dashboard didn't open at 8am | The PC was asleep or off, or `BotControlServer` is disabled | Open http://127.0.0.1:8765; if it doesn't load, right-click the `BotControlServer` task → Run, or run the installer again |
 | Bot controls says it **can't reach the control server** | The server is off (outside 8am–6pm on weekdays, or it stopped) | Double-click **Trading dashboard** on your desktop: it starts the server and reopens the dashboard. Still not working: run the `BotControlServer` task |
+| **Update now** is greyed out | The bots might be trading (weekdays 8am–5:15pm New York) | Press it after 5:15pm, at the weekend or before 8am |
+| The update banner says **files were edited on this PC** | One of the bots' code files was changed by hand | Settings belong in `.env`. Ask the owner for help before undoing the edit |
+| The update banner says the **update failed** | Usually no internet, or a problem in the new version | You're still on the old version and nothing else changed. Try again later; if it keeps failing, send the owner the newest `logs\update_….log` |
+| No update notice, though the owner released one | Your copy checks when the control server starts (8am on weekdays), or it was installed before version 1.0.0, or downloaded as a ZIP | Double-click **Trading dashboard**. Installed before 1.0.0: run `git pull` and the installer once. ZIP: download it again with `git clone` (step 4) |
 | `Error 326 ... client id is already in use` | The same bot was started twice | Close the extra window; it fixes itself the next day |
 | Orders are rejected as "read-only" | TWS's Read-Only API box is ticked | Untick it (step 7) |
 | A log file is empty or missing | The task didn't start, or the installer didn't finish | Run **scripts\install.ps1** again |
@@ -404,7 +408,10 @@ for the message below.
   install it; you never write any.
 - **Git / GitHub:** Git keeps track of versions of files; GitHub is the
   website where the code is stored. The bots also use Git to save each
-  day's reports on your PC.
+  day's reports on your PC, and to check for new versions.
+- **Version / release:** a numbered edition of the bots, such as 1.0.0.
+  The owner publishes a new one when something is improved; yours is shown
+  at the bottom of the Bot controls tab.
 - **PowerShell:** a Windows window where you type or paste commands.
 - **`.env` file:** the bots' settings file. It stays on your PC and is
   never uploaded.
