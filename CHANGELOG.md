@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+## 1.1.1 — 2026-11-16
+
 - The 8am premarket report and readiness check now wait up to 10 minutes for TWS to be logged in (on Mondays it often still needs its weekly log-in) instead of failing straight away.
 - Bot health no longer shows an error when TWS refused a connection that later succeeded, or for the readiness check's own log (its results are in its list).
 
