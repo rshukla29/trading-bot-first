@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+## 1.0.0 — 2026-11-15
+
 - First numbered release. From now on the dashboard tells you when a new version is out and installs it with one click (Update now), while the bots are idle.
 - Bot controls tab: Start, Pause or Stop each strategy, or all at once; Stop can keep or close the open positions.
 - The dashboard opens by itself at 8am on weekdays and updates the tab that's already open; double-click Trading dashboard to use the buttons at any hour.
