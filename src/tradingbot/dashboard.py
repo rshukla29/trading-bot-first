@@ -235,6 +235,30 @@ def _summary(md: str) -> str:
 _IB_NOTICE = re.compile(r"ERROR (Error \d+, reqId|.*request timed out)")
 
 
+# ib_async's lines when TWS refuses the connection (closed, at its log-in
+# screen). Only an error if no connection succeeded later in the same log:
+# the 8am jobs retry, and a rerun appends to the same file.
+_CONNECT_FAIL = re.compile(r"ERROR (API connection failed|Make sure API port)")
+_CONNECTED = re.compile(r"INFO (Connected\b|TWS is up)|^Saved to ")  # "Saved to": the snapshot's report, written after connecting
+# The readiness check reports its findings in its own list (Bot health); its
+# log's connection messages aren't a bot failing.
+_FINDINGS_ONLY = {"readiness"}
+
+
+def _classify(bot: str, lines: list[str]) -> tuple[list[str], list[str]]:
+    """(errors, warnings) for one log file."""
+    last_ok = max((i for i, line in enumerate(lines) if _CONNECTED.search(line)), default=-1)
+    errors, warnings = [], []
+    for i, line in enumerate(lines):
+        if " ERROR " in line:
+            notice = bool(_IB_NOTICE.search(line)) or bot in _FINDINGS_ONLY or \
+                (bool(_CONNECT_FAIL.search(line)) and i < last_ok)
+            (warnings if notice else errors).append(line)
+        elif " WARNING " in line:
+            warnings.append(line)
+    return errors, warnings
+
+
 def _strip_log(line: str) -> str:
     return re.sub(r"^(python\.exe : )?\d{4}-\d{2}-\d{2} [\d:,]+ ERROR ", "", line)
 
@@ -251,8 +275,7 @@ def bot_health(logs_dir: Path, today: date, days: int = HEALTH_DAYS, since: str 
         if m["d"] not in keep:
             continue
         lines = _read_log(p).splitlines()
-        errors = [line for line in lines if " ERROR " in line and not _IB_NOTICE.search(line)]
-        warnings = [line for line in lines if " WARNING " in line or (" ERROR " in line and _IB_NOTICE.search(line))]
+        errors, warnings = _classify(m["bot"], lines)
         last = next((line for line in reversed(lines) if line.strip()), "")
         by_day.setdefault(m["d"], {})[m["bot"]] = dict(
             errors=len(errors), warnings=len(warnings), size=p.stat().st_size,

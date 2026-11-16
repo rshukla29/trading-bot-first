@@ -10,6 +10,9 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+- The 8am premarket report and readiness check now wait up to 10 minutes for TWS to be logged in (on Mondays it often still needs its weekly log-in) instead of failing straight away.
+- Bot health no longer shows an error when TWS refused a connection that later succeeded, or for the readiness check's own log (its results are in its list).
+
 ## 1.1.0 — 2026-11-15
 
 - New readiness check on the Bot health tab: checks in about 20 seconds that everything the bots need is in place (TWS and the paper account, live prices for SPY, stocks and options, price history, the scheduled tasks, safe settings, the PC not sleeping, and that TWS accepts the bots' order size), with the fix for anything that's wrong. Press Run checks now any time; it never places orders.

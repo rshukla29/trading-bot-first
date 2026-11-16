@@ -608,7 +608,8 @@ def main() -> None:
     journal = Journal(settings.db_path)
     today = date.today()
 
-    with IBKRClient(settings, client_id=settings.snapshot_client_id) as client:
+    # Waits up to 10 minutes for TWS: at 8am on Mondays it often still needs its weekly log-in.
+    with IBKRClient(settings, client_id=settings.snapshot_client_id, wait_minutes=10) as client:
         fills = get_closed_fills_today(client.ib, today)
         closed_trades_today = persist_closed_fills(journal, fills, today)
 

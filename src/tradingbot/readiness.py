@@ -186,9 +186,11 @@ def data_status(name: str, codes: dict[int, str], got_prices: bool, delayed: boo
     return PASS, "No subscription errors (live prices are confirmed during market hours)"
 
 
-def ibkr_checks(out: list[dict] | None = None, timeout: float = 10.0) -> list[dict]:
-    """Appends to `out` as it goes, so a crash part-way keeps what was checked."""
+def ibkr_checks(out: list[dict] | None = None, timeout: float = 10.0, wait_minutes: float = 0) -> list[dict]:
+    """Appends to `out` as it goes, so a crash part-way keeps what was checked.
+    wait_minutes: keep retrying while TWS isn't up yet (the 8am run)."""
     from ib_async import IB, Option, Stock
+    from tradingbot.ibkr.client import connect_with_retry
 
     def skipped(why: str) -> list[dict]:
         return [check(cid, "ibkr", name, SKIP, why) for cid, name in IBKR_LATER]
@@ -198,7 +200,8 @@ def ibkr_checks(out: list[dict] | None = None, timeout: float = 10.0) -> list[di
     ib.errorEvent += lambda req_id, code, msg, contract=None: errors.append((req_id, code, msg))
     out = [] if out is None else out
     try:
-        ib.connect(settings.ibkr_host, settings.ibkr_port, clientId=settings.readiness_client_id, timeout=timeout)
+        connect_with_retry(ib, settings.ibkr_host, settings.ibkr_port, settings.readiness_client_id,
+                           wait_minutes=wait_minutes, timeout=timeout)
     except Exception as exc:
         out.append(check("tws", "ibkr", "TWS connection", FAIL,
                          f"Can't connect to {settings.ibkr_host}:{settings.ibkr_port} ({type(exc).__name__})",
@@ -358,28 +361,36 @@ def running(data: dict | None = None, now: datetime | None = None) -> bool:
         age = ((now or datetime.now(ET)) - datetime.fromisoformat(data["started_at"])).total_seconds()
     except (KeyError, ValueError, TypeError):
         return False
-    return age < STALE_RUN_SECONDS
+    return age < data.get("max_seconds", STALE_RUN_SECONDS)
+
+
+def _running_mark(wait_minutes: float) -> dict:
+    return {"running": True, "started_at": datetime.now(ET).isoformat(timespec="seconds"),
+            "max_seconds": STALE_RUN_SECONDS + wait_minutes * 60, "waiting_for_tws": wait_minutes > 0}
 
 
 def payload() -> dict:
     """What the dashboard shows."""
     d = read()
     checks = d.get("checks", [])
-    return {"running": running(d), "started_at": d.get("started_at"), "finished_at": d.get("finished_at"),
+    return {"running": running(d), "waiting_for_tws": running(d) and bool(d.get("waiting_for_tws")),
+            "started_at": d.get("started_at"), "finished_at": d.get("finished_at"),
             "checks": checks, "summary": summary(checks) if checks else None}
 
 
-def run(notify: bool = False) -> dict:
-    """Run every check (in this process) and save the results."""
+def run(notify: bool = False, wait_minutes: float = 0) -> dict:
+    """Run every check (in this process) and save the results. wait_minutes:
+    how long to wait for TWS to come up (the 8am run; 0 for Run checks now)."""
     old = read()
-    started = datetime.now(ET).isoformat(timespec="seconds")
-    _write({**old, "running": True, "started_at": started})
+    mark = _running_mark(wait_minutes)
+    started = mark["started_at"]
+    _write({**old, **mark})
     checks: list[dict] = []
     try:
         checks = pc_checks()
         ibkr: list[dict] = []
         try:
-            ibkr_checks(ibkr)
+            ibkr_checks(ibkr, wait_minutes=wait_minutes)
         except Exception as exc:
             logger.exception("IBKR checks failed")
             done = {c["id"] for c in ibkr}
@@ -404,15 +415,16 @@ def run(notify: bool = False) -> dict:
     return data
 
 
-def start(notify: bool = False) -> bool:
+def start(notify: bool = False, wait_minutes: float = 0) -> bool:
     """Run the checks in the background (run_readiness.py). False if already running."""
     if running():
         return False
-    _write({**read(), "running": True, "started_at": datetime.now(ET).isoformat(timespec="seconds")})
+    _write({**read(), **_running_mark(wait_minutes)})
     log_dir = REPO / "logs"
     log_dir.mkdir(exist_ok=True)
     log = open(log_dir / f"readiness_{datetime.now(ET):%Y-%m-%d}.log", "ab")
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    subprocess.Popen([sys.executable, "-m", "tradingbot.run_readiness", *(["--notify"] if notify else [])],
+    subprocess.Popen([sys.executable, "-m", "tradingbot.run_readiness", *(["--notify"] if notify else []),
+                      *(["--wait", f"{wait_minutes:g}"] if wait_minutes else [])],
                      cwd=str(REPO), stdout=log, stderr=log, stdin=subprocess.DEVNULL, creationflags=flags)
     return True

@@ -2,6 +2,7 @@
 
     python -m tradingbot.run_readiness            # print the results
     python -m tradingbot.run_readiness --notify   # also a Windows notification if anything fails
+    python -m tradingbot.run_readiness --wait 10  # wait up to 10 minutes for TWS to come up (the 8am run)
 
 Started by the control server (8am, and Run checks now on the Bot health
 tab). Never places orders. Exit code 1 if anything failed.
@@ -19,7 +20,9 @@ ICON = {"pass": "OK  ", "warn": "WARN", "fail": "FAIL", "skip": "SKIP"}
 
 
 def main() -> int:
-    data = readiness.run(notify="--notify" in sys.argv[1:])
+    args = sys.argv[1:]
+    wait = float(args[args.index("--wait") + 1]) if "--wait" in args[:-1] else 0.0
+    data = readiness.run(notify="--notify" in args, wait_minutes=wait)
     for c in data["checks"]:
         print(f"{ICON[c['status']]}  {c['name']}: {c['detail']}")
         if c["fix"]:

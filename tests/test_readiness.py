@@ -119,7 +119,7 @@ def test_a_crash_part_way_keeps_results_and_is_not_ready(monkeypatch):
         out.append(rd.check("tws", "ibkr", "TWS connection", PASS, "ok"))
         raise RuntimeError("boom")
     monkeypatch.setattr(rd, "pc_checks", lambda: [rd.check("settings", "pc", "Safe settings", PASS)])
-    monkeypatch.setattr(rd, "ibkr_checks", half)
+    monkeypatch.setattr(rd, "ibkr_checks", lambda out, wait_minutes=0: half(out))
     data = rd.run()
     ids = [c["id"] for c in data["checks"]]
     assert ids[:2] == ["settings", "tws"] and "orders" in ids and ids.count("tws") == 1
@@ -131,13 +131,23 @@ def test_notifies_at_8am_only_when_something_fails(monkeypatch):
     from tradingbot import notify
     shown = []
     monkeypatch.setattr(notify, "windows_notify", lambda title, text: shown.append(text) or True)
-    monkeypatch.setattr(rd, "ibkr_checks", lambda out: out)
+    monkeypatch.setattr(rd, "ibkr_checks", lambda out, wait_minutes=0: out)
     monkeypatch.setattr(rd, "pc_checks", lambda: [rd.check("settings", "pc", "Safe settings", PASS)])
     rd.run(notify=True)
     assert shown == []
     monkeypatch.setattr(rd, "pc_checks", lambda: [rd.check("tasks", "pc", "Scheduled tasks", FAIL, "Missing: OrbBot")])
     rd.run(notify=True)
     assert len(shown) == 1 and "Scheduled tasks" in shown[0]
+
+
+def test_8am_run_waits_for_tws_and_stays_marked_running(monkeypatch):
+    launched = []
+    monkeypatch.setattr(rd.subprocess, "Popen", lambda args, **k: launched.append(args))
+    assert rd.start(notify=True, wait_minutes=10)
+    assert launched[0][-3:] == ["--notify", "--wait", "10"]
+    d = rd.read()
+    later = datetime.fromisoformat(d["started_at"]) + timedelta(minutes=8)   # still waiting for TWS
+    assert rd.running(d, now=later) and rd.payload()["waiting_for_tws"]
 
 
 def test_running_mark_expires():

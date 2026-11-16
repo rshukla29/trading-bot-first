@@ -382,7 +382,7 @@
         (c.fix ? `<div class="rd-fix"><b>Fix:</b> ${e(c.fix)}</div>` : "") + `</li>`).join("") + `</ul>`;
     }).join("");
     box.innerHTML = `<div class="rd">
-      <div class="rd-head"><div class="rd-title ${busyNow ? "" : cls}"><span class="dot"></span>${busyNow ? "Checking… (about 20 seconds)" : e(text)}</div>
+      <div class="rd-head"><div class="rd-title ${busyNow ? "" : cls}"><span class="dot"></span>${busyNow ? (R.waiting_for_tws ? "Checking… (waits up to 10 minutes for TWS to be logged in)" : "Checking… (about 20 seconds)") : e(text)}</div>
         <button type="button" class="rd-btn" data-rd-run ${busyNow ? "disabled" : ""}>${busyNow ? "Checking…" : "Run checks now"}</button></div>
       <div class="rd-sub">Is everything the bots need in place? ${R.finished_at ? "Last checked " + e(when(R.finished_at)) + "." : "Not checked yet."}
         Runs by itself at 8am on weekdays. It never places orders.</div>${groups}</div>`;

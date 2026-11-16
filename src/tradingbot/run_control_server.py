@@ -532,7 +532,9 @@ def check_for_update() -> None:
     if status.get("available"):
         logger.info("Version %s is available (this is %s)", status["latest"], status["current"])
         updates.notify_once(status)
-    readiness.start(notify=in_service_hours(datetime.now(ET)))
+    # At 8am TWS may still need its weekly log-in: wait up to 10 minutes for it before reporting.
+    scheduled = in_service_hours(datetime.now(ET))
+    readiness.start(notify=scheduled, wait_minutes=10 if scheduled else 0)
 
 
 def stop_at(server: ThreadingHTTPServer, until: time, poll: float = 30.0) -> None:

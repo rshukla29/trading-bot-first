@@ -506,7 +506,7 @@ day (the files stay where they are).
 | Time Machine | Stock ORB's checks: per day and each one with its verdict and decision |
 | Reports | Every snapshot, weekly and monthly report, by month, plus the one-off studies in `analysis/` |
 | Daily reviews | Each 4:50pm review, rendered |
-| Bot health | The **readiness check** (see below), then each bot's log for the last 15 days: ran cleanly / warnings / errors. IBKR's own notices (a cancelled order, a brief disconnect, market data messages) count as warnings; errors are lines the bots' code logged at ERROR |
+| Bot health | The **readiness check** (see below), then each bot's log for the last 15 days: ran cleanly / warnings / errors. IBKR's own notices (a cancelled order, a brief disconnect, market data messages) count as warnings; so do "TWS refused the connection" lines when a later connection in the same log succeeded (a retry or a rerun), and everything in the readiness check's log (its findings are in its own list). Errors are lines the bots' code logged at ERROR |
 
 Built by [dashboard.py](src/tradingbot/dashboard.py) (data) and
 [dashboard_page.html](src/tradingbot/dashboard_page.html) (the page);
@@ -592,7 +592,10 @@ trade hours later. [readiness.py](src/tradingbot/readiness.py), run by
 (IBKR client `READINESS_CLIENT_ID`, 88), results in `data/readiness.json`.
 
 **When.** At each control server start, so 8am on weekdays: after the
-update check, with a Windows notification if anything fails. Also from
+update check, with a Windows notification if anything fails. The 8am run
+waits up to 10 minutes for TWS to accept connections (on Mondays it often
+still needs its weekly log-in), so it doesn't report a problem that fixes
+itself a minute later. Also from
 **Run checks now** on the Bot health tab (`POST /api/readiness`, same
 security checks as the buttons), or by hand:
 `python -m tradingbot.run_readiness [--notify]` (exit code 1 if not ready).

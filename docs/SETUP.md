@@ -216,7 +216,7 @@ You're set. The bots start by themselves on the next weekday.
 
 | Time (New York) | What you'll see |
 |---|---|
-| 8:00am | The premarket report is saved, and the dashboard opens in your browser on the **Bot controls** tab. If yesterday's dashboard tab is still open, it updates itself instead of opening a second one. The readiness check runs: the top right corner says **Ready to trade** or how many problems there are, and if something is wrong Windows shows a notification. Click it (or the **Bot health** tab) for the fix |
+| 8:00am | The premarket report is saved, and the dashboard opens in your browser on the **Bot controls** tab. If yesterday's dashboard tab is still open, it updates itself instead of opening a second one. The readiness check runs (if TWS isn't logged in yet, it and the premarket report wait up to 10 minutes for it): the top right corner says **Ready to trade** or how many problems there are, and if something is wrong Windows shows a notification. Click it (or the **Bot health** tab) for the fix |
 | 9:25am – 4:00pm | The bots trade. Check the Bot controls tab any time: each strategy shows Running / Paused / Stopped, today's profit or loss and what's open |
 | 4:30pm | The postmarket report is saved and the open dashboard updates itself |
 | 4:50pm | With Claude Code, a written review appears on the dashboard |
@@ -383,6 +383,7 @@ for the message below.
 | You see | What it means | What to do |
 |---|---|---|
 | `Couldn't connect` or `Error 502` | TWS isn't running, or its API isn't switched on | Start TWS and log in to paper; check step 7 |
+| Bot health shows **snapshot premarket** or **readiness** with errors at 8am | TWS wasn't logged in by 8:10am (it needs a full log-in about once a week, usually Monday morning). The 8am jobs wait up to 10 minutes for it, then give up | Log in to TWS, then press **Run checks now** on Bot health. The day's trading isn't affected once TWS is up before 9:25am |
 | "not a paper account", and the bot stops | TWS is logged in with your real username | Log out and log in with the **paper** username |
 | `Error 10089 ... requires additional subscription` | A market data subscription is missing or not shared yet | Step 2; sharing can take until the next day |
 | `Error 10168`, `2186` or `354` ... not subscribed | The paper account isn't receiving the shared market data yet (common right after creating a paper account) | Step 2, items 4 and 5: sharing on for this paper user, then log TWS out and in. Press **Pause all** until it works |
