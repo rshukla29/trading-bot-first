@@ -779,8 +779,9 @@ Run tests with `pytest`.
 
 ## Releases and updates
 
-The version is in `pyproject.toml` and shown at the bottom of the Bot
-controls tab. Each release is a `vX.Y.Z` git tag plus a GitHub Release on
+The version is in `pyproject.toml` and shown as a badge in the top right
+corner of the Bot controls tab, with a small **Update to vX** button beside
+it when a newer release exists (hover: when it last checked). Each release is a `vX.Y.Z` git tag plus a GitHub Release on
 **trading-bot-first** (the repo people install from), with its notes in
 [CHANGELOG.md](CHANGELOG.md). Ordinary commits and pushes don't notify
 anyone; only a release does.

@@ -10,6 +10,9 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+- The version you're on is shown in the top right corner of the Bot controls tab, with a small Update button next to it when a new version is out.
+- Fix: an empty blue box no longer appears on the Bot controls tab when there's no update.
+
 ## 1.0.0 — 2026-11-15
 
 - First numbered release. From now on the dashboard tells you when a new version is out and installs it with one click (Update now), while the bots are idle.

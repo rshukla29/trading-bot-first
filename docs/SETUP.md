@@ -323,9 +323,11 @@ version:
 
 1. At 8am the next weekday, Windows shows a notification: **Trading bots
    update: Version X is available**. The **Bot controls** tab shows a
-   blue banner with what's new.
+   blue banner with what's new, and a small blue **Update to vX** button
+   in its top right corner, next to the version you have.
 2. After 5:15pm, at the weekend or before 8am (New York time), press
-   **Update now** on that banner and confirm. It takes about a minute.
+   **Update now** on the banner (or **Update to vX** at the top right) and
+   confirm. It takes about a minute.
    The page reloads itself and says **Updated from … to …**.
 
 Your settings (`.env`), your trades and your reports stay as they are. If
@@ -333,8 +335,9 @@ anything goes wrong, the update puts the previous version back, and the
 banner says what happened.
 
 The button stays greyed out while the bots might be trading (weekdays 8am
-to 5:15pm). The version you have is shown at the bottom of the Bot controls
-tab.
+to 5:15pm). The version you have is shown in the top right corner of the
+Bot controls tab (for example **v1.0.0**); point at it to see when it last
+checked for updates.
 
 > If the banner says **files were edited on this PC**, you (or someone)
 > changed one of the bots' code files. Settings belong in `.env`, which is
@@ -411,7 +414,7 @@ for the message below.
   day's reports on your PC, and to check for new versions.
 - **Version / release:** a numbered edition of the bots, such as 1.0.0.
   The owner publishes a new one when something is improved; yours is shown
-  at the bottom of the Bot controls tab.
+  in the top right corner of the Bot controls tab.
 - **PowerShell:** a Windows window where you type or paste commands.
 - **`.env` file:** the bots' settings file. It stays on your PC and is
   never uploaded.

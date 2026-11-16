@@ -15,6 +15,7 @@
   #cp-root { --cp-run: #2fb67a; --cp-run-ink: #03190f; --cp-stop: #6b7380;
     --cp-run-soft: rgba(47,182,122,.14); --cp-pause-soft: rgba(242,181,58,.14); --cp-stop-soft: rgba(139,149,163,.14); }
 }
+#cp-root [hidden] { display: none !important; }  /* elements styled display:flex must still hide */
 #cp-root button { font: inherit; }
 #cp-root button:focus-visible { outline: 2px solid var(--accent, #2a78d6); outline-offset: 2px; }
 .cp-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
@@ -95,11 +96,20 @@
 .cp-update li { margin: 2px 0; }
 .cp-update .cp-why { font-size: 12px; color: var(--muted, #898781); margin-top: 6px; }
 .cp-update .cp-big { background: var(--accent, #2a78d6); color: #fff; }
-.cp-ver { font-size: 12px; color: var(--muted, #898781); text-align: right; }
+.cp-top { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: -8px; font-size: 12px; }
+.cp-vtag { display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--ring, rgba(0,0,0,.1)); color: var(--ink-2, #52514e); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cp-vtag.new { border-color: var(--accent, #2a78d6); }
+.cp-mini { min-height: 28px; padding: 0 12px; border-radius: 999px; border: 0; background: var(--accent, #2a78d6); color: #fff;
+  font-weight: 700 !important; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.cp-mini:hover:not(:disabled) { filter: brightness(1.08); }
+.cp-mini:disabled { opacity: .5; cursor: default; }
+.cp-mini .dot { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
 .cp-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink, #0b0b0b); color: var(--page, #fff);
   padding: 10px 16px; border-radius: 10px; font-size: 13px; z-index: 50; max-width: calc(100% - 32px); }
 </style>
 <div id="cp-root" aria-live="polite" data-port="{{CONTROL_PORT}}">
+  <div class="cp-top" id="cp-top" hidden></div>
   <div class="cp-offline" id="cp-offline" hidden></div>
   <div class="cp-offline cp-warn" id="cp-sched" role="alert" hidden></div>
   <div class="cp-update" id="cp-update" hidden></div>
@@ -120,7 +130,6 @@
     <div class="cp-safety" id="cp-safety"></div>
     <ul class="cp-log" id="cp-log"></ul>
   </div>
-  <div class="cp-ver" id="cp-ver"></div>
   <dialog id="cp-dialog" aria-labelledby="cp-dlg-title">
     <h2 id="cp-dlg-title"></h2>
     <p id="cp-dlg-body"></p>
@@ -256,7 +265,7 @@
   let updating = false;
   function renderUpdate() {
     const u = S.update || {}, box = q("#cp-update"), r = u.result || {};
-    q("#cp-ver").textContent = u.current ? "Version " + u.current + (u.checked_at ? " · checked for updates " + u.checked_at.slice(0, 10) : "") : "";
+    renderVersionBadge(u, r);
     const recent = r.at && (Date.now() - new Date(r.at).getTime()) < 24 * 3600e3;
     if (r.running || updating) {
       box.hidden = false; box.className = "cp-update";
@@ -279,6 +288,26 @@
       return;
     }
     box.hidden = true;
+  }
+
+  // Top right: the version you're on, plus a small Update button when a newer one is out.
+  function renderVersionBadge(u, r) {
+    const top = q("#cp-top");
+    if (!u.current) { top.hidden = true; return; }
+    const checked = u.checked_at ? "Checked for updates " + u.checked_at.slice(0, 16).replace("T", " ") : "Not checked for updates yet";
+    let html = `<span class="cp-vtag ${u.available ? "new" : ""}" title="${e(checked)}">v${e(u.current)}</span>`;
+    if (r.running || updating) {
+      html += `<span class="cp-vtag new">Updating to v${e(r.to || u.latest)}…</span>`;
+    } else if (u.available) {
+      const tip = u.busy ? "Available after 5:15pm, at the weekend or before 8am (New York), while the bots are idle"
+                         : `Install version ${u.latest}`;
+      html += `<button type="button" class="cp-mini" data-update="${e(u.latest)}" title="${e(tip)}" ${u.busy ? "disabled" : ""}>` +
+              `<span class="dot" aria-hidden="true"></span>Update to v${e(u.latest)}</button>`;
+    } else {
+      html = html.replace('title="', 'title="Up to date · ');
+    }
+    top.innerHTML = html;
+    top.hidden = false;
   }
 
   async function update(version) {
