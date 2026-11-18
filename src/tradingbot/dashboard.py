@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
 import sqlite3
 from datetime import date, datetime
@@ -29,6 +30,7 @@ from tradingbot.strategy_pnl import ET, JOURNAL_STRATEGIES, STOCK_BOTS, _et_date
 
 TEMPLATE = Path(__file__).with_name("dashboard_page.html")
 CONTROL_PANEL = Path(__file__).with_name("control_panel.html")
+RULES_PANEL = Path(__file__).with_name("rules_panel.html")
 STRATEGIES = [n for n, _, _ in JOURNAL_STRATEGIES] + list(STOCK_BOTS.values()) + ["Manual / other"]
 HEALTH_DAYS = 15
 
@@ -408,7 +410,22 @@ def render(data: dict) -> str:
     from tradingbot.config import settings
     panel = CONTROL_PANEL.read_text(encoding="utf-8").replace("{{CONTROL_PORT}}", str(settings.control_port))
     return (TEMPLATE.read_text(encoding="utf-8").replace("<!--__CONTROLS__-->", panel)
+            .replace("<!--__RULES__-->", rules_panel_html())
             .replace("/*__DATA__*/null", payload))
+
+
+def rules_panel_html() -> str:
+    """The Rules tab, with the saved rules built in for when the page is
+    opened as a file (read-only); served pages fetch /api/rules instead."""
+    from tradingbot import rules
+    from tradingbot.config import settings
+    try:
+        data = json.dumps(rules.payload(), separators=(",", ":")).replace("<", "\\u003c")
+    except Exception:  # the dashboard must build even if the rules can't be read
+        logging.getLogger(__name__).exception("Couldn't read the rules for the dashboard")
+        data = "null"
+    return (RULES_PANEL.read_text(encoding="utf-8").replace("{{CONTROL_PORT}}", str(settings.control_port))
+            .replace("/*__RULES_DATA__*/null", data))
 
 
 def build(out_path: Path | None = None, today: date | None = None) -> Path:

@@ -63,7 +63,17 @@ def plan_stop_raise(
     cost 1265.93 with its stop at 1116.31 (-11.8%), INTC -14.2%. Skipped
     while the price is within the buffer of that floor, so lifting the stop
     can't trigger it on the spot."""
-    candidates = [ladder_stop(avg_cost, price, trigger_pct, step_pct, trail_pct)]
+    return raise_stop_to(ladder_stop(avg_cost, price, trigger_pct, step_pct, trail_pct),
+                         avg_cost, price, current_stop, buffer_pct, max_loss_pct)
+
+
+def raise_stop_to(
+    ladder_level: float | None, avg_cost: float, price: float, current_stop: float, buffer_pct: float,
+    max_loss_pct: float | None = None,
+) -> float | None:
+    """plan_stop_raise with the step-up level already worked out (the Rules
+    tab's rules.StrategyRules.ladder_stop)."""
+    candidates = [ladder_level]
     if max_loss_pct:
         floor = round(avg_cost * (1 - max_loss_pct), 2)
         if price > floor * (1 + buffer_pct):
@@ -127,6 +137,19 @@ def working_stop_qty_by_symbol(trades) -> dict[str, float]:
         if t.contract.secType == "STK" and o.action == "SELL" and o.orderType == "STP":
             qty[t.contract.symbol] = qty.get(t.contract.symbol, 0.0) + o.totalQuantity
     return qty
+
+
+def ensure_stops_by_symbol(
+    ib: IB, journal: Journal, positions: dict, stop_pct_by_symbol: dict[str, float], default_pct: float, source: str,
+) -> set[str]:
+    """ensure_protective_stops for positions whose stop % differs by symbol
+    (a $ stop on the Rules tab is a different % for each cost price)."""
+    sold: set[str] = set()
+    pct = {s: stop_pct_by_symbol.get(s) or default_pct for s in positions}
+    for level in sorted(set(pct.values())):
+        group = {s: p for s, p in positions.items() if pct[s] == level}
+        sold |= ensure_protective_stops(ib, journal, group, level, source)
+    return sold
 
 
 def ensure_protective_stops(

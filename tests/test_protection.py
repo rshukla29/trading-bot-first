@@ -255,8 +255,9 @@ def test_step_stop_floors_rsi2_at_its_own_stop(tmp_path, monkeypatch):
     j = Journal(str(tmp_path / "j.db"))
     j.claim_stock("V", "ma_crossover")
     j.claim_stock("ADM", "rsi2")
-    pct = run_step_stop_bot.stop_pct_by_symbol(j)
-    assert pct == {"V": 0.10, "ADM": 0.15}
+    from types import SimpleNamespace as NS
+    pct = run_step_stop_bot.stop_pct_by_symbol(j, {"V": NS(avgCost=300.0), "ADM": NS(avgCost=60.0), "ASTX": NS(avgCost=5.0)})
+    assert pct == {"V": 0.10, "ADM": 0.15}  # ASTX isn't a bot's: no stop % at all
     # A 15% RSI(2) stop at $85 on a $100 cost is left alone, not lifted to the 10% floor.
     assert plan_stop_raise(100.0, 98.0, 85.0, *LOCK, max_loss_pct=pct["ADM"]) is None
     assert plan_stop_raise(100.0, 98.0, 85.0, *LOCK, max_loss_pct=pct["V"]) == 90.0

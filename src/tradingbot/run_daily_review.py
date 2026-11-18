@@ -272,6 +272,32 @@ def section_other(day: date) -> str:
     return "\n".join(out)
 
 
+def section_rules(day: date) -> str:
+    """The Rules tab (rules.py): today's changes and every rule that differs
+    from the settings, so results can be read against the rules in force."""
+    from tradingbot import rules
+    cap, vals, problems = rules.effective()
+    base = rules.defaults()
+    out = ["## Rules tab (sizes, stops and limits set on the dashboard)\n",
+           f"Capital the bots trade with: {f'${cap:,.0f}' if cap else 'the whole account'}. "
+           "These override the settings quoted in the strategy sections below.\n"]
+    changed = [e for e in rules.read_log(200) if e.get("at", "").startswith(day.isoformat())]
+    out.append("Changed today:\n\n" + "\n".join(f"- {e['at'][11:16]} {e['text']}" for e in reversed(changed))
+               if changed else "No changes today.")
+    rows = []
+    for sid in rules.STRATEGIES:
+        for f in rules.SCHEMA[sid]["fields"]:
+            k = f.get("key")
+            if k and vals[sid][k] != base[sid][k]:
+                rows.append(dict(strategy=rules.SCHEMA[sid]["name"], rule=f["label"],
+                                 now=rules.format_value(sid, f, vals[sid][k]), setting=rules.format_value(sid, f, base[sid][k])))
+    out.append("\nRules that differ from the settings:\n\n" + md_table(pd.DataFrame(rows)) if rows
+               else "\nEvery strategy uses its default rules.")
+    if problems:
+        out.append("\nSaved rules that couldn't be used (defaults applied): " + "; ".join(problems))
+    return "\n".join(out) + "\n"
+
+
 def section_health(day: date) -> str:
     out = ["## Health: errors and warnings in today's logs\n"]
     names = sorted(p.name[: -len(f"_{day.isoformat()}.log")] for p in Path("logs").glob(f"*_{day.isoformat()}.log"))
@@ -355,7 +381,8 @@ def main() -> None:
 
     sections = [f"# Daily facts — {day.isoformat()} ({day.strftime('%A')})\n",
                 "Generated after the close by run_daily_review.py. Read-only data for the daily review.\n"]
-    for fn, args in ((section_account, (day, ib)), (section_orb, (day, model)), (section_credit_orb, (day,)),
+    for fn, args in ((section_account, (day, ib)), (section_rules, (day,)), (section_orb, (day, model)),
+                     (section_credit_orb, (day,)),
                      (section_stock_orb, (day,)), (section_other, (day,)), (section_health, (day,))):
         try:
             sections.append(fn(*args))

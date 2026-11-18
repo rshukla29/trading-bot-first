@@ -145,9 +145,28 @@ def check_updates() -> dict:
     return check("updates", "pc", "Version", PASS, f"v{have}, up to date")
 
 
+def check_rules() -> dict:
+    """The Rules tab's saved rules can be used (rules.py)."""
+    from tradingbot import rules
+    cap, vals, problems = rules.effective()
+    if problems:
+        return check("rules", "pc", "Trading rules", FAIL, "; ".join(problems)[:300],
+                     "Open the Rules tab, fix or reset the rules named here, and save")
+    acct = rules.account_value()
+    if cap and acct and cap > acct:
+        return check("rules", "pc", "Trading rules", WARN,
+                     f"Capital ${cap:,.0f} is more than the account's ${acct:,.0f}; the bots use ${acct:,.0f}",
+                     "Lower the capital on the Rules tab, or leave it blank for the whole account")
+    base = rules.defaults()
+    custom = [rules.SCHEMA[s]["name"] for s in rules.STRATEGIES if vals[s] != base[s]]
+    detail = (f"Capital ${cap:,.0f}" if cap else "Whole account") + "; " + (
+        "custom rules for " + ", ".join(custom) if custom else "default rules")
+    return check("rules", "pc", "Trading rules", PASS, detail)
+
+
 def pc_checks() -> list[dict]:
     out = []
-    for fn in (check_settings, check_journal, check_tasks, check_sleep, check_claude, check_updates):
+    for fn in (check_settings, check_rules, check_journal, check_tasks, check_sleep, check_claude, check_updates):
         try:
             out.append(fn())
         except Exception as exc:  # one broken check never hides the others
@@ -193,7 +212,7 @@ def ibkr_checks(out: list[dict] | None = None, timeout: float = 10.0, wait_minut
     from tradingbot.ibkr.client import connect_with_retry
 
     def skipped(why: str) -> list[dict]:
-        return [check(cid, "ibkr", name, SKIP, why) for cid, name in IBKR_LATER]
+        return [check(cid, "ibkr", order_check_name() if cid == "orders" else name, SKIP, why) for cid, name in IBKR_LATER]
 
     errors: list[tuple[int, int, str]] = []
     ib = IB()
@@ -299,12 +318,13 @@ def order_check(ib, opt, errors: list) -> dict:
     """Read-only API and the precautionary size limit, from a what-if preview
     of the iron condor's order size (never sent)."""
     from ib_async import LimitOrder
-    name = "Orders allowed (10 contracts)"
+    size = order_size()
+    name = order_check_name()
     if opt is None:
         return check("orders", "ibkr", name, SKIP, "Needs an option contract")
     start = len(errors)
     try:  # bounded: an order error can leave the preview unanswered
-        state = ib.run(ib.whatIfOrderAsync(opt, LimitOrder("BUY", 10, 0.01, tif="DAY")), timeout=10)
+        state = ib.run(ib.whatIfOrderAsync(opt, LimitOrder("BUY", size, 0.01, tif="DAY")), timeout=10)
     except Exception as exc:
         state = None
         logger.info("what-if failed: %s", exc)
@@ -315,20 +335,39 @@ def order_check(ib, opt, errors: list) -> dict:
     if 383 in codes:
         return check("orders", "ibkr", name, FAIL, codes[383][:140],
                      "TWS: Global Configuration → Presets → Options (and Stocks) → Precautionary Settings → "
-                     "Size Limit at least 10, or tick API → Settings → Bypass Order Precautions for API Orders")
+                     f"Size Limit at least {size}, or tick API → Settings → Bypass Order Precautions for API Orders")
     if state is None or not getattr(state, "initMarginChange", ""):
         code = next(iter(codes), None)
         return check("orders", "ibkr", name, WARN,
                      f"The order preview didn't answer{f' (error {code}: {codes[code][:90]})' if code else ''}",
-                     "Check TWS's API settings (setup step 7) and the order size limit (at least 10)")
+                     f"Check TWS's API settings (setup step 7) and the order size limit (at least {size})")
     return check("orders", "ibkr", name, PASS,
-                 "Order preview accepted: API isn't read-only and 10 contracts aren't refused (nothing was sent)")
+                 f"Order preview accepted: API isn't read-only and {size} contracts aren't refused (nothing was sent)")
+
+
+def order_size() -> int:
+    """The largest option order the rules allow (at least 10): what TWS's
+    order size limit has to accept."""
+    from tradingbot import rules
+    try:
+        vals = rules.effective()[1]
+    except Exception:
+        return 10
+    sizes = [10]
+    for sid in ("orb", "credit_orb", "iron_condor"):
+        v = vals[sid]
+        sizes.append(min(v["maxQty"], v["size"]["fixed"]) if v["size"]["mode"] == "fixed" else v["maxQty"])
+    return int(max(sizes))
+
+
+def order_check_name() -> str:
+    return f"Orders allowed ({order_size()} contracts)"
 
 
 IBKR_LATER = [("account", "Paper account"), ("data_spy", "SPY prices"), ("data_nasdaq", "Nasdaq stock prices (AAPL)"),
               ("data_nyse", "NYSE stock prices (JPM)"), ("data_options", "SPY option prices"),
               ("history", "Price history (1-minute bars)"), ("competing", "Real account not logged in elsewhere"),
-              ("orders", "Orders allowed (10 contracts)")]
+              ("orders", "Orders allowed (10 contracts)")]  # the name follows order_size() when run
 
 
 # ---------------------------------------------------------------- results

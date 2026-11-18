@@ -9,6 +9,8 @@ def _isolated_control_file(tmp_path, monkeypatch):
     data/control.json — a strategy paused from the dashboard — must never
     change what a test sees."""
     monkeypatch.setattr(settings, "control_path", str(tmp_path / "control.json"))
+    # And the Rules tab's file (data/rules.json): a test sees the default rules.
+    monkeypatch.setattr(settings, "rules_path", str(tmp_path / "rules.json"))
     # Same for the update check's files (data/update_status.json, update_result.json).
     from tradingbot import readiness, updates
     monkeypatch.setattr(readiness, "RESULTS", tmp_path / "readiness.json")

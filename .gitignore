@@ -19,3 +19,6 @@ data/update_result.json
 data/update_*.tmp
 data/readiness.json
 data/readiness.tmp
+data/rules.json
+data/rules.tmp
+data/rules_log.jsonl

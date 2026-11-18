@@ -402,6 +402,11 @@ class Settings(BaseSettings):
     control_path: str = "data/control.json"
     control_port: int = 8765
 
+    # Rules tab (rules.py): the capital the bots trade with and each
+    # strategy's size, caps, stops and daily loss limit, as changed on the
+    # dashboard. Only changed values are saved; the rest come from here.
+    rules_path: str = "data/rules.json"
+
     # Daily pre/post-market snapshot (run_snapshot.py): open orders,
     # per-position unrealized P&L, account realized/unrealized/daily P&L,
     # total balance, and YTD P&L. Written as HTML under reports_dir and

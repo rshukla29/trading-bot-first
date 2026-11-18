@@ -44,6 +44,14 @@ def connect_with_retry(ib: IB, host: str, port: int, client_id: int, wait_minute
             sleep(min(RETRY_SECONDS, left))
 
 
+def net_liquidation(ib) -> float:
+    """The account's value (NetLiquidation, USD) from a connected IB."""
+    for av in ib.accountValues():
+        if av.tag == "NetLiquidation" and av.currency == "USD":
+            return float(av.value)
+    raise RuntimeError("NetLiquidation value not found in account summary")
+
+
 class IBKRClient:
     """Thin wrapper around ib_async.IB with a paper-account safety guard."""
 
@@ -84,10 +92,7 @@ class IBKRClient:
         return self.ib.accountValues()
 
     def net_liquidation(self) -> float:
-        for av in self.ib.accountValues():
-            if av.tag == "NetLiquidation" and av.currency == "USD":
-                return float(av.value)
-        raise RuntimeError("NetLiquidation value not found in account summary")
+        return net_liquidation(self.ib)
 
     def positions(self):
         return self.ib.positions()

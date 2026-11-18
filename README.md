@@ -583,6 +583,83 @@ The panel is [control_panel.html](src/tradingbot/control_panel.html):
 inlined into the dashboard at build time and served on its own at
 `/controls`. Tests: [tests/test_control.py](tests/test_control.py).
 
+## Rules tab (size, stops and limits per strategy)
+
+The dashboard's **Rules** tab (next to Bot controls) sets how much each
+strategy trades and how it protects itself, so the bots can be fitted to
+the money in the account without editing `.env`.
+[rules.py](src/tradingbot/rules.py); the page is
+[rules_panel.html](src/tradingbot/rules_panel.html), built into the
+dashboard like the controls panel.
+
+**Capital the bots trade with.** A typed amount that every "% of capital"
+rule is a % of, so the bots can trade part of the account. Blank means the
+whole account (the behaviour before this tab). Never more than the account
+holds: the bots use `min(capital, NetLiquidation)`.
+
+**Per strategy.** Each strategy has its own card and its own values;
+nothing is shared between strategies any more.
+
+| Strategy | Rules |
+|---|---|
+| ORB | size (% of capital / $ per trade / fixed contracts), max contracts, max premium ($ option price or % of capital: skip the trade above it), stop loss (off / % of premium / $ per contract), first & step stop (% of entry or $ per contract), profit target, max trades per day (calls and puts together), daily loss limit |
+| Credit ORB | size ($ max loss / % / fixed), max contracts, spread width, min credit, daily loss limit |
+| Iron condor | size (% / $ at risk / fixed), max contracts, max open, wing width, profit target (% of credit), stop (x credit) |
+| Stock ORB | size ($ / % at risk / fixed shares), max position, trades per day, target (x risk), daily loss limit (planned risk, as before) |
+| Trend join | size, max position, max open, trades per day, ⅓ profit and breakeven points (x risk), daily loss limit |
+| RSI(2), MA crossover | size, max position, max open, stop loss (% below entry / $ per share), first & step stop, daily loss limit |
+
+**First & step stop.** "Once up *trig*, lock in *lock*; every further
+*step*, raise the stop by *step*." With the defaults this gives exactly the
+old ladder (`risk.ladder_stop`: ORB 50/25/25 and stocks 30/15/15, which
+lock in 25% and 15%).
+
+**Defaults are your current settings.** Each card starts from `.env` /
+`config.py` (`OPTIONS_*`, `CREDIT_ORB_*`, `CREDIT_SPREAD_*`, `STOCK_ORB_*`,
+`TREND_JOIN_*`, `RISK_PCT_PER_TRADE`, `STOP_LOSS_PCT`,
+`RSI2_STOP_LOSS_PCT`, `STOCK_LOCK_*` and so on). Only
+changed values are saved, to `data/rules.json` (`RULES_PATH`, gitignored,
+never touched by updates), so a later `.env` change still applies to
+everything not changed on the tab. Each card has Reset to defaults.
+
+**Checks.** At most 5% of capital at risk per trade, 1–50 contracts, a stop
+below 100%, a first stop that locks in less than its trigger, a min credit
+below the width, and so on. The page shows each problem next to its field
+and won't save; the server checks again (`POST /api/rules` refuses with
+every problem). A broken file or a bad saved value is logged as an error
+and that value falls back to its default, so a bot never trades on a bad
+rule; the Rules tab and the readiness check say so.
+
+**Preview.** Each card shows what the rules mean at the capital for an
+example price you can change: contracts or shares, cost, worst case at the
+stop, the step-stop table, and warnings such as "sizes to 0, won't trade"
+or "above the max premium, skips". The top shows the most all the bots
+could lose in one bad day.
+
+**When changes apply.** Bots re-read the file when it changes (before each
+entry; ORB and the step-stop job at every check). Size changes apply to new
+trades. Stop loss and step-stop changes also reach open ORB, RSI(2) and MA
+crossover positions within a minute; iron condor target and stop at the
+next 3:45pm run; Trend join partial and breakeven on open positions.
+
+**Daily loss limit.** No new entries for the rest of the day once that
+strategy's realized P&L today (`strategy_pnl.py`) is at or below −limit.
+It stops new trades only, so one open trade can still go past it. Every
+strategy's limit starts Off and is only what you set on its card; RSI(2)
+and MA crossover each have their own and no longer use
+`MAX_DAILY_LOSS_PCT` (whose old kill switch never received the day's P&L).
+
+**Change log.** Every save appends to `data/rules_log.jsonl`; the tab shows
+the latest, and the daily review's facts get a "Rules tab" section (today's
+changes and every rule that differs from the settings).
+
+**Read-only** when the dashboard is opened as a file or the control server
+is off: the page shows the rules saved when it was built, with the inputs
+disabled. `GET /api/rules` and `POST /api/rules {"capital", "strategies"}`
+use the same security checks as the buttons.
+
+Tests: [tests/test_rules.py](tests/test_rules.py).
+
 ## Readiness check
 
 "Is everything the bots need in place right now?", so a missing
@@ -607,6 +684,7 @@ plain words.
 | Group | Check | Fails when |
 |---|---|---|
 | This PC | Safe settings | `LIVE_TRADING=true`, or a live port (7496 / 4001) |
+| This PC | Trading rules | a saved rule on the Rules tab can't be used (warning when the capital is above the account value) |
 | This PC | Trade diary | `DB_PATH`'s folder is missing or not writable |
 | This PC | Scheduled tasks | a task from `schedule.json` is missing, disabled, or its next run is off (the drift check) |
 | This PC | PC stays awake | it sleeps on mains power (warning; from `powercfg`) |
@@ -618,7 +696,7 @@ plain words.
 | IBKR | SPY option prices | the same codes on a far out-of-the-money SPY put (OPRA) |
 | IBKR | Price history | no 1-minute SPY bars |
 | IBKR | Real account not logged in elsewhere | error 10197 on any request |
-| IBKR | Orders allowed (10 contracts) | a **what-if preview** (never sent) of a 10-contract $0.01 option buy draws error 321 (read-only API) or 383 (size limit) |
+| IBKR | Orders allowed (N contracts) | a **what-if preview** (never sent) of an N-contract $0.01 option buy draws error 321 (read-only API) or 383 (size limit); N is the largest option order the Rules tab allows, at least 10 |
 
 Outside market hours "live prices are flowing" can't be proven, so the
 price checks pass on "no subscription errors", which IBKR sends at any hour.
@@ -821,8 +899,8 @@ the repo can live anywhere.
   `run_expiry_guard` closes any option expiring today, from any strategy,
   at market; it waits out any exit already in progress so it can't
   double-sell. See [run_expiry_guard.py](src/tradingbot/run_expiry_guard.py).
-- A daily-loss kill-switch (`MAX_DAILY_LOSS_PCT`) halts new stock entries
-  once tripped.
+- A daily loss limit per strategy (Rules tab, off until you set it) halts
+  that strategy's new entries once today's realized losses reach it.
 
 Run tests with `pytest`.
 

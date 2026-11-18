@@ -31,11 +31,11 @@ from zoneinfo import ZoneInfo
 
 from ib_async import Stock
 
-from tradingbot import control
+from tradingbot import control, rules
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.journal import Journal
-from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops, plan_stop_raise
+from tradingbot.protection import cancel_orphan_stops, ensure_stops_by_symbol, raise_stop_to
 from tradingbot.stock_close import close_owned
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -62,12 +62,20 @@ def owned_positions(client: IBKRClient, journal: Journal) -> dict:
     }
 
 
-def stop_pct_by_symbol(journal: Journal) -> dict[str, float]:
-    """Each owned symbol's max loss below cost: RSI(2) has its own stop
-    (rsi2_stop_loss_pct), MA-crossover uses stop_loss_pct."""
-    pct = {s: settings.stop_loss_pct for s in journal.owned_stocks("ma_crossover")}
-    pct.update({s: settings.rsi2_stop_loss_pct for s in journal.owned_stocks("rsi2")})
-    return pct
+def rules_by_symbol(journal: Journal) -> dict[str, rules.StrategyRules]:
+    """Each owned symbol's strategy rules (Rules tab): its stop loss and
+    step stop. RSI(2) wins if both somehow claim a symbol."""
+    out = {}
+    for sid in ("ma_crossover", "rsi2"):
+        r = rules.load(sid)
+        out.update({s: r for s in journal.owned_stocks(sid)})
+    return out
+
+
+def stop_pct_by_symbol(journal: Journal, positions: dict) -> dict[str, float]:
+    """Each owned position's max loss below cost, from its strategy's rules."""
+    by = rules_by_symbol(journal)
+    return {s: by[s].stop_fraction(p.avgCost) or settings.stop_loss_pct for s, p in positions.items() if s in by}
 
 
 def main() -> None:
@@ -87,11 +95,8 @@ def main() -> None:
             ib.sleep(max(0.0, wait_s))
 
         positions = owned_positions(client, journal)
-        stop_pct = stop_pct_by_symbol(journal)
-        for pct in sorted(set(stop_pct.values())):
-            group = {s: p for s, p in positions.items() if stop_pct.get(s, settings.stop_loss_pct) == pct}
-            if group:
-                ensure_protective_stops(ib, journal, group, pct, SOURCE)
+        ensure_stops_by_symbol(ib, journal, positions, stop_pct_by_symbol(journal, positions),
+                               settings.stop_loss_pct, SOURCE)
         logger.info("Step-stop manager starting for %s", sorted(positions))
 
         tickers = {}
@@ -108,7 +113,8 @@ def main() -> None:
                     close_owned(ib, journal, strategy, held_qty)
                     control.close_done(strategy)
             positions = owned_positions(client, journal)
-            stop_pct = stop_pct_by_symbol(journal)
+            by_symbol = rules_by_symbol(journal)
+            stop_pct = stop_pct_by_symbol(journal, positions)
             held = {p.contract.symbol for p in client.positions() if p.position > 0 and p.contract.secType == "STK"}
             # A stop only counts as orphaned once its symbol has looked flat
             # on two consecutive ticks: right at the open, a bracket BUY can
@@ -139,10 +145,10 @@ def main() -> None:
                     continue
 
                 current = max(t.order.auxPrice for t in stops)
-                new_stop = plan_stop_raise(
-                    pos.avgCost, price, current, settings.stock_lock_trigger_pct, settings.stock_lock_step_pct,
-                    settings.stock_lock_trail_pct, settings.step_stop_buffer_pct,
-                    max_loss_pct=stop_pct.get(symbol, settings.stop_loss_pct),
+                r = by_symbol.get(symbol)
+                new_stop = raise_stop_to(
+                    r.ladder_stop(pos.avgCost, price) if r else None, pos.avgCost, price, current,
+                    settings.step_stop_buffer_pct, max_loss_pct=stop_pct.get(symbol, settings.stop_loss_pct),
                 )
                 if new_stop is None:
                     continue

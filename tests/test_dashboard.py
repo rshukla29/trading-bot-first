@@ -63,8 +63,9 @@ def test_page_embeds_the_data_safely(tmp_path):
                    1_000_000.0, date(2026, 10, 30))
     data["trades"][0]["reason"] = "</script><script>alert(1)</script>"
     page = render(data)
-    # Two real scripts (the controls panel's and the page's own); the trade text adds none.
-    assert page.count("</script>") == page.count("<script>") == 2
+    # Three real scripts (the controls panel's, the Rules tab's and the page's own) plus the
+    # Rules tab's JSON data block; the trade text adds none.
+    assert page.count("<script>") == 3 and page.count("</script>") == 4
     embedded = json.loads(re.search(r"const D = (\{.*?\});\n", page, re.S).group(1))
     assert embedded["trades"][0]["reason"] == "</script><script>alert(1)</script>"
 
