@@ -684,6 +684,11 @@ The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
 
 **New here?** Follow [docs/SETUP.md](docs/SETUP.md): a step-by-step guide,
 no programming needed, from opening the IBKR account to the first report.
+The one-click installer [Install-Trading-Bots.cmd](Install-Trading-Bots.cmd)
+(attached to every GitHub Release by `scripts/release.py`) installs Python
+and Git with winget if they're missing, clones the repo into
+Documents	rading-bot, asks for the Git name in a pop-up and runs
+`install.ps1`. Double-click it again to repair; it keeps the clone and `.env`.
 [scripts/install.ps1](scripts/install.ps1) does steps 1, 2 and 4 below in
 one go (packages, `.env`, tests, scheduled tasks in your PC's time zone).
 The steps below are the same thing by hand.

@@ -11,7 +11,9 @@ It then:
   2. commits just those two files ("Release v1.1.0") and tags v1.1.0;
   3. pushes master and the tag to both repos (they're identical: public
      trading-bot-first and the private trading-bot), and creates the GitHub
-     Release on trading-bot-first, the repo people install from.
+     Release on trading-bot-first, the repo people install from, with the
+     one-click installer (Install-Trading-Bots.cmd) attached: docs/SETUP.md
+     links to releases/latest/download/Install-Trading-Bots.cmd.
 
 Every installed copy finds the new tag at its next 8am check, shows it on
 the Bot controls tab and offers Update now (src/tradingbot/updates.py).
@@ -31,6 +33,7 @@ from tradingbot import updates  # noqa: E402
 RELEASE_REPO = "rshukla29/trading-bot-first"  # public: people install from it; the GitHub Release goes here
 RELEASE_URL = f"https://github.com/{RELEASE_REPO}.git"
 MIRROR_URL = "https://github.com/rshukla29/trading-bot.git"  # private, identical copy
+INSTALLER = REPO / "Install-Trading-Bots.cmd"  # attached to every Release (docs/SETUP.md, step 4)
 
 
 def git(*args: str) -> str:
@@ -88,7 +91,7 @@ def main() -> None:
     git("tag", "-a", tag, "-m", f"{tag}\n\n{notes_md}")
     for url in (RELEASE_URL, MIRROR_URL):
         git("push", url, "master:master", f"refs/tags/{tag}:refs/tags/{tag}")
-    out = subprocess.run(["gh", "release", "create", tag, "--repo", RELEASE_REPO, "--title", tag,
+    out = subprocess.run(["gh", "release", "create", tag, str(INSTALLER), "--repo", RELEASE_REPO, "--title", tag,
                           "--notes", notes_md, "--verify-tag"], capture_output=True, text=True)
     if out.returncode != 0:
         print(f"Tag pushed, but creating the GitHub Release failed (copies are still notified):\n{out.stderr.strip()}")

@@ -65,7 +65,7 @@ if (Test-Path ".env") {
     Ok ".env already exists - kept as it is"
 } else {
     Copy-Item ".env.example" ".env"
-    Ok "Created .env from .env.example - review it in Notepad (docs/SETUP.md, step 5)"
+    Ok "Created .env from .env.example - review it in Notepad (docs/SETUP.md, step 6)"
 }
 New-Item -ItemType Directory -Force -Path "data", "logs", "reports" | Out-Null
 

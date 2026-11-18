@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+- One-click install: download **Install-Trading-Bots.cmd** from the release page and double-click it. It installs Python and Git if needed, downloads the bots and sets everything up, with no PowerShell typing (docs/SETUP.md, step 4).
+
 ## 1.1.1 — 2026-11-16
 
 - The 8am premarket report and readiness check now wait up to 10 minutes for TWS to be logged in (on Mondays it often still needs its weekly log-in) instead of failing straight away.
