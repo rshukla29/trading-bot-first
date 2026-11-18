@@ -68,19 +68,13 @@ minutes late, and the bots skip most trades.
 
 ## Step 3. Install the programs
 
-Install each one with its normal installer. Accept the defaults unless the
-step says otherwise.
+The installer in step 4 installs **Python** (runs the bots) and **Git**
+(downloads the code and saves the daily reports) for you. You only install:
 
-1. **Python** (runs the bots): go to **python.org → Downloads → Windows**
-   and download the latest Python 3 (3.11 or newer). On the first installer
-   screen, **tick "Add python.exe to PATH"** before you click Install. This
-   is the step people most often miss.
-2. **Git** (downloads the code and saves the daily reports): go to
-   **git-scm.com → Download for Windows**. Click Next through every screen.
-3. **Trader Workstation (TWS)** (IBKR's trading program; the bots connect
+1. **Trader Workstation (TWS)** (IBKR's trading program; the bots connect
    to it): on interactivebrokers.com go to **Trading → Trader Workstation**
-   and download the Windows version.
-4. **Claude Code** *(optional)*: writes a plain-English review of each
+   and download the Windows version. Install it with its normal installer.
+2. **Claude Code** *(optional)*: writes a plain-English review of each
    trading day at 4:50pm. You can skip it; everything else works without it.
    To install, open PowerShell (see the box below), paste this line and
    press Enter:
@@ -97,42 +91,58 @@ step says otherwise.
 > run a command from this guide, copy it, right-click inside the window to
 > paste, and press Enter.
 
-## Step 4. Download the code
+## Step 4. Download and run the installer
 
-In PowerShell, paste these two lines one at a time:
+1. Download **[Install-Trading-Bots.cmd](https://github.com/rshukla29/trading-bot-first/releases/latest/download/Install-Trading-Bots.cmd)**
+   (it's also on the [latest release](https://github.com/rshukla29/trading-bot-first/releases/latest)
+   page, under **Assets**).
+2. Open your **Downloads** folder and double-click **Install-Trading-Bots**.
+3. Windows may show **"Windows protected your PC"**, because the file isn't
+   signed by a big publisher. Click **More info → Run anyway**. If your
+   browser asks whether to keep the file, choose **Keep**.
+4. Click **OK** on the first message. If Python or Git are missing, it
+   installs them; Windows may ask for permission once: click **Yes**.
+5. It asks for your name (and, optionally, your email). The bots stamp it
+   on the daily reports they save; it stays on your PC.
+6. A window shows each step with a green **OK** (see step 5 for what it
+   does). It takes 5–10 minutes. At the end, press **Enter** to close the
+   window, and click **Yes** to open this guide at step 6.
 
-```
-cd $HOME\Documents
-git clone https://github.com/rshukla29/trading-bot-first.git trading-bot
-```
+The code is now in **Documents	rading-bot**. The installer downloads it
+with Git (not as a ZIP): that's how your copy finds out about new versions
+later (see [Getting updates](#getting-updates)).
 
-The code is now in **Documents\trading-bot**. Download it this way (not as
-a ZIP): it's how your copy finds out about new versions later (see
-[Getting updates](#getting-updates)).
+If you see a red **PROBLEM**, the message says what to fix. Fix it and
+double-click the installer again. Running it twice is safe: it keeps your
+download, your settings and your trades.
 
-## Step 5. Run the installer
+> **Prefer to do it by hand?** Install Python 3.11 or newer from
+> **python.org** (tick **"Add python.exe to PATH"**) and Git from
+> **git-scm.com**, then in PowerShell:
+> `cd $HOME\Documents` and
+> `git clone https://github.com/rshukla29/trading-bot-first.git trading-bot`,
+> and run the installer as in step 5.
 
-1. Open **File Explorer** and go to **Documents\trading-bot\scripts**.
-2. Right-click **install.ps1** → **Run with PowerShell**. If Windows asks
-   whether to allow it, choose **Open** or **Yes**.
-3. A window shows each step with a green **OK**:
-   - checks Python and Git (the first time, it asks your name and email:
-     Git stamps them on the saved reports; they stay on your PC);
-   - installs what the bots need (a few minutes);
-   - creates the settings file `.env`;
-   - runs the bots' self-tests (all must pass);
-   - creates the scheduled tasks that start each bot at the right time on
-     weekdays. The times are New York time, listed in
-     **scripts\schedule.json**, and they automatically follow the clock
-     when it changes for daylight saving;
-   - sets up the **control server** (task `BotControlServer`) behind the
-     dashboard's Start / Pause / Stop buttons. Monday to Friday at 8am it
-     rebuilds the dashboard and opens it in your browser (if the dashboard is
-     still open from the day before, that same tab updates instead); it
-     stops at 6pm and leaves the browser open;
-   - puts a **Trading dashboard** shortcut on your desktop.
-4. If you see a red **PROBLEM**, the line says what to fix. Fix it and run
-   the installer again. Running it twice is safe.
+## Step 5. What the installer does
+
+The one-click installer ends by running **Documents	rading-bot\scripts\install.ps1**.
+You can also run that on its own at any time (right-click it → **Run with
+PowerShell**). It:
+
+- checks Python and Git;
+- installs what the bots need (a few minutes);
+- creates the settings file `.env` (an existing one is kept);
+- runs the bots' self-tests (all must pass);
+- creates the scheduled tasks that start each bot at the right time on
+  weekdays. The times are New York time, listed in
+  **scripts\schedule.json**, and they automatically follow the clock
+  when it changes for daylight saving;
+- sets up the **control server** (task `BotControlServer`) behind the
+  dashboard's Start / Pause / Stop buttons. Monday to Friday at 8am it
+  rebuilds the dashboard and opens it in your browser (if the dashboard is
+  still open from the day before, that same tab updates instead); it
+  stops at 6pm and leaves the browser open;
+- puts a **Trading dashboard** shortcut on your desktop.
 
 ## Step 6. Check the settings file
 
