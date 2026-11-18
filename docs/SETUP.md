@@ -19,7 +19,7 @@ setting. Leave it that way.
 | 1 | A Windows 10 or 11 PC that is switched on, and logged in, on market days from 8:00am to 6:00pm New York time | — |
 | 2 | An Interactive Brokers (IBKR) account. It comes with a free paper account | Free to open; IBKR may ask you to fund the real account before you can buy market data |
 | 3 | IBKR market data subscriptions (step 2) | A few dollars a month, depending on IBKR's prices |
-| 4 | Four free programs: Python, Git, IBKR's Trader Workstation, and optionally Claude Code | Free (Claude Code needs a Claude plan) |
+| 4 | Free programs: IBKR's Trader Workstation, and optionally Claude Code. The installer adds Python and Git for you | Free (Claude Code needs a Claude plan) |
 | 5 | The code, from the public GitHub repository **rshukla29/trading-bot-first** (no account needed) | — |
 
 ## Step 1. Open the Interactive Brokers account
@@ -108,7 +108,7 @@ The installer in step 4 installs **Python** (runs the bots) and **Git**
    does). It takes 5–10 minutes. At the end, press **Enter** to close the
    window, and click **Yes** to open this guide at step 6.
 
-The code is now in **Documents	rading-bot**. The installer downloads it
+The code is now in **Documents\trading-bot**. The installer downloads it
 with Git (not as a ZIP): that's how your copy finds out about new versions
 later (see [Getting updates](#getting-updates)).
 
@@ -125,7 +125,7 @@ download, your settings and your trades.
 
 ## Step 5. What the installer does
 
-The one-click installer ends by running **Documents	rading-bot\scripts\install.ps1**.
+The one-click installer ends by running **Documents\trading-bot\scripts\install.ps1**.
 You can also run that on its own at any time (right-click it → **Run with
 PowerShell**). It:
 
@@ -402,9 +402,8 @@ powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 
 - [ ] IBKR account open; paper username and `DU…` account ID written down
 - [ ] Four market data subscriptions, Non-Professional, shared with paper
-- [ ] Python (with "Add to PATH"), Git and TWS installed; Claude Code optional
-- [ ] Code downloaded to Documents\trading-bot with `git clone` (not a ZIP)
-- [ ] Installer finished with all green OKs
+- [ ] TWS installed; Claude Code optional
+- [ ] Install-Trading-Bots.cmd run from the release page, finished with all green OKs (code in Documents\trading-bot)
 - [ ] `.env` checked: `LIVE_TRADING=false`, your own stocks removed from the watchlists
 - [ ] TWS logged in to paper, API enabled, Read-Only off, port 7497, 127.0.0.1 trusted
 - [ ] TWS order size limit at least 10 (Presets → Precautionary Settings)
@@ -440,12 +439,14 @@ for the message below.
 | **Update now** is greyed out | The bots might be trading (weekdays 8am–5:15pm New York) | Press it after 5:15pm, at the weekend or before 8am |
 | The update banner says **files were edited on this PC** | One of the bots' code files was changed by hand | Settings belong in `.env`. Ask the owner for help before undoing the edit |
 | The update banner says the **update failed** | Usually no internet, or a problem in the new version | You're still on the old version and nothing else changed. Try again later; if it keeps failing, send the owner the newest `logs\update_….log` |
-| No update notice, though the owner released one | Your copy checks when the control server starts (8am on weekdays), or it was installed before version 1.0.0, or downloaded as a ZIP | Double-click **Trading dashboard**. Installed before 1.0.0: run `git pull` and the installer once. ZIP: download it again with `git clone` (step 4) |
+| No update notice, though the owner released one | Your copy checks when the control server starts (8am on weekdays), or it was installed before version 1.0.0, or downloaded as a ZIP | Double-click **Trading dashboard**. Installed before 1.0.0: run `git pull` and the installer once. ZIP: run the one-click installer instead (step 4) |
 | `Error 326 ... client id is already in use` | The same bot was started twice | Close the extra window; it fixes itself the next day |
 | Orders are rejected as "read-only" | TWS's Read-Only API box is ticked | Untick it (step 7) |
-| A log file is empty or missing | The task didn't start, or the installer didn't finish | Run **scripts\install.ps1** again |
-| `Claude review failed` in the review log | Claude Code isn't installed or not signed in | Step 3, item 4, or ignore it if you don't use the review |
-| The installer says Python isn't found | "Add python.exe to PATH" wasn't ticked | Run the Python installer again, choose **Modify**, tick **Add Python to environment variables**, then open a new PowerShell window |
+| A log file is empty or missing | The task didn't start, or the installer didn't finish | Double-click **Install-Trading-Bots** again (or run **scripts\install.ps1**) |
+| `Claude review failed` in the review log | Claude Code isn't installed or not signed in | Step 3, item 2, or ignore it if you don't use the review |
+| The installer says Python or Git didn't install, or App Installer (winget) isn't available | Older Windows 10 without App Installer, or no internet | Install **App Installer** from the Microsoft Store (the installer opens it), or install Python and Git by hand (the box in step 4), then double-click the installer again |
+| The installer says Python isn't found (installed by hand) | "Add python.exe to PATH" wasn't ticked | Run the Python installer again, choose **Modify**, tick **Add Python to environment variables**, then run the installer again |
+| **Windows protected your PC** when opening the installer | The file isn't signed by a big publisher | Click **More info → Run anyway** |
 
 ## Glossary
 
