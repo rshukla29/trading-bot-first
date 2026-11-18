@@ -176,7 +176,9 @@ def defaults(s: Settings | None = None) -> dict[str, dict]:
     stock_ladder = dict(on=bool(s.step_stop_enabled and s.stock_lock_trigger_pct > 0), mode="pct",
                         trig=p(s.stock_lock_trigger_pct), step=p(s.stock_lock_step_pct),
                         lock=_lock_from_trail(s.stock_lock_trigger_pct, s.stock_lock_step_pct, s.stock_lock_trail_pct))
-    daily_stock = dict(mode="pct" if s.max_daily_loss_pct > 0 else "off", usd=500.0, pct=p(s.max_daily_loss_pct) or 3.0)
+    # Off until set on the Rules tab: the only limit RSI(2) / MA crossover use is the
+    # one the user saves for that strategy ($ or % of capital), never a built-in %.
+    daily_stock = dict(mode="off", usd=500.0, pct=2.0)
     return {
         "orb": dict(
             size=dict(mode="pct", pct=p(s.options_risk_pct_per_trade), usd=250.0, fixed=1),

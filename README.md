@@ -617,7 +617,7 @@ lock in 25% and 15%).
 **Defaults are your current settings.** Each card starts from `.env` /
 `config.py` (`OPTIONS_*`, `CREDIT_ORB_*`, `CREDIT_SPREAD_*`, `STOCK_ORB_*`,
 `TREND_JOIN_*`, `RISK_PCT_PER_TRADE`, `STOP_LOSS_PCT`,
-`RSI2_STOP_LOSS_PCT`, `STOCK_LOCK_*`, `MAX_DAILY_LOSS_PCT` and so on). Only
+`RSI2_STOP_LOSS_PCT`, `STOCK_LOCK_*` and so on). Only
 changed values are saved, to `data/rules.json` (`RULES_PATH`, gitignored,
 never touched by updates), so a later `.env` change still applies to
 everything not changed on the tab. Each card has Reset to defaults.
@@ -644,9 +644,10 @@ next 3:45pm run; Trend join partial and breakeven on open positions.
 
 **Daily loss limit.** No new entries for the rest of the day once that
 strategy's realized P&L today (`strategy_pnl.py`) is at or below −limit.
-It stops new trades only, so one open trade can still go past it. RSI(2)
-and MA crossover's old `MAX_DAILY_LOSS_PCT` kill switch never received the
-day's P&L; it now works from the journal (3% of capital by default).
+It stops new trades only, so one open trade can still go past it. Every
+strategy's limit starts Off and is only what you set on its card; RSI(2)
+and MA crossover each have their own and no longer use
+`MAX_DAILY_LOSS_PCT` (whose old kill switch never received the day's P&L).
 
 **Change log.** Every save appends to `data/rules_log.jsonl`; the tab shows
 the latest, and the daily review's facts get a "Rules tab" section (today's
@@ -898,8 +899,8 @@ the repo can live anywhere.
   `run_expiry_guard` closes any option expiring today, from any strategy,
   at market; it waits out any exit already in progress so it can't
   double-sell. See [run_expiry_guard.py](src/tradingbot/run_expiry_guard.py).
-- A daily-loss kill-switch (`MAX_DAILY_LOSS_PCT`) halts new stock entries
-  once tripped.
+- A daily loss limit per strategy (Rules tab, off until you set it) halts
+  that strategy's new entries once today's realized losses reach it.
 
 Run tests with `pytest`.
 

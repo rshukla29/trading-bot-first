@@ -11,7 +11,7 @@ that needs people to do something (e.g. new settings in .env).
 ## Unreleased
 
 - New **Rules** tab on the dashboard: type the capital the bots trade with (or leave it blank for the whole account), and set each strategy's own trade size (% of capital, $ or a fixed number of contracts or shares), max contracts, max premium, stop loss, first and step stop, profit target, trades per day and daily loss limit, in $ or %. Each card shows what the rules mean at your capital before you save, refuses unsafe values, and every change is logged. Nothing changes until you save: the starting values are your current settings.
-- The daily loss limit for RSI(2) and MA crossover now really stops new entries after a bad day (it never counted the day's losses before).
+- RSI(2) and MA crossover each have their own daily loss limit on the Rules tab ($ or % of capital, off until you set it) that really stops new entries after a bad day. The old `MAX_DAILY_LOSS_PCT` setting is no longer used (it never counted the day's losses).
 - The readiness check tests the Rules tab's saved rules, and previews an order as large as the biggest option order your rules allow.
 
 ## 1.1.1 — 2026-11-16

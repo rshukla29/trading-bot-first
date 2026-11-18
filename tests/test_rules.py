@@ -152,6 +152,24 @@ def test_orb_trades_per_day_and_daily_limit(monkeypatch):
     assert not orb.rules_allow_entry("SPY", state, 100_000)        # one trade a day, done
 
 
+def test_rsi2_and_ma_daily_limit_is_only_the_users_rule(monkeypatch):
+    # No built-in % (MAX_DAILY_LOSS_PCT is ignored): off until set on the tab.
+    monkeypatch.setattr(rules._settings, "max_daily_loss_pct", 0.03)
+    monkeypatch.setattr(rules, "realized_today", lambda sid, **k: -50_000.0)
+    for sid in ("rsi2", "ma_crossover"):
+        r = rules.load(sid)
+        assert r.daily_limit(100_000) is None
+        assert rules.daily_limit_hit(r, 100_000) is None
+    # Each strategy then uses its own saved value, $ or % of capital.
+    _save({"rsi2": {"daily": {"mode": "usd", "usd": 400.0, "pct": 2.0}},
+           "ma_crossover": {"daily": {"mode": "pct", "usd": 500.0, "pct": 1.5}}})
+    assert rules.load("rsi2").daily_limit(100_000) == 400.0
+    assert rules.load("ma_crossover").daily_limit(100_000) == 1_500.0
+    monkeypatch.setattr(rules, "realized_today", lambda sid, **k: -450.0)
+    assert rules.daily_limit_hit(rules.load("rsi2"), 100_000) == 400.0
+    assert rules.daily_limit_hit(rules.load("ma_crossover"), 100_000) is None
+
+
 def test_realized_today_reads_the_strategys_journal(tmp_path, monkeypatch):
     from tradingbot.journal import Journal
     db = str(tmp_path / "j.db")
