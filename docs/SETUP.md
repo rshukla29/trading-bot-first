@@ -282,6 +282,35 @@ Good to know:
 - If it says **a bot's start time is off**, run
   **scripts\register_tasks.ps1** (right-click → Run with PowerShell).
 
+### Setting how much each strategy trades (Rules tab)
+
+Open the **Rules** tab on the dashboard. You can only change it when the
+dashboard was opened with **Trading dashboard** on your desktop.
+
+1. Type the **capital the bots trade with**, for example 25000. Every
+   "% of capital" rule is a % of this amount. Leave it blank to use the
+   whole account. The bots never use more than the account holds.
+2. Click a strategy to open its card. Choose how big each trade is (% of
+   capital, $ per trade, or a fixed number of contracts or shares), the
+   most contracts, the stop loss, the first and step stop, and the daily
+   loss limit. The **$ / %** buttons switch how a rule is written.
+3. The right side of the card shows what that means at your capital, for
+   an example price you can change: how many contracts or shares, the
+   worst case at the stop, and where the step stop moves. A ⚠ line warns
+   when a rule means the bot won't trade (for example the size is too small
+   for one contract).
+4. Press **Save rules**. A rule outside the safe range (more than 5% of
+   capital per trade, more than 50 contracts and so on) is marked in red
+   and isn't saved until you fix it.
+
+The bots use the saved rules from their next trade. Changes to a stop loss
+or step stop also reach trades that are already open. **Reset to
+defaults** on a card puts back the settings from `.env`. Every change is
+listed in the Change log at the bottom of the tab.
+
+If you allow more than 10 contracts, raise TWS's order size limit to match
+(step 7, item 3); the readiness check tests the new size.
+
 ### Changing when a bot runs
 
 The times are in **scripts\schedule.json** (New York time). Open it with
@@ -372,6 +401,7 @@ powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 - [ ] Logged out of TWS and back in after market data sharing started
 - [ ] First check report shows your `DU…` account
 - [ ] Bot health → Run checks now says **Ready to trade**
+- [ ] Rules tab: capital and each strategy's size set for your account, and saved
 - [ ] http://127.0.0.1:8765 opens the dashboard on a weekday between 8am and 6pm
 
 ## When something goes wrong
@@ -387,7 +417,10 @@ for the message below.
 | "not a paper account", and the bot stops | TWS is logged in with your real username | Log out and log in with the **paper** username |
 | `Error 10089 ... requires additional subscription` | A market data subscription is missing or not shared yet | Step 2; sharing can take until the next day |
 | `Error 10168`, `2186` or `354` ... not subscribed | The paper account isn't receiving the shared market data yet (common right after creating a paper account) | Step 2, items 4 and 5: sharing on for this paper user, then log TWS out and in. Press **Pause all** until it works |
-| `Error 383 ... size exceeds the Size Limit` | TWS's precautionary order size limit is lower than the order | Step 7, item 3: raise the size limit to at least 10 |
+| `Error 383 ... size exceeds the Size Limit` | TWS's precautionary order size limit is lower than the order | Step 7, item 3: raise the size limit to at least 10, or to the largest max contracts on the Rules tab |
+| The Rules tab says **some saved rules couldn't be used**, or the readiness check fails **Trading rules** | A saved rule is outside its safe range (or the file was edited by hand). The bots use the default for that rule | Open the Rules tab, fix or reset the rule it names, and press **Save rules** |
+| The Rules tab's boxes are greyed out | The dashboard was opened as a file, or the control server is off | Double-click **Trading dashboard** on your desktop |
+| A ⚠ on a Rules card says the bot **won't trade** | At your capital, the size buys less than one contract (or share), or the option costs more than the max premium | Raise the size or the capital, or the max premium |
 | `Error 10197 ... competing live session` | Your real account is logged in somewhere | Log out of the real account in TWS, IBKR Desktop and the mobile app |
 | `Error 162 ... different IP address` | Another login took over the price feed | Same as above |
 | Bot controls says **a bot's start time is off** | A task's time drifted from `scripts\schedule.json` (e.g. after a daylight-saving change) | Run **scripts\register_tasks.ps1** (right-click → Run with PowerShell) or the installer again |
@@ -442,6 +475,12 @@ for the message below.
   8am and whenever you press **Run checks now**.
 - **Strategy:** a set of rules for when to buy and sell. The README
   describes each one.
+- **Rules tab:** the dashboard tab where you set the capital the bots trade
+  with and, for each strategy, how big a trade is, its stop loss, step
+  stop and daily loss limit.
+- **Step stop:** a stop that moves up as a trade gains: once it's up by
+  the first amount it locks in some profit, then rises with each further
+  step. It never moves down.
 - **Stop (stop-loss):** a standing order to sell if the price falls to a
   set level, to limit a loss.
 - **Claude Code:** an AI assistant from Anthropic. Here it only reads the

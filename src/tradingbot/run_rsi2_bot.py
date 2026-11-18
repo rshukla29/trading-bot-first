@@ -55,7 +55,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from tradingbot import control
+from tradingbot import control, rules
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
@@ -64,10 +64,10 @@ from tradingbot.ibkr.scanner import fetch_top_movers, merge_scan_universe, shoul
 from tradingbot.indicators import rsi, volume_spike_ratio
 from tradingbot.journal import Journal
 from tradingbot.ownership import resolve_ownership
-from tradingbot.protection import cancel_orphan_stops, ensure_protective_stops
+from tradingbot.protection import cancel_orphan_stops, ensure_stops_by_symbol
 from tradingbot.sp500_scanner import screen_rsi2_buys
 from tradingbot.stock_close import close_owned
-from tradingbot.risk import DailyLossKillSwitch, can_open_new_position, position_size
+from tradingbot.risk import can_open_new_position
 from tradingbot.strategy.rsi2_mean_reversion import RSI2MeanReversionStrategy
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -90,7 +90,10 @@ def main() -> None:
 
     with IBKRClient(settings) as client:
         equity = client.net_liquidation()
-        kill_switch = DailyLossKillSwitch(settings.max_daily_loss_pct, equity)
+        # Size, stops, max open and daily loss limit: the Rules tab (rules.py).
+        r = rules.load("rsi2")
+        capital = r.capital(equity)
+        daily_hit = rules.daily_limit_hit(r, capital)
 
         # Only positions this bot opened itself (see ownership.py) — never a
         # manual trade, an MA-crossover position, or a Trend Join leftover.
@@ -107,7 +110,8 @@ def main() -> None:
         # Every owned position must have a working stop; anything already
         # through its 10% level without one is sold (see protection.py).
         cancel_orphan_stops(client.ib, {s for s, p in held.items() if p.position > 0})
-        stop_audit_sold = ensure_protective_stops(client.ib, journal, rsi2_positions, settings.rsi2_stop_loss_pct, "run_rsi2_bot")
+        stop_audit_sold = ensure_stops_by_symbol(client.ib, journal, rsi2_positions, r.stock_stop_pcts(rsi2_positions),
+                                                 settings.rsi2_stop_loss_pct, "run_rsi2_bot")
         for symbol in stop_audit_sold:
             rsi2_positions.pop(symbol)
         logger.info("Equity: %.2f | RSI2 open positions: %s", equity, list(rsi2_positions))
@@ -198,27 +202,25 @@ def main() -> None:
                 logger.info("%s: BUY skipped — RSI(2) is %s from the dashboard", symbol, gate.mode())
                 continue
 
-            if kill_switch.is_tripped():
-                logger.warning("Daily loss kill-switch tripped, skipping new entries for %s", symbol)
+            if daily_hit is not None:
+                logger.warning("Daily loss limit ($%.0f) reached, skipping new entries for %s", daily_hit, symbol)
                 continue
 
-            if not can_open_new_position(len(rsi2_positions), settings.max_positions):
-                logger.info("Max positions (%d) reached, skipping %s", settings.max_positions, symbol)
+            if not can_open_new_position(len(rsi2_positions), r["maxOpen"]):
+                logger.info("Max positions (%d) reached, skipping %s", r["maxOpen"], symbol)
                 continue
 
-            qty = position_size(
-                equity, signal.price, settings.risk_pct_per_trade, settings.rsi2_stop_loss_pct,
-                settings.max_position_value,
-            )
+            qty = r.stock_quantity(capital, signal.price)
+            stop_pct = r.stop_fraction(signal.price)
             if qty <= 0:
                 logger.info("Computed position size 0 for %s, skipping", symbol)
                 continue
 
-            place_bracket_buy(client.ib, symbol, qty, signal.price, settings.rsi2_stop_loss_pct)
+            place_bracket_buy(client.ib, symbol, qty, signal.price, stop_pct)
             journal.claim_stock(symbol, STRATEGY)
             journal.log_order(
                 symbol, "BUY", qty, "MKT+STP", broker="IBKR", status="submitted",
-                stop_price=round(signal.price * (1 - settings.rsi2_stop_loss_pct), 2),
+                stop_price=round(signal.price * (1 - stop_pct), 2),
             )
             rsi2_positions[symbol] = None  # mark as filled-in-this-run to respect max_positions
             logger.info("BUY %s x%d @ ~%.2f (%s)", symbol, qty, signal.price, signal.reason)

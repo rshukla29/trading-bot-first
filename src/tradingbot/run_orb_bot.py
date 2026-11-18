@@ -46,7 +46,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from ib_async import Option, Stock
 
-from tradingbot import control
+from tradingbot import control, rules
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
@@ -70,7 +70,7 @@ from tradingbot.position_guard import (
     intended_short_conids,
     unexpected_shorts,
 )
-from tradingbot.risk import ladder_stop, profit_lock_floor, step_trailing_stop
+from tradingbot.risk import profit_lock_floor, step_trailing_stop
 from tradingbot.strategy.trend_join import completed_bars
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -235,11 +235,11 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         position["entry_premium"], position["peak_premium"],
         settings.options_lock_trigger_pct, settings.options_lock_keep_pct,
     )
-    ladder = (
-        ladder_stop(position["entry_premium"], position["peak_premium"], settings.options_ladder_trigger_pct,
-                    settings.options_ladder_step_pct, settings.options_ladder_trail_pct)
-        if settings.options_ladder_trigger_pct > 0 else None
-    )
+    # Stop loss, step stop and profit target: the Rules tab (rules.py), whose
+    # defaults are the options_* settings. Changes reach open positions too.
+    r = rules.load("orb")
+    ladder = r.ladder_stop(position["entry_premium"], position["peak_premium"], CONTRACT_MULTIPLIER)
+    stop_fraction = r.stop_fraction(position["entry_premium"], CONTRACT_MULTIPLIER)
     if (ladder is not None or lock_floor is not None) and not position.get("lock_active"):
         position["lock_active"] = True
         logger.info("%s: profit lock active — checking every %.0fs", symbol, TICK_SECONDS)
@@ -252,15 +252,15 @@ def check_exit(ib, journal: Journal, symbol: str, underlying: Stock, position: d
         now_time=_now_et().time(),
         current_premium=premium_mid,
         entry_premium=position["entry_premium"],
-        stop_loss_pct_of_premium=settings.options_stop_loss_pct_of_premium,
-        profit_target_pct=settings.options_profit_target_pct or None,
+        stop_loss_pct_of_premium=stop_fraction or 0.0,
+        profit_target_pct=r.profit_target(),
         spot=spot_mid,
         right=position["right"],
         range_low=position["range_low"],
         range_high=position["range_high"],
         exit_on_range_reentry=settings.options_exit_on_range_reentry,
         step_stop_premium=step_stop,
-        use_stop_loss=settings.options_use_stop_loss,
+        use_stop_loss=stop_fraction is not None,
         bar_close=bar_close,
         vwap=vwap,
         lock_floor_premium=lock_floor,
@@ -409,12 +409,21 @@ def check_entry(
                            iv[1] * 100, settings.orb_entry_max_iv_ratio)
             return None
 
-    contracts = int((equity * settings.options_risk_pct_per_trade) // (mid * CONTRACT_MULTIPLIER))
-    if contracts > settings.options_max_contracts_per_trade:
-        logger.info("%s: risk-sized %d contracts, capping at %d", symbol, contracts, settings.options_max_contracts_per_trade)
-        contracts = settings.options_max_contracts_per_trade
+    # Size, caps and max premium: the Rules tab (rules.py).
+    r = rules.load("orb")
+    capital = r.capital(equity)
+    cost = mid * CONTRACT_MULTIPLIER
+    max_prem = r.max_premium(capital)
+    if max_prem is not None and cost > max_prem:
+        logger.info("%s: %s costs $%.0f a contract, above the max premium of $%.0f — skipping",
+                    symbol, contract.localSymbol, cost, max_prem)
+        return None
+    contracts = r.quantity(capital, cost)
+    if contracts > r["maxQty"]:
+        logger.info("%s: sized %d contracts, capping at %d", symbol, contracts, r["maxQty"])
+        contracts = r["maxQty"]
     if contracts <= 0:
-        logger.info("%s: computed 0 contracts, skipping", symbol)
+        logger.info("%s: computed 0 contracts (capital $%.0f, contract $%.0f), skipping", symbol, capital, cost)
         return None
 
     trade, _ = enter_orb_trade(ib, contract, contracts)
@@ -550,6 +559,24 @@ def repair_short_options(ib, journal: Journal, symbols: list[str]) -> None:
 GATE = control.Gate("orb", logger)
 
 
+def rules_allow_entry(symbol: str, state: dict, equity: float) -> bool:
+    """The Rules tab's max trades per day and daily loss limit (rules.py)."""
+    r = rules.load("orb")
+    done = sum((state.get("entries_today") or {}).values())
+    if done >= r["trades"]:
+        if not state.get("trades_logged"):
+            logger.info("%s: max trades per day (%d) reached — no more entries today", symbol, r["trades"])
+            state["trades_logged"] = True
+        return False
+    hit = rules.daily_limit_hit(r, r.capital(equity))
+    if hit is not None:
+        if not state.get("daily_logged"):
+            logger.warning("%s: daily loss limit ($%.0f) reached — no more entries today", symbol, hit)
+            state["daily_logged"] = True
+        return False
+    return True
+
+
 def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStrategy, state: dict) -> None:
     """One monitoring tick for one symbol: manage its open position, or
     look for an entry on each newly-completed bar."""
@@ -597,8 +624,11 @@ def tick_symbol(ib, client, journal: Journal, strategy: OpeningRangeBreakoutStra
             logger.warning("%s: ORB entries paused — recent fills priced >%.2fx the VIX-calibrated estimate",
                            symbol, settings.orb_iv_pause_ratio)
             return
+        equity = client.net_liquidation()
+        if not rules_allow_entry(symbol, state, equity):
+            return
         state["position"] = check_entry(
-            ib, journal, symbol, strategy, state["chain"], client.net_liquidation(), bars, state["entries_today"],
+            ib, journal, symbol, strategy, state["chain"], equity, bars, state["entries_today"],
         )
         if state["position"] is not None:
             state["entries_today"][state["position"]["right"]] += 1

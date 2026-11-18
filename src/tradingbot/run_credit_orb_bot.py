@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from ib_async import LimitOrder, Stock
 
-from tradingbot import control
+from tradingbot import control, rules
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
@@ -73,13 +73,25 @@ def _hhmm(s: str) -> time:
     return time(int(h), int(m))
 
 
-def config_from_settings() -> CreditOrbConfig:
+def config_from_settings(equity: float | None = None) -> CreditOrbConfig:
+    """Width, size and max contracts come from the Rules tab (rules.py,
+    defaults: the credit_orb_* settings). `equity` (the account value) is
+    only needed when sizing by % of capital."""
     skip = tuple(int(x) for x in settings.credit_orb_skip_weekdays.split(",") if x.strip())
+    r = rules.load("credit_orb")
+    max_contracts = r["maxQty"]
+    if r["size"]["mode"] == "fixed":
+        # Enough budget for the fixed count at any credit; max_contracts does the capping.
+        max_contracts = min(max_contracts, int(r["size"]["fixed"]))
+        max_loss = max_contracts * float(r["width"]) * 100 + 1
+    else:
+        capital = r.capital(equity) if equity else (r.capital_setting or 0.0)
+        max_loss = r.budget(capital) or 0.0
     return CreditOrbConfig(
         range_minutes=settings.credit_orb_range_minutes, entry_end=_hhmm(settings.credit_orb_entry_end),
-        min_range_pct=settings.credit_orb_min_range_pct, width=settings.credit_orb_width,
-        anchor=settings.credit_orb_anchor, max_loss_dollars=settings.credit_orb_max_loss_dollars,
-        max_contracts=settings.credit_orb_max_contracts, skip_weekdays=skip,
+        min_range_pct=settings.credit_orb_min_range_pct, width=float(r["width"]),
+        anchor=settings.credit_orb_anchor, max_loss_dollars=max_loss,
+        max_contracts=max_contracts, skip_weekdays=skip,
     )
 
 
@@ -118,8 +130,9 @@ def open_spread(ib, journal: Journal, cfg: CreditOrbConfig, sig, chain, symbol: 
 
     sb, sa, lb, la = _leg_quotes(ib, short, long)
     mid_credit = (sb + sa) / 2 - (lb + la) / 2
-    if mid_credit < settings.credit_orb_min_credit:
-        logger.info("%s: credit %.2f below minimum %.2f — skipping", symbol, mid_credit, settings.credit_orb_min_credit)
+    min_credit = rules.load("credit_orb")["minCredit"]
+    if mid_credit < min_credit:
+        logger.info("%s: credit %.2f below minimum %.2f — skipping", symbol, mid_credit, min_credit)
         return None
     n = contracts_for(mid_credit, cfg)
     if n == 0:
@@ -304,7 +317,8 @@ def main() -> None:
         traded = journal.credit_orb_traded_on(_now_et().date().isoformat())
         last_bar, last_mark = None, 0.0
         logger.info("Credit ORB loop starting (%s, range %dm, entries until %s, max loss $%.0f)",
-                    symbol, cfg.range_minutes, settings.credit_orb_entry_end, cfg.max_loss_dollars)
+                    symbol, cfg.range_minutes, settings.credit_orb_entry_end,
+                    cfg.max_loss_dollars)
 
         while _now_et().time() < MARKET_CLOSE:
             now = _now_et()
@@ -331,7 +345,13 @@ def main() -> None:
                         if sig is not None and sig.bar_ts >= day.index[-1] - pd.Timedelta(minutes=cfg.bar_minutes):
                             logger.info("%s: ORB %s breakout (range %.2f-%.2f, close %.2f)",
                                         symbol, sig.direction, sig.range_low, sig.range_high, sig.spot)
-                            pos = open_spread(ib, journal, cfg, sig, chain, symbol)
+                            equity = client.net_liquidation()
+                            r = rules.load("credit_orb")
+                            hit = rules.daily_limit_hit(r, r.capital(equity))
+                            if hit is not None:
+                                logger.warning("%s: daily loss limit ($%.0f) reached — no trade today", symbol, hit)
+                            else:
+                                pos = open_spread(ib, journal, config_from_settings(equity), sig, chain, symbol)
                             traded = True
                             last_mark = 0.0
                         elif sig is None:

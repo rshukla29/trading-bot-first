@@ -37,7 +37,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from ib_async import IB, MarketOrder, Stock, StopOrder, Trade
 
-from tradingbot import control
+from tradingbot import control, rules
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_intraday_bars
@@ -57,7 +57,6 @@ from tradingbot.strategy.trend_join import (
     plan_exit,
     rank_candidates,
     relative_volume,
-    share_quantity,
     split_session,
 )
 
@@ -141,9 +140,10 @@ def try_enter(
         return None
 
     stop = initial_stop(check.price, check.low_of_day, settings.trend_join_lod_stop_buffer_pct, settings.stop_loss_pct)
-    qty = share_quantity(
-        client.net_liquidation(), settings.risk_pct_per_trade, check.price, stop, settings.max_position_value,
-    )
+    r = rules.load("trend_join")  # size and max position (Rules tab)
+    capital = r.capital(client.net_liquidation())
+    risk_per_share = check.price - stop
+    qty = 0 if risk_per_share <= 0 else min(r.quantity(capital, risk_per_share), int(r["maxVal"] // check.price))
     if qty <= 0:
         logger.info("%s: entry signal but sized to 0 shares (price %.2f), skipping", sym, check.price)
         return None
@@ -252,9 +252,10 @@ def manage(ib: IB, journal: Journal, pos: LivePosition, flatten_time: time) -> b
         price = float(rth["close"].iloc[-1])  # no live quote: fall back to the last completed bar
 
     swing = latest_swing_low(rth, settings.trend_join_swing_bars, settings.trend_join_swing_bars)
+    r = rules.load("trend_join")  # partial and breakeven points (Rules tab)
     plan = plan_exit(
         pos.state, price, now.time(), swing, flatten_time,
-        settings.trend_join_partial_r, settings.trend_join_partial_fraction, settings.trend_join_breakeven_r,
+        r["partialR"], settings.trend_join_partial_fraction, r["beR"],
     )
     if plan.flatten_reason:
         return flatten(ib, journal, pos, plan.flatten_reason)
@@ -273,7 +274,7 @@ def manage(ib: IB, journal: Journal, pos: LivePosition, flatten_time: time) -> b
                 s.remaining -= plan.partial_qty
                 pos.realized_pnl += (fill - s.entry) * plan.partial_qty
                 journal.log_order(pos.symbol, "SELL", plan.partial_qty, "MKT", broker="IBKR", status="filled")
-                logger.info("%s: +%.2fR partial, sold %d @ %.2f", pos.symbol, settings.trend_join_partial_r, plan.partial_qty, fill)
+                logger.info("%s: +%.2fR partial, sold %d @ %.2f", pos.symbol, r["partialR"], plan.partial_qty, fill)
         journal.update_trend_join_position(
             pos.id, partial_taken=int(s.partial_taken), remaining=s.remaining, realized_pnl=pos.realized_pnl,
         )
@@ -348,6 +349,7 @@ def main() -> None:
         candidates: list[GapCandidate] = []
         volume_history: dict[str, pd.DataFrame] = {}
         last_bar_bucket = None
+        daily_logged = False
 
         logger.info("Trend Join live loop starting (%d recovered positions)", len(positions))
         # Runs past flatten_time only while a flatten is still being retried,
@@ -378,11 +380,17 @@ def main() -> None:
                 last_bar_bucket = bucket
                 traded = journal.trend_join_symbols_traded_on(today)
                 excluded = excluded_symbols(client, journal, today)
-                for cand in candidates:
-                    if len(positions) >= settings.trend_join_max_positions:
+                r = rules.load("trend_join")  # max open, trades per day, daily limit (Rules tab)
+                hit = rules.daily_limit_hit(r, r.capital(client.net_liquidation()))
+                if hit is not None:
+                    if not daily_logged:
+                        logger.warning("Daily loss limit ($%.0f) reached — no more entries today", hit)
+                        daily_logged = True
+                for cand in ([] if hit is not None else candidates):
+                    if len(positions) >= r["maxOpen"]:
                         break
-                    if len(traded) >= settings.trend_join_max_trades_per_day:
-                        logger.info("Max trades/day (%d) reached", settings.trend_join_max_trades_per_day)
+                    if len(traded) >= r["trades"]:
+                        logger.info("Max trades/day (%d) reached", r["trades"])
                         break
                     if ib_symbol(cand.symbol) in excluded:
                         continue

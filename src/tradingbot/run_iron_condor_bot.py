@@ -40,7 +40,7 @@ from datetime import date, datetime, timezone
 
 from ib_async import Contract
 
-from tradingbot import control
+from tradingbot import control, rules
 from tradingbot.config import settings
 from tradingbot.ibkr.client import IBKRClient
 from tradingbot.ibkr.data import fetch_daily_bars
@@ -118,10 +118,13 @@ def manage_position(ib, journal: Journal, symbol: str, pos, force_reason: str | 
     expiry_date = datetime.strptime(pos["expiry"], "%Y%m%d").date()
     days_to_expiry = (expiry_date - date.today()).days
 
+    # Profit target and stop: the Rules tab (rules.py; defaults credit_spread_*).
+    r = rules.load("iron_condor")
+    target = r.profit_target()
     exit_reason = None
-    if cost <= credit * (1 - settings.credit_spread_profit_target_pct):
+    if target is not None and cost <= credit * (1 - target):
         exit_reason = "profit_target"
-    elif cost >= credit * settings.credit_spread_stop_loss_multiple:
+    elif cost >= credit * r["stopX"]:
         exit_reason = "stop_loss"
     elif days_to_expiry <= settings.credit_spread_dte_forced_close:
         exit_reason = "dte_forced_close"
@@ -190,9 +193,10 @@ def _filled(trades) -> tuple[int, float]:
 
 
 def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) -> None:
+    r = rules.load("iron_condor")  # size, caps and wing width (Rules tab)
     open_positions = journal.open_condor_positions(symbol)
-    if len(open_positions) >= settings.credit_spread_max_concurrent:
-        logger.info("%s: max concurrent (%d) reached, skipping entry", symbol, settings.credit_spread_max_concurrent)
+    if len(open_positions) >= r["maxOpen"]:
+        logger.info("%s: max open (%d) reached, skipping entry", symbol, r["maxOpen"])
         return
 
     last_entry = journal.last_condor_entry_date(symbol)
@@ -211,19 +215,20 @@ def maybe_open_new_position(ib, journal: Journal, symbol: str, equity: float) ->
     chain = get_real_chain(ib, symbol)
     legs = select_condor_legs(
         ib, symbol, chain, spot, vol, settings.credit_spread_rate,
-        settings.credit_spread_target_delta, settings.credit_spread_wing_width, settings.credit_spread_dte_days,
+        settings.credit_spread_target_delta, float(r["wing"]), settings.credit_spread_dte_days,
     )
 
     credit_estimate = net_credit_estimate(ib, legs)
-    max_loss_per_contract = settings.credit_spread_wing_width * CONTRACT_MULTIPLIER - credit_estimate * CONTRACT_MULTIPLIER
+    max_loss_per_contract = float(r["wing"]) * CONTRACT_MULTIPLIER - credit_estimate * CONTRACT_MULTIPLIER
     if max_loss_per_contract <= 1.0:
         logger.warning("%s: max loss per contract too small (%.2f), skipping", symbol, max_loss_per_contract)
         return
 
-    contracts = int((equity * settings.credit_spread_risk_pct_per_trade) // max_loss_per_contract)
-    if contracts > settings.credit_spread_max_contracts_per_trade:
-        logger.info("%s: risk-sized %d contracts, capping at %d", symbol, contracts, settings.credit_spread_max_contracts_per_trade)
-        contracts = settings.credit_spread_max_contracts_per_trade
+    capital = r.capital(equity)
+    contracts = r.quantity(capital, max_loss_per_contract)
+    if contracts > r["maxQty"]:
+        logger.info("%s: sized %d contracts, capping at %d", symbol, contracts, r["maxQty"])
+        contracts = r["maxQty"]
     if contracts <= 0:
         logger.info("%s: computed 0 contracts, skipping", symbol)
         return

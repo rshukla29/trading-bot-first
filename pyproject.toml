@@ -26,7 +26,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-tradingbot = ["dashboard_page.html"]
+tradingbot = ["dashboard_page.html", "control_panel.html", "rules_panel.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -41,9 +41,9 @@ import pandas as pd
 import yfinance as yf
 from ib_async import IB, LimitOrder, MarketOrder, Stock, StopOrder, Trade
 
-from tradingbot import control
+from tradingbot import control, rules
 from tradingbot.config import settings
-from tradingbot.ibkr.client import IBKRClient
+from tradingbot.ibkr.client import IBKRClient, net_liquidation
 from tradingbot.ibkr.data import fetch_intraday_bars
 from tradingbot.journal import Journal
 from tradingbot.options.live_orb import wait_for_fill
@@ -55,7 +55,6 @@ from tradingbot.strategy.stock_orb import (
     plan_trade,
     regular_session,
     run_time_machine,
-    share_quantity,
     time_machine_check,
     time_machine_plan,
     time_machine_summary,
@@ -183,17 +182,20 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
     if trig is None:
         logger.info("%s: Yahoo hit not confirmed on IBKR bars — skipping", sym)
         return None
-    plan = plan_trade(trig.entry, trig.or_high, trig.or_low, settings.stock_orb_target_r)
+    r = rules.load("stock_orb")  # size, caps, target and daily limit (Rules tab)
+    plan = plan_trade(trig.entry, trig.or_high, trig.or_low, r["targetR"])
     if plan is None:
         logger.info("%s: risk to the range midpoint is inside the spread — skipping", sym)
         return None
-    qty = share_quantity(plan.entry, plan.stop, settings.stock_orb_max_loss_per_trade,
-                         settings.stock_orb_max_order_value)
+    needs_capital = r["size"]["mode"] == "pct" or (r["daily"]["mode"] == "pct")
+    capital = r.capital(net_liquidation(ib)) if needs_capital else 0.0
+    qty = min(r.quantity(capital, plan.risk), int(r["maxVal"] // plan.entry))
     risk_dollars = qty * plan.risk
     if qty <= 0:
         return None
-    if risk_used_today(journal, today) + risk_dollars > settings.stock_orb_max_daily_loss:
-        logger.info("%s: daily loss budget ($%.0f) would be exceeded — skipping", sym, settings.stock_orb_max_daily_loss)
+    daily = r.daily_limit(capital)
+    if daily is not None and risk_used_today(journal, today) + risk_dollars > daily:
+        logger.info("%s: daily loss budget ($%.0f) would be exceeded — skipping", sym, daily)
         return None
 
     reason = (f"close {trig.entry:.2f} > opening range high {trig.or_high:.2f} "
@@ -237,7 +239,7 @@ def try_enter(ib: IB, journal: Journal, yahoo_sym: str, now: pd.Timestamp, today
                                            check and check["hist_triggered"], check and check["hist_avg_r"])
     pos = LivePosition(pid, sym, contract, fill, qty, plan.stop, plan.target, stop_trade, take)
     logger.info("%s: BOUGHT %d @ %.2f (signal %.2f), stop %.2f, target %.2f (%.1fR), risk $%.0f — %s",
-                sym, qty, fill, trig.entry, plan.stop, plan.target, settings.stock_orb_target_r,
+                sym, qty, fill, trig.entry, plan.stop, plan.target, r["targetR"],
                 qty * (fill - plan.stop), reason)
     if fill <= plan.stop:
         logger.warning("%s: filled at/below the stop, flattening immediately", sym)
@@ -411,15 +413,16 @@ def main() -> None:
             if (boundary != last_scan and (now - boundary).total_seconds() >= SCAN_DELAY_SECONDS
                     and entry_start <= bar_end <= entry_end and gate.entries_allowed()):
                 last_scan = boundary
-                if len(journal.stock_orb_rows_on(today)) < settings.stock_orb_max_trades_per_day:
+                max_trades = rules.load("stock_orb")["trades"]
+                if len(journal.stock_orb_rows_on(today)) < max_trades:
                     try:
                         excluded = excluded_symbols(client, journal, today)
                         hits = yahoo_hits([s for s in universe if ib_symbol(s) not in excluded], now)
                         logger.info("Bar %s: %d fresh breakout(s)%s", (boundary - pd.Timedelta(minutes=bm)).strftime("%H:%M"),
                                     len(hits), f": {[h[0] for h in hits[:10]]}" if hits else "")
                         for n, (ysym, _) in enumerate(hits):
-                            if len(journal.stock_orb_rows_on(today)) >= settings.stock_orb_max_trades_per_day:
-                                logger.info("Max trades/day (%d) reached", settings.stock_orb_max_trades_per_day)
+                            if len(journal.stock_orb_rows_on(today)) >= max_trades:
+                                logger.info("Max trades/day (%d) reached", max_trades)
                                 break
                             if n >= settings.stock_orb_max_checks_per_bar:
                                 logger.info("Checked %d candidates this bar (the cap) — skipping the other %d",

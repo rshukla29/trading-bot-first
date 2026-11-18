@@ -1,0 +1,477 @@
+<!-- Rules tab (rules.py): built into the dashboard by dashboard.py. Reads and
+     saves through the control server (/api/rules); opened as a file it shows
+     the rules saved when the dashboard was built, read-only. -->
+<style>
+#rl-root {
+  --rl-warn: #f2b53a; --rl-warn-soft: rgba(242,181,58,.18); --rl-warn-ink: #6b4a00;
+  --rl-bad: #c0392b; --rl-bad-soft: rgba(192,57,43,.10);
+  --rl-accent-soft: rgba(42,120,214,.10); --rl-down: var(--down, #b3261e);
+  display: flex; flex-direction: column; gap: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  #rl-root { --rl-warn-soft: rgba(242,181,58,.14); --rl-warn-ink: #f5c86a; --rl-bad: #e66767; --rl-bad-soft: rgba(230,103,103,.14);
+    --rl-accent-soft: rgba(57,135,229,.16); }
+}
+#rl-root [hidden] { display: none !important; }
+#rl-root button, #rl-root input { font: inherit; color: inherit; }
+#rl-root button:focus-visible, #rl-root input:focus-visible { outline: 2px solid var(--accent, #2a78d6); outline-offset: 2px; }
+.rl-card { background: var(--surface, #fff); border: 1px solid var(--ring, rgba(0,0,0,.1)); border-radius: 12px; }
+.rl-box { border: 1px dashed var(--axis, #c3c2b7); border-radius: 12px; padding: 14px 16px; font-size: 14px; }
+.rl-box.warn { border-style: solid; border-color: var(--rl-warn); background: var(--rl-warn-soft); }
+.rl-box code { background: var(--surface-2, #f3f2ee); padding: 1px 6px; border-radius: 4px; }
+.rl-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--grid, #e1e0d9); border-radius: 8px; overflow: hidden; background: var(--surface-2, #f3f2ee); }
+.rl-seg button { border: 0; background: none; padding: 5px 10px; cursor: pointer; color: var(--ink-2, #52514e); font-size: 13px; white-space: nowrap; }
+.rl-seg button + button { border-left: 1px solid var(--grid, #e1e0d9); }
+.rl-seg button[aria-pressed="true"] { background: var(--surface, #fff); color: var(--ink, #0b0b0b); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent, #2a78d6); }
+.rl-seg button:disabled { cursor: default; opacity: .6; }
+.rl-capbar { padding: 18px 20px; display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; }
+@media (max-width: 800px) { .rl-capbar { grid-template-columns: 1fr; } }
+.rl-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2, #52514e); }
+.rl-capin { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 8px; }
+.rl-money { display: inline-flex; align-items: center; border: 1px solid var(--axis, #c3c2b7); border-radius: 10px; background: var(--page, #fff); padding: 0 12px; }
+.rl-money span { font-size: 22px; color: var(--muted, #898781); font-weight: 600; }
+.rl-money input { border: 0; background: none; font-size: 26px; font-weight: 700; width: 9ch; padding: 6px; font-variant-numeric: tabular-nums; }
+.rl-money input:focus { outline: none; }
+.rl-money:focus-within { border-color: var(--accent, #2a78d6); box-shadow: 0 0 0 3px var(--rl-accent-soft); }
+.rl-small { font-size: 12px; color: var(--muted, #898781); }
+.rl-link { background: none; border: 0; color: var(--accent, #2a78d6); cursor: pointer; padding: 0; font-size: 12px; text-decoration: underline; }
+.rl-link:disabled { color: var(--muted, #898781); cursor: default; }
+.rl-budget h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.rl-big { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 4px; color: var(--rl-down); }
+.rl-brow { display: grid; grid-template-columns: 100px minmax(0, 1fr) 72px; gap: 8px; align-items: center; font-size: 12px; margin-top: 6px; }
+.rl-brow .n { color: var(--ink-2, #52514e); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-track { height: 8px; background: var(--surface-2, #f3f2ee); border-radius: 4px; overflow: hidden; }
+.rl-fill { display: block; height: 100%; background: var(--accent, #2a78d6); border-radius: 0 4px 4px 0; min-width: 2px; }
+.rl-brow .a { text-align: right; font-variant-numeric: tabular-nums; }
+.rl-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.rl-btn { min-height: 40px; padding: 0 16px; border-radius: 9px; border: 1px solid var(--grid, #e1e0d9); background: var(--surface-2, #f3f2ee); cursor: pointer; font-weight: 600 !important; }
+.rl-btn:hover:not(:disabled) { border-color: var(--axis, #c3c2b7); }
+.rl-btn.primary { background: var(--accent, #2a78d6); border-color: var(--accent, #2a78d6); color: #fff; }
+.rl-btn:disabled { opacity: .45; cursor: default; }
+.rl-status { font-size: 13px; color: var(--ink-2, #52514e); }
+.rl-strat { overflow: hidden; }
+.rl-strat[data-err="1"] { border-color: var(--rl-bad); }
+.rl-head { width: 100%; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; background: none; border: 0; text-align: left; cursor: pointer; }
+.rl-head:hover { background: var(--surface-2, #f3f2ee); }
+.rl-chev { transition: transform .15s; color: var(--muted, #898781); }
+.rl-strat[data-open="1"] .rl-chev { transform: rotate(90deg); }
+.rl-name { font-size: 15px; font-weight: 600; }
+.rl-sum { display: block; font-size: 12px; color: var(--ink-2, #52514e); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rl-pills { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.rl-pill { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; white-space: nowrap; background: var(--surface-2, #f3f2ee); color: var(--ink-2, #52514e); }
+.rl-pill.custom { background: var(--rl-accent-soft); color: var(--ink, #0b0b0b); }
+.rl-pill.unsaved { background: var(--rl-warn-soft); color: var(--rl-warn-ink); }
+.rl-pill.err { background: var(--rl-bad-soft); color: var(--rl-bad); }
+.rl-body { border-top: 1px solid var(--grid, #e1e0d9); display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .rl-body { grid-template-columns: 1fr; } }
+.rl-fields { padding: 8px 16px 16px; display: flex; flex-direction: column; }
+.rl-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 14px; padding: 10px 0; border-bottom: 1px solid var(--grid, #e1e0d9); align-items: start; }
+.rl-row:last-child { border-bottom: 0; }
+@media (max-width: 560px) { .rl-row { grid-template-columns: 1fr; } }
+.rl-row > label, .rl-row > .rl-lab { font-weight: 600; font-size: 13px; padding-top: 5px; }
+.rl-ctl { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rl-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rl-num { display: inline-flex; align-items: center; border: 1px solid var(--grid, #e1e0d9); border-radius: 7px; background: var(--page, #fff); padding: 0 8px; }
+.rl-num:focus-within { border-color: var(--accent, #2a78d6); }
+.rl-num input { width: 7ch; border: 0; background: none; padding: 5px 2px; font-variant-numeric: tabular-nums; text-align: right; }
+.rl-num input:focus { outline: none; }
+.rl-num .af { color: var(--muted, #898781); font-size: 13px; }
+.rl-num.bad { border-color: var(--rl-bad); background: var(--rl-bad-soft); }
+.rl-hint { font-size: 12px; color: var(--muted, #898781); }
+.rl-msg { font-size: 12px; border-radius: 6px; padding: 4px 8px; }
+.rl-msg.err { color: var(--rl-bad); background: var(--rl-bad-soft); }
+.rl-msg.warn { color: var(--rl-warn-ink); background: var(--rl-warn-soft); }
+.rl-info { font-size: 13px; color: var(--ink-2, #52514e); padding-top: 5px; }
+.rl-prev { background: var(--surface-2, #f3f2ee); padding: 16px; display: flex; flex-direction: column; gap: 10px; border-left: 1px solid var(--grid, #e1e0d9); }
+@media (max-width: 900px) { .rl-prev { border-left: 0; border-top: 1px solid var(--grid, #e1e0d9); } }
+.rl-prev h4 { margin: 0; font-size: 13px; }
+.rl-try { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: var(--ink-2, #52514e); }
+.rl-kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; font-size: 13px; }
+.rl-kv .k { color: var(--ink-2, #52514e); }
+.rl-kv .v { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rl-kv .v.down { color: var(--rl-down); }
+.rl-ladder { font-size: 12px; border-collapse: collapse; width: 100%; }
+.rl-ladder th, .rl-ladder td { padding: 3px 6px; text-align: right; border-bottom: 1px solid var(--grid, #e1e0d9); font-variant-numeric: tabular-nums; background: none; position: static; }
+.rl-ladder th { color: var(--ink-2, #52514e); font-weight: 600; }
+.rl-ladder th:first-child, .rl-ladder td:first-child { text-align: left; }
+.rl-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--grid, #e1e0d9); font-size: 12px; color: var(--muted, #898781); }
+.rl-log { padding: 16px; }
+.rl-log h2 { margin: 0 0 8px; font-size: 15px; }
+.rl-log ul { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.rl-log li { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--grid, #e1e0d9); }
+.rl-log li:last-child { border-bottom: 0; }
+.rl-log time { color: var(--muted, #898781); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .rl-chev { transition: none; } }
+</style>
+<div id="rl-root" data-port="{{CONTROL_PORT}}"></div>
+<script id="rl-data" type="application/json">/*__RULES_DATA__*/null</script>
+<script>
+(function () {
+  const root = document.getElementById("rl-root");
+  if (!root) return;
+  const SERVED = location.protocol === "http:" || location.protocol === "https:";
+  const SERVER_URL = "http://127.0.0.1:" + (root.dataset.port || "8765") + "/";
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const $ = s => root.querySelector(s);
+  let P = null;               // payload from rules.payload()
+  let st = null;              // working state
+  let live = false;           // the control server answered: saving allowed
+  let serverProblems = {};    // field problems the server reported on save
+
+  function boot(payload, isLive) {
+    P = payload; live = isLive;
+    const open = st ? st.open : {orb: true};
+    st = {
+      capital: P.capital ? String(P.capital) : "", savedCapital: P.capital ? String(P.capital) : "",
+      vals: clone(P.values), saved: clone(P.values), open,
+      ex: Object.fromEntries(P.strategies.map(id => [id, Object.fromEntries(P.schema[id].example.map(e => [e.key, e.val]))])),
+    };
+    serverProblems = {};
+    render();
+  }
+
+  // ---------------------------------------------------------------- helpers
+  function money(x, cents) {
+    if (!isFinite(x)) return "—";
+    const neg = x < 0; x = Math.abs(x);
+    const s = (cents || (x < 100 && x % 1 !== 0)) ? x.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : Math.round(x).toLocaleString("en-US");
+    return (neg ? "−$" : "$") + s;
+  }
+  const account = () => P.account_value || 0;
+  function capValue() {
+    const v = parseFloat(st.capital);
+    if (v > 0) return account() > 0 ? Math.min(v, account()) : v;
+    return account();
+  }
+  const pctOf = p => capValue() * p / 100;
+  const modeVal = m => m.mode === "off" ? null : m.mode === "pct" ? pctOf(m.pct) : m[m.mode];
+  const plural = (n, unit) => `${n} ${n === 1 ? unit.replace(/s$/, "") : unit}`;
+  const L = () => P.limits;
+
+  // ------------------------------------------------- checks (rules.py is the final word)
+  function checkField(id, f, v, cap) {
+    if (f.t === "num") {
+      if (typeof v !== "number" || !isFinite(v)) return "Enter a number.";
+      if (f.int && v !== Math.trunc(v)) return "Use a whole number.";
+      const lo = f.min ?? 0, hi = f.max ?? 1e9;
+      if (v < lo || v > hi) return `Use a number from ${lo} to ${hi.toLocaleString("en-US")}.`;
+      return null;
+    }
+    if (f.t === "modes") {
+      if (v.mode === "off") return null;
+      const x = v[v.mode];
+      if (typeof x !== "number" || !isFinite(x)) return "Enter a number.";
+      if (f.key === "size") {
+        if (v.mode === "pct" && !(x > 0 && x <= L().max_risk_pct)) return `Use more than 0% and at most ${L().max_risk_pct}% of capital per trade.`;
+        if (v.mode === "usd" && !(x > 0 && x <= cap * L().max_risk_pct / 100 + 1e-9)) return `Use more than $0 and at most ${money(cap * L().max_risk_pct / 100)} (${L().max_risk_pct}% of capital) per trade.`;
+        if (v.mode === "fixed") { const mx = P.schema[id].opt ? L().max_contracts : 1e6; if (x !== Math.trunc(x) || x < 1 || x > mx) return `Use a whole number from 1 to ${mx.toLocaleString("en-US")}.`; }
+        return null;
+      }
+      if (f.key === "stop" && v.mode === "pct" && !(x > 0 && x < 100)) return "Use more than 0% and less than 100%.";
+      if (f.key === "target" && v.mode === "pct" && id === "iron_condor" && !(x > 0 && x < 100)) return "Use more than 0% and less than 100%.";
+      if (f.key === "daily" && v.mode === "pct" && !(x > 0 && x <= L().max_daily_pct)) return `Use more than 0% and at most ${L().max_daily_pct}% of capital.`;
+      if (f.key === "maxPrem" && v.mode === "pct" && !(x > 0 && x <= L().max_risk_pct)) return `Use more than 0% and at most ${L().max_risk_pct}% of capital.`;
+      if (x <= 0) return "Use more than 0, or turn it off.";
+      return null;
+    }
+    if (f.t === "ladder") {
+      if (!v.on) return null;
+      if ([v.trig, v.lock, v.step].some(n => typeof n !== "number" || !isFinite(n))) return "Enter a number in each box.";
+      if (v.trig <= 0 || v.step <= 0) return "The first amount and the step must be more than 0.";
+      if (v.lock < 0) return "The amount locked in can't be below 0.";
+      if (v.lock >= v.trig) return "The stop must lock in less than the first amount, or it would sell straight away.";
+    }
+    return null;
+  }
+  function checkStrategy(id) {
+    const v = st.vals[id], errs = {}, cap = capValue() || 1e12;
+    P.schema[id].fields.forEach(f => { if (f.t !== "info") { const m = checkField(id, f, v[f.key], cap); if (m) errs[f.key] = m; } });
+    if (id === "credit_orb" && !errs.minCredit && !errs.width && v.minCredit >= v.width) errs.minCredit = "The min credit must be smaller than the spread width.";
+    Object.entries(serverProblems[id] || {}).forEach(([k, m]) => { if (!errs[k]) errs[k] = m; });
+    return errs;
+  }
+
+  // ------------------------------------------------- what the rules mean at this capital
+  function ladderRows(Ld, entry, mult, qty) {
+    if (!Ld || !Ld.on || !(Ld.trig > 0) || !(Ld.step > 0) || Ld.lock >= Ld.trig) return null;
+    const k = Ld.mode === "pct" ? entry / 100 : 1 / mult;
+    return [0, 1, 2, 3].map(i => {
+      const peak = entry + (Ld.trig + i * Ld.step) * k, stop = entry + (Ld.lock + i * Ld.step) * k;
+      return [money(peak, 1), money(stop, 1), money(qty * (stop - entry) * mult)];
+    });
+  }
+  function dayWorst(daily, fallback, r) {
+    const lim = daily ? modeVal(daily) : null;
+    if (lim != null && lim > 0) {
+      if (r.worstTrade > lim) r.warn.push(`One trade can lose ${money(r.worstTrade)}, more than the daily limit of ${money(lim)}. The limit stops new trades, so a single trade can still go past it.`);
+      return Math.max(lim, r.worstTrade);
+    }
+    return fallback;
+  }
+  function calc(id) {
+    const v = st.vals[id], ex = st.ex[id], r = {rows: [], warn: [], worstTrade: 0, worstDay: 0, ladder: null, dayNote: ""};
+    const budget = v.size ? modeVal(v.size) : 0, fixed = v.size && v.size.mode === "fixed";
+    if (id === "orb") {
+      const p = ex.p, per = p * 100;
+      let qty = fixed ? v.size.fixed : Math.floor(budget / per + 1e-9);
+      const capped = qty > v.maxQty; qty = Math.min(qty, v.maxQty);
+      const premCap = v.maxPrem.mode === "usd" ? v.maxPrem.usd * 100 : v.maxPrem.mode === "pct" ? pctOf(v.maxPrem.pct) : Infinity;
+      const skip = per > premCap;
+      const riskPer = v.stop.mode === "off" ? per : v.stop.mode === "pct" ? per * v.stop.pct / 100 : Math.min(v.stop.usd, per);
+      if (skip) { qty = 0; r.warn.push(`At ${money(p, 1)} one contract costs ${money(per)}, above the max premium of ${money(premCap)}: the bot skips the trade.`); }
+      else if (qty === 0) r.warn.push(`${money(budget)} is less than one contract at ${money(per)}: the bot won't trade. Raise the size or the capital.`);
+      r.rows.push(["Contracts", skip ? "skips" : qty + (capped ? " (capped)" : "")], ["Cost", money(qty * per)]);
+      r.worstTrade = qty * riskPer;
+      r.rows.push([v.stop.mode === "off" ? "Worst case (no stop: the whole premium)" : "Worst case at the stop", money(-r.worstTrade), "down"]);
+      if (v.target.mode === "pct") r.rows.push(["Profit target", money(qty * per * v.target.pct / 100)]);
+      r.ladder = ladderRows(v.ladder, p, 100, qty);
+      r.worstDay = dayWorst(v.daily, r.worstTrade * v.trades, r);
+    } else if (id === "credit_orb") {
+      const c = ex.c, maxLoss = (v.width - c) * 100;
+      if (c >= v.width) r.warn.push("The credit can't be as large as the spread width; try a smaller example credit.");
+      let qty = fixed ? v.size.fixed : Math.floor(budget / maxLoss + 1e-9);
+      const capped = qty > v.maxQty; qty = Math.max(0, Math.min(qty, v.maxQty));
+      if (c < v.minCredit) { qty = 0; r.warn.push(`A ${money(c, 1)} credit is below the min credit of ${money(v.minCredit, 1)}: the bot skips the trade.`); }
+      else if (qty === 0 && c < v.width) r.warn.push(`${money(budget)} doesn't cover one spread's worst case (${money(maxLoss)}): the bot won't trade.`);
+      r.rows.push(["Contracts", qty + (capped ? " (capped)" : "")], ["Credit received", money(qty * c * 100)], ["Worst case (width − credit)", money(-qty * Math.max(maxLoss, 0)), "down"]);
+      r.worstTrade = qty * Math.max(maxLoss, 0); r.worstDay = dayWorst(v.daily, r.worstTrade, r);
+    } else if (id === "iron_condor") {
+      const c = ex.c, maxLoss = (v.wing - c) * 100;
+      let qty = fixed ? v.size.fixed : Math.floor(budget / maxLoss + 1e-9);
+      const capped = qty > v.maxQty; qty = Math.max(0, Math.min(qty, v.maxQty));
+      if (c >= v.wing) r.warn.push("The credit can't be as large as the wing width; try a smaller example credit.");
+      else if (qty === 0) r.warn.push(`${money(budget)} doesn't cover one condor's worst case (${money(maxLoss)}): the bot won't trade. Raise the size or the capital.`);
+      const stopLoss = Math.min(c * (v.stopX - 1) * 100, maxLoss);
+      r.rows.push(["Contracts", qty + (capped ? " (capped)" : "")], ["Credit received", money(qty * c * 100)]);
+      if (v.target.mode === "pct") r.rows.push(["Kept at the profit target", money(qty * c * 100 * v.target.pct / 100)]);
+      r.rows.push(["Loss at the stop", money(-qty * stopLoss), "down"], ["Worst case (wing − credit)", money(-qty * Math.max(maxLoss, 0)), "down"]);
+      r.worstTrade = qty * Math.max(maxLoss, 0); r.worstDay = r.worstTrade * v.maxOpen; r.dayNote = `${v.maxOpen} open at once`;
+    } else {
+      const e = ex.e;
+      const stopPx = (id === "rsi2" || id === "ma_crossover") ? (v.stop.mode === "pct" ? e * (1 - v.stop.pct / 100) : e - v.stop.usd)
+        : id === "trend_join" ? ex.s * 0.99 : ex.s;
+      const R = e - stopPx;
+      if (R <= 0) r.warn.push("The stop must be below the entry; try different example prices.");
+      let qty = fixed ? v.size.fixed : (R > 0 ? Math.floor(budget / R + 1e-9) : 0);
+      const byVal = Math.floor(v.maxVal / e);
+      const capped = qty > byVal; qty = Math.max(0, Math.min(qty, byVal));
+      if (R > 0 && qty === 0) r.warn.push(`At ${money(e, 1)} a share the size or the max position gives 0 shares: the bot won't trade.`);
+      r.rows.push(["Shares", qty + (capped ? " (capped by max position)" : "")], ["Position", money(qty * e)], ["Stop at", money(stopPx, 1)]);
+      r.worstTrade = qty * Math.max(R, 0);
+      r.rows.push(["Worst case at the stop", money(-r.worstTrade), "down"]);
+      if (id === "stock_orb") r.rows.push(["Profit target", `${money(qty * R * v.targetR)} at ${money(e + R * v.targetR, 1)}`]);
+      if (id === "trend_join") r.rows.push(["⅓ sold at", money(e + R * v.partialR, 1)], ["Breakeven stop from", money(e + R * v.beR, 1)]);
+      if (v.ladder) r.ladder = ladderRows(v.ladder, e, 1, qty);
+      const perDay = id === "stock_orb" || id === "trend_join" ? v.trades : v.maxOpen;
+      r.worstDay = dayWorst(v.daily, r.worstTrade * perDay, r);
+    }
+    return r;
+  }
+
+  // ---------------------------------------------------------------- rendering
+  const ro = () => live ? "" : "disabled";
+  function numInput(id, path, val, o = {}) {
+    return `<span class="rl-num" data-num="${path}">${o.prefix ? `<span class="af">${o.prefix}</span>` : ""}<input id="${id}" type="number" inputmode="decimal" step="${o.step || "any"}" value="${Number.isFinite(val) ? val : ""}" data-path="${path}" aria-label="${esc(o.aria || "")}" ${ro()}>${o.suffix ? `<span class="af">${esc(o.suffix)}</span>` : ""}</span>`;
+  }
+  function segs(path, opts, cur, label) {
+    return `<span class="rl-seg" role="group" aria-label="${esc(label)}">${opts.map(([k, l]) => `<button type="button" data-seg="${path}" data-val="${k}" aria-pressed="${k === cur}" ${ro()}>${esc(l)}</button>`).join("")}</span>`;
+  }
+  function fieldHTML(id, f) {
+    const v = st.vals[id], fid = `rl-${id}-${f.key || "info"}`;
+    if (f.t === "info") return `<div class="rl-row"><span class="rl-lab">${esc(f.label)}</span><div class="rl-ctl"><div class="rl-info">${esc(f.text)}</div></div></div>`;
+    let ctl = "";
+    if (f.t === "num") ctl = `<div class="rl-line">${numInput(fid, `${id}.${f.key}`, v[f.key], {...f, aria: f.label})}</div>`;
+    if (f.t === "modes") {
+      const m = v[f.key], cur = f.modes.find(x => x.k === m.mode) || f.modes[0];
+      ctl = `<div class="rl-line">${segs(`${id}.${f.key}.mode`, f.modes.map(x => [x.k, x.label]), m.mode, f.label)}</div>`;
+      if (cur.k !== "off") ctl += `<div class="rl-line">${numInput(fid, `${id}.${f.key}.${cur.k}`, m[cur.k], {prefix: cur.prefix, suffix: cur.suffix, step: cur.k === "fixed" ? 1 : "any", aria: f.label})}${cur.k === "pct" ? `<span class="rl-hint" data-eq="${id}.${f.key}"></span>` : ""}</div>`;
+    }
+    if (f.t === "ladder") {
+      const Ld = v.ladder, o = Ld.mode === "pct" ? {suffix: "%"} : {prefix: "$"};
+      ctl = `<div class="rl-line">${segs(`${id}.ladder.on`, [["off", "Off"], ["on", "On"]], Ld.on ? "on" : "off", "Step stop on or off")}${Ld.on ? segs(`${id}.ladder.mode`, [["pct", "% of entry"], ["usd", "$ " + f.per]], Ld.mode, "Step stop unit") : ""}</div>`;
+      if (Ld.on) ctl += `<div class="rl-line"><span class="rl-hint">First stop: once up</span>${numInput(fid, `${id}.ladder.trig`, Ld.trig, {...o, aria: "First stop: once up"})}<span class="rl-hint">lock in</span>${numInput(fid + "-l", `${id}.ladder.lock`, Ld.lock, {...o, aria: "First stop: lock in"})}</div>
+        <div class="rl-line"><span class="rl-hint">Step stop: every further</span>${numInput(fid + "-s", `${id}.ladder.step`, Ld.step, {...o, aria: "Step stop: every further"})}<span class="rl-hint">up, raise the stop the same</span></div>`;
+    }
+    return `<div class="rl-row"><label for="${fid}">${esc(f.label)}</label><div class="rl-ctl">${ctl}<div class="rl-msg err" data-err="${id}.${f.key}" hidden></div>${f.hint ? `<div class="rl-hint">${esc(f.hint)}</div>` : ""}</div></div>`;
+  }
+  function summary(id) {
+    const v = st.vals[id], z = v.size, unit = P.schema[id].unit;
+    const parts = [z.mode === "pct" ? `${z.pct}% ${id === "orb" ? "of capital" : "risk"}` : z.mode === "usd" ? `${money(z.usd)} ${id === "orb" ? "per trade" : id === "credit_orb" ? "max loss" : "risk"}` : plural(z.fixed, unit)];
+    if ("maxQty" in v) parts.push(`max ${v.maxQty}`);
+    if ("maxVal" in v) parts.push(`${money(v.maxVal)} max position`);
+    if (v.stop) parts.push(v.stop.mode === "off" ? "no stop" : v.stop.mode === "pct" ? `${v.stop.pct}% stop` : `${money(v.stop.usd)} stop`);
+    if (v.ladder) parts.push(v.ladder.on ? `step stop from +${v.ladder.mode === "pct" ? v.ladder.trig + "%" : money(v.ladder.trig)}` : "no step stop");
+    if (v.daily && v.daily.mode !== "off") parts.push(`${v.daily.mode === "pct" ? v.daily.pct + "%" : money(v.daily.usd)}/day`);
+    return parts.join(" · ");
+  }
+  function render() {
+    const offline = !SERVED
+      ? `<div class="rl-box"><b>Read-only.</b> These are the rules saved when this page was built. To change them, open the dashboard from <a href="${SERVER_URL}">${SERVER_URL}</a> (double-click <b>Trading dashboard</b> on the desktop).</div>`
+      : !live ? `<div class="rl-box"><b>Read-only.</b> Can't reach the control server at <a href="${SERVER_URL}">${SERVER_URL}</a>, so these are the rules saved when this page was built. Double-click <b>Trading dashboard</b> on the desktop, then reload this tab.</div>` : "";
+    const probs = P.problems && P.problems.length ? `<div class="rl-box warn"><b>Some saved rules couldn't be used</b>, so the bots use the defaults for them:<ul>${P.problems.map(p => `<li>${esc(p)}</li>`).join("")}</ul>Change or reset them below and save.</div>` : "";
+    root.innerHTML = `${offline}${probs}
+    <div class="rl-card rl-capbar">
+      <div>
+        <div class="rl-eyebrow">Capital the bots trade with</div>
+        <div class="rl-capin">
+          <label class="rl-money" for="rl-cap"><span>$</span><input id="rl-cap" type="number" inputmode="decimal" min="0" step="1000" placeholder="whole account" value="${esc(st.capital)}" ${ro()}></label>
+          <button type="button" class="rl-link" id="rl-capclear" ${ro()}>Use the whole account</button>
+        </div>
+        <div class="rl-small" style="margin-top:8px">${account() ? `Account value ${money(account())} (at the last snapshot).` : "Account value unknown until the first snapshot."} Every % below is a % of this amount. Leave it blank to use the whole account; the bots never use more than the account holds.</div>
+        <div class="rl-msg warn" id="rl-capwarn" hidden style="margin-top:8px"></div>
+      </div>
+      <div class="rl-budget">
+        <h3>Most the bots can lose in one bad day</h3>
+        <div class="rl-big" id="rl-total"></div>
+        <div class="rl-small" id="rl-totalpct"></div>
+        <div id="rl-bars" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="rl-actions">
+      <span class="rl-status" id="rl-status" role="status"></span>
+      <span style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="rl-btn" id="rl-discard" ${ro()}>Discard changes</button>
+        <button type="button" class="rl-btn primary" id="rl-save" ${ro()}>Save rules</button>
+      </span>
+    </div>
+    ${P.strategies.map(id => { const S = P.schema[id], open = !!st.open[id]; return `<div class="rl-card rl-strat" id="rl-card-${id}" data-open="${open ? 1 : 0}">
+      <button type="button" class="rl-head" aria-expanded="${open}" data-toggle="${id}">
+        <svg class="rl-chev" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 3l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span style="min-width:0"><span class="rl-name">${esc(S.name)}</span> <span class="rl-small">${esc(S.desc)}</span><span class="rl-sum" data-sum="${id}"></span></span>
+        <span class="rl-pills" data-pills="${id}"></span>
+      </button>
+      ${open ? `<div class="rl-body">
+        <div class="rl-fields">${S.fields.map(f => fieldHTML(id, f)).join("")}</div>
+        <div class="rl-prev">
+          <h4>What this means at your capital</h4>
+          <div class="rl-try">Try: ${S.example.map(e => `<label class="rl-num"><span class="af">${esc(e.label)}</span><input type="number" step="${e.step}" value="${st.ex[id][e.key]}" data-ex="${id}.${e.key}" aria-label="Example ${esc(e.label)}"></label>`).join("")}</div>
+          <div data-prev="${id}"></div>
+        </div>
+      </div>
+      <div class="rl-foot"><span>${esc(S.open_note)}</span><button type="button" class="rl-link" data-reset="${id}" ${ro()}>Reset to defaults</button></div>` : ""}
+    </div>`; }).join("")}
+    <div class="rl-card rl-log"><h2>Change log</h2><ul id="rl-log"></ul></div>`;
+    refresh();
+  }
+  function refresh() {
+    let errCount = 0, total = 0;
+    const per = [];
+    P.strategies.forEach(id => {
+      const r = calc(id), v = st.vals[id], errs = checkStrategy(id), n = Object.keys(errs).length;
+      errCount += n; total += r.worstDay; per.push([id, r]);
+      const card = $(`#rl-card-${id}`); card.dataset.err = n ? 1 : 0;
+      $(`[data-sum="${id}"]`).textContent = summary(id);
+      const custom = JSON.stringify(v) !== JSON.stringify(P.defaults[id]), unsaved = JSON.stringify(v) !== JSON.stringify(st.saved[id]);
+      $(`[data-pills="${id}"]`).innerHTML = (n ? `<span class="rl-pill err">${plural(n, "problems")}</span>` : "") + (unsaved ? `<span class="rl-pill unsaved">Unsaved</span>` : "") + `<span class="rl-pill ${custom ? "custom" : ""}">${custom ? "Custom" : "Defaults"}</span>`;
+      card.querySelectorAll("[data-err]").forEach(m => { const k = m.dataset.err.split(".")[1]; m.hidden = !errs[k]; m.textContent = errs[k] || ""; });
+      card.querySelectorAll("[data-num]").forEach(el => { const k = el.dataset.num.split(".")[1]; el.classList.toggle("bad", !!errs[k]); });
+      card.querySelectorAll("[data-eq]").forEach(h => { const k = h.dataset.eq.split(".")[1]; h.textContent = capValue() ? "= " + money(pctOf(v[k].pct)) : ""; });
+      const pv = card.querySelector(`[data-prev="${id}"]`);
+      if (pv) pv.innerHTML = `<div class="rl-kv">${r.rows.map(([k, val, cls]) => `<span class="k">${esc(k)}</span><span class="v ${cls || ""}">${esc(val)}</span>`).join("")}
+          <span class="k">Worst day${r.dayNote ? ` (${esc(r.dayNote)})` : ""}</span><span class="v down">${money(-r.worstDay)}</span></div>
+        ${r.ladder ? `<table class="rl-ladder"><thead><tr><th>Best price reached</th><th>Stop moves to</th><th>Locked in</th></tr></thead><tbody>${r.ladder.map(x => `<tr><td>${x[0]}</td><td>${x[1]}</td><td>${x[2]}</td></tr>`).join("")}</tbody></table>` : ""}
+        ${r.warn.map(w => `<div class="rl-msg warn">⚠ ${esc(w)}</div>`).join("")}`;
+    });
+    const cap = capValue();
+    $("#rl-total").textContent = money(-total);
+    $("#rl-totalpct").textContent = cap ? `${(total / cap * 100).toFixed(1)}% of ${money(cap)}, if every bot had its worst day at once. Daily loss limits keep this down.` : "Enter the capital to see this as a % of it.";
+    const max = Math.max(...per.map(([, r]) => r.worstDay), 1);
+    $("#rl-bars").innerHTML = per.map(([id, r]) => `<div class="rl-brow" title="${esc(P.schema[id].name)}: worst day ${money(-r.worstDay)}"><span class="n">${esc(P.schema[id].name)}</span><span class="rl-track"><span class="rl-fill" style="width:${(r.worstDay / max * 100).toFixed(1)}%"></span></span><span class="a">${money(r.worstDay)}</span></div>`).join("");
+    const capIn = parseFloat(st.capital), cw = $("#rl-capwarn");
+    const capBad = st.capital !== "" && !(capIn > 0);
+    cw.hidden = !(capBad || (account() && capIn > account()) || (capIn > 0 && capIn < 2000));
+    cw.textContent = capBad ? "Enter an amount above $0, or leave it blank for the whole account."
+      : account() && capIn > account() ? `That's more than the account holds; the bots will use ${money(account())}.`
+      : "Under $2,000 most strategies size to 0 and won't trade.";
+    if (capBad) errCount++;
+    const dirty = st.capital !== st.savedCapital || P.strategies.some(id => JSON.stringify(st.vals[id]) !== JSON.stringify(st.saved[id]));
+    $("#rl-save").disabled = !live || !dirty || errCount > 0;
+    $("#rl-discard").disabled = !live || !dirty;
+    $("#rl-status").innerHTML = !live ? "Read-only."
+      : errCount ? `<span style="color:var(--rl-bad)">Fix ${plural(errCount, "problems")} before saving.</span>`
+      : dirty ? "You have unsaved changes. The bots keep using the saved rules until you save."
+      : P.saved_at ? `Saved ${esc(P.saved_at.replace("T", " ").slice(0, 16))}. The bots use these rules from their next trade.` : "These are the default rules (from your settings). Change anything and save.";
+    $("#rl-log").innerHTML = P.log.length ? P.log.map(l => `<li><time>${esc(l.at.replace("T", " ").slice(5, 16))}</time><span>${esc(l.text)}</span></li>`).join("")
+      : `<li><time>—</time><span class="rl-small">No changes yet. Every save is listed here and mentioned in the daily review.</span></li>`;
+  }
+
+  // ---------------------------------------------------------------- events
+  function setPath(path, value) {
+    const [id, ...keys] = path.split("."); let o = st.vals[id];
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    o[keys[keys.length - 1]] = value;
+    if (serverProblems[id]) delete serverProblems[id][keys[0]];
+  }
+  root.addEventListener("input", ev => {
+    const t = ev.target;
+    if (t.id === "rl-cap") { st.capital = t.value; refresh(); return; }
+    if (t.dataset.path) { setPath(t.dataset.path, t.value === "" ? NaN : parseFloat(t.value)); refresh(); }
+    if (t.dataset.ex) { const [id, k] = t.dataset.ex.split("."); st.ex[id][k] = parseFloat(t.value) || 0; refresh(); }
+  });
+  root.addEventListener("click", async ev => {
+    const t = ev.target.closest("button"); if (!t || t.disabled) return;
+    if (t.dataset.toggle) { st.open[t.dataset.toggle] = !st.open[t.dataset.toggle]; render(); const b = $(`[data-toggle="${t.dataset.toggle}"]`); if (b) b.focus(); return; }
+    if (t.dataset.seg) {
+      const path = t.dataset.seg, val = t.dataset.val;
+      setPath(path, path.endsWith(".on") ? val === "on" : val);
+      render(); const again = root.querySelector(`[data-seg="${path}"][data-val="${val}"]`); if (again) again.focus(); return;
+    }
+    if (t.dataset.reset) { st.vals[t.dataset.reset] = clone(P.defaults[t.dataset.reset]); delete serverProblems[t.dataset.reset]; render(); return; }
+    if (t.id === "rl-capclear") { st.capital = ""; render(); return; }
+    if (t.id === "rl-discard") { st.vals = clone(st.saved); st.capital = st.savedCapital; serverProblems = {}; render(); toast("Changes discarded."); return; }
+    if (t.id === "rl-save") await save(t);
+  });
+  async function save(btn) {
+    btn.disabled = true;
+    const body = {capital: st.capital === "" ? null : parseFloat(st.capital), strategies: st.vals};
+    try {
+      const r = await fetch("/api/rules", {method: "POST", cache: "no-store",
+        headers: {"Content-Type": "application/json", "X-Bot-Control": "1"}, body: JSON.stringify(body)});
+      const d = await r.json();
+      if (!r.ok) {
+        let problems = null;
+        try { problems = JSON.parse(d.error).problems; } catch (e) { /* plain message */ }
+        if (problems) {
+          serverProblems = problems; refresh();
+          toast("Not saved: fix the problems marked in red."); return;
+        }
+        throw new Error(d.error || r.status);
+      }
+      const open = st.open;
+      boot(d, true); st.open = open; render();
+      toast(d.message || "Saved.");
+    } catch (err) {
+      toast("Couldn't save: " + err.message + ". Is the control server running?");
+      refresh();
+    }
+  }
+  function toast(msg) {
+    const t = document.createElement("div");
+    t.className = "cp-toast"; t.setAttribute("role", "status"); t.textContent = msg;
+    t.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink,#0b0b0b);color:var(--page,#fff);padding:10px 16px;border-radius:10px;font-size:13px;z-index:50;max-width:calc(100% - 32px)";
+    document.body.appendChild(t); setTimeout(() => t.remove(), 4000);
+  }
+
+  // ---------------------------------------------------------------- start
+  let embedded = null;
+  try { embedded = JSON.parse(document.getElementById("rl-data").textContent); } catch (e) { /* none */ }
+  async function load() {
+    if (!SERVED) { if (embedded) boot(embedded, false); else root.innerHTML = `<div class="rl-box">The rules appear here once the dashboard is opened from <a href="${SERVER_URL}">${SERVER_URL}</a>.</div>`; return; }
+    try {
+      const r = await fetch("/api/rules", {cache: "no-store"});
+      if (!r.ok) throw new Error(r.status);
+      boot(await r.json(), true);
+    } catch (err) {
+      if (embedded) boot(embedded, false);
+      else root.innerHTML = `<div class="rl-box">Can't reach the control server at <a href="${SERVER_URL}">${SERVER_URL}</a>. Double-click <b>Trading dashboard</b> on the desktop, then reload this tab.</div>`;
+    }
+  }
+  window.rulesPanelShow = function () {
+    // Re-read when the tab is opened, unless there are unsaved edits.
+    const dirty = st && (st.capital !== st.savedCapital || P.strategies.some(id => JSON.stringify(st.vals[id]) !== JSON.stringify(st.saved[id])));
+    if (!dirty) load();
+  };
+  load();
+})();
+</script>

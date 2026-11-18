@@ -9,6 +9,7 @@ can reach it, and serves:
   /api/control  POST {"strategy": id | "all", "mode": run|pause|stop, "close": bool}
   /api/update   POST {"version": "X.Y.Z"}: install the offered release (updates.py)
   /api/readiness  POST {}: run the readiness check now (readiness.py)
+  /api/rules    GET the Rules tab's rules; POST {"capital", "strategies"} to save them (rules.py)
   /reports/..., /analysis/...   the report and review pages the dashboard links to
 
 A button press writes data/control.json (control.py); the bots read it every
@@ -56,7 +57,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from zoneinfo import ZoneInfo
 
-from tradingbot import control, readiness, updates
+from tradingbot import control, readiness, rules, updates
 from tradingbot.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -70,7 +71,7 @@ STOCK_BOTS = ("rsi2", "ma_crossover")  # closed by the step-stop bot (client 1) 
 DISPLAY_TO_ID = {"ORB (SPY 0DTE options)": "orb", "ORB credit spreads": "credit_orb", "Iron condor": "iron_condor",
                  "Trend Join": "trend_join", "Stock ORB": "stock_orb", "RSI(2)": "rsi2", "MA-crossover": "ma_crossover"}
 STATIC_ROOTS = ("reports", "analysis")
-MAX_BODY = 4096
+MAX_BODY = 32768  # the Rules tab's save holds every strategy's rules
 TASK_CACHE_SECONDS = 60.0  # each refresh starts PowerShell (~0.5s CPU); next-run times don't change minute to minute
 SCHEDULE = Path(__file__).resolve().parents[2] / "scripts" / "schedule.json"
 
@@ -231,6 +232,15 @@ def dashboard_info() -> dict:
     return {"url": "/" + p.as_posix(), "build": str(p.stat().st_mtime_ns)}
 
 
+def apply_rules(body: dict) -> tuple[dict, str]:
+    """Save rules (Rules tab). A problem raises ValueError whose text is
+    JSON {"problems": {strategy: {field: message}}} for the page to show."""
+    _, lines = rules.save(body, rules.account_value())
+    msg = (f"Saved {len(lines)} change{'s' if len(lines) != 1 else ''}. The bots use them from their next trade."
+           if lines else "Nothing changed.")
+    return rules.payload(), msg
+
+
 def apply_readiness(body: dict) -> tuple[dict, str]:
     """Run checks now (Bot health tab): the readiness check in the background."""
     started = readiness.start()
@@ -375,6 +385,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/ping":  # "are you up, and is a page open?" — not itself a page checking in
             last = self.server.last_poll
             self._json(HTTPStatus.OK, {"since_poll": round(clock.monotonic() - last, 1) if last else None})
+        elif path == "/api/rules":
+            self._json(HTTPStatus.OK, rules.payload())
         elif path == "/api/state":
             self.server.last_poll = clock.monotonic()
             # ?light=1: a background tab only asking whether the dashboard was rebuilt
@@ -416,7 +428,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return
         path = urlsplit(self.path).path
-        if path not in ("/api/control", "/api/update", "/api/readiness"):
+        if path not in ("/api/control", "/api/update", "/api/readiness", "/api/rules"):
             self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         origin = self.headers.get("Origin", "")
@@ -434,7 +446,8 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(raw)
             if not isinstance(body, dict):
                 raise ValueError("expected an object")
-            handler = {"/api/control": apply, "/api/update": apply_update, "/api/readiness": apply_readiness}[path]
+            handler = {"/api/control": apply, "/api/update": apply_update, "/api/readiness": apply_readiness,
+                       "/api/rules": apply_rules}[path]
             payload, msg = handler(body)
         except ValueError as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
