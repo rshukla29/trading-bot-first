@@ -212,7 +212,7 @@
   function calc(id) {
     const v = st.vals[id], ex = st.ex[id], r = {rows: [], warn: [], worstTrade: 0, worstDay: 0, ladder: null, dayNote: ""};
     const budget = v.size ? modeVal(v.size) : 0, fixed = v.size && v.size.mode === "fixed";
-    if (id === "orb") {
+    if (id === "orb" || id === "orb_hp") {
       const p = ex.p, per = p * 100;
       let qty = fixed ? v.size.fixed : Math.floor(budget / per + 1e-9);
       const capped = qty > v.maxQty; qty = Math.min(qty, v.maxQty);
@@ -297,7 +297,7 @@
   }
   function summary(id) {
     const v = st.vals[id], z = v.size, unit = P.schema[id].unit;
-    const parts = [z.mode === "pct" ? `${z.pct}% ${id === "orb" ? "of capital" : "risk"}` : z.mode === "usd" ? `${money(z.usd)} ${id === "orb" ? "per trade" : id === "credit_orb" ? "max loss" : "risk"}` : plural(z.fixed, unit)];
+    const parts = [z.mode === "pct" ? `${z.pct}% ${id === "orb" || id === "orb_hp" ? "of capital" : "risk"}` : z.mode === "usd" ? `${money(z.usd)} ${id === "orb" || id === "orb_hp" ? "per trade" : id === "credit_orb" ? "max loss" : "risk"}` : plural(z.fixed, unit)];
     if ("maxQty" in v) parts.push(`max ${v.maxQty}`);
     if ("maxVal" in v) parts.push(`${money(v.maxVal)} max position`);
     if (v.stop) parts.push(v.stop.mode === "off" ? "no stop" : v.stop.mode === "pct" ? `${v.stop.pct}% stop` : `${money(v.stop.usd)} stop`);

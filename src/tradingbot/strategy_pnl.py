@@ -26,6 +26,7 @@ ET = ZoneInfo("America/New_York")
 
 JOURNAL_STRATEGIES = (
     ("ORB (SPY 0DTE options)", "orb_positions", "exit_date"),
+    ("ORB-0DTE-HP (SPY 0DTE options)", "orb_hp_positions", "exit_date"),
     ("ORB credit spreads", "credit_orb_positions", "exit_ts"),
     ("Iron condor", "condor_positions", "exit_date"),
     ("Trend Join", "trend_join_positions", "exit_ts"),

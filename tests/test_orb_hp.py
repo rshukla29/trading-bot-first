@@ -1,0 +1,213 @@
+"""ORB-0DTE-HP: the entry and exit rules (options/orb_hp_strategy.py) and the
+bot's signal handling (run_orb_hp_bot.py), IBKR faked."""
+from datetime import date, datetime, time
+from types import SimpleNamespace as NS
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from tradingbot.journal import Journal
+from tradingbot.options import orb_hp_strategy as s
+
+P = s.HpParams()
+COLS = ["open", "close", "ema9", "sma50", "sma200", "vwap", "macd", "signal"]
+
+
+def frame(prev, now):
+    return pd.DataFrame([prev, now], columns=COLS)
+
+
+CALL_PREV = dict(open=600, close=600.5, ema9=600, sma50=599, sma200=598, vwap=599.5, macd=0.10, signal=0.12)
+CALL_NOW = dict(open=600.5, close=601.5, ema9=600.6, sma50=599.1, sma200=598.1, vwap=599.7, macd=0.20, signal=0.14)
+
+
+def flip(row):
+    """The put mirror of a call row, around 600 / MACD 0."""
+    m = {k: 1200 - v for k, v in row.items() if k not in ("macd", "signal")}
+    return {**m, "macd": -row["macd"], "signal": -row["signal"]}
+
+
+# ---------------------------------------------------------------- entries
+
+def test_call_when_everything_lines_up():
+    assert s.signal_at(frame(CALL_PREV, CALL_NOW), 1) == s.CALL
+
+
+def test_put_is_the_mirror_image():
+    assert s.signal_at(frame(flip(CALL_PREV), flip(CALL_NOW)), 1) == s.PUT
+
+
+@pytest.mark.parametrize("change", [
+    dict(close=600.5),             # not above the 9 EMA (600.6)
+    dict(sma50=602),               # not above the 50 SMA
+    dict(sma200=602),              # not above the 200 SMA
+    dict(vwap=602),                # not above VWAP
+    dict(macd=0.13),               # MACD below its signal line: no cross
+])
+def test_each_call_condition_is_required(change):
+    assert s.signal_at(frame(CALL_PREV, {**CALL_NOW, **change}), 1) is None
+
+
+def test_macd_must_cross_on_this_candle_and_be_above_zero():
+    already_above = {**CALL_PREV, "macd": 0.15, "signal": 0.12}
+    assert s.signal_at(frame(already_above, CALL_NOW), 1) is None
+    below_zero = frame({**CALL_PREV, "macd": -0.30, "signal": -0.20}, {**CALL_NOW, "macd": -0.05, "signal": -0.10})
+    assert s.signal_at(below_zero, 1) is None
+
+
+def test_no_signal_before_the_200_sma_exists():
+    bars = pd.DataFrame({"open": [1.0] * 150, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0},
+                        index=pd.date_range("2026-11-19 09:30", periods=150, freq="5min", tz="America/New_York"))
+    assert s.latest_signal(bars, P) == (None, None)
+
+
+def test_real_series_gives_both_sides():
+    rng = np.random.default_rng(3)
+    idx = pd.date_range("2026-01-05 09:30", periods=78 * 30, freq="5min", tz="America/New_York")
+    close = 500 + np.cumsum(rng.normal(0, 0.3, len(idx)))
+    bars = pd.DataFrame({"open": close - rng.normal(0, 0.1, len(idx)), "high": close + 0.2, "low": close - 0.2,
+                         "close": close, "volume": 1000.0}, index=idx)
+    ind = s.indicators(bars, P)
+    sigs = [s.signal_at(ind, i, P) for i in range(len(ind))]
+    assert sigs.count(s.CALL) > 0 and sigs.count(s.PUT) > 0
+
+
+# ---------------------------------------------------------------- exits
+
+def test_candle_colour_exits():
+    assert s.candle_exit(s.CALL, 600, 599.9) and not s.candle_exit(s.CALL, 600, 600.1)
+    assert s.candle_exit(s.PUT, 600, 600.1) and not s.candle_exit(s.PUT, 600, 599.9)
+    assert not s.candle_exit(s.CALL, 600, 600) and not s.candle_exit(s.PUT, 600, 600)   # doji: hold
+
+
+def test_exit_priority():
+    kw = dict(eod=time(15, 55), stop_fraction=None, ladder_stop=None, target_fraction=None, candle=True)
+    assert s.exit_reason(time(15, 55), 1, 1, **kw) == "eod_flatten"
+    assert s.exit_reason(time(11, 0), 1, 1, **kw) == "candle_exit"
+    assert s.exit_reason(time(11, 0), 0.6, 1, **{**kw, "stop_fraction": 0.3}) == "stop_loss"
+    assert s.exit_reason(time(11, 0), 1, 1, **{**kw, "candle": False}) is None
+
+
+# ---------------------------------------------------------------- journal, reports, rules
+
+def test_own_table_and_reports(tmp_path):
+    from tradingbot import dashboard, strategy_pnl
+    import sqlite3
+    db = str(tmp_path / "j.db")
+    j = Journal(db)
+    pid = j.open_orb_position("SPY", "2026-11-19T15:00:00+00:00", "20261119", 600, "P", 7, 1.0, 2, 599, 598,
+                              table="orb_hp_positions")
+    assert j.open_orb_position_row("SPY") is None
+    j.close_orb_position(pid, "2026-11-19T15:10:00+00:00", 1.2, "candle_exit", 40.0, table="orb_hp_positions")
+    df = strategy_pnl.strategy_pnl(db, date(2026, 11, 19), date(2026, 11, 19)).set_index("strategy")
+    assert df.loc["ORB-0DTE-HP (SPY 0DTE options)", "realized"] == 40.0
+    assert df.loc["ORB (SPY 0DTE options)", "realized"] == 0.0
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    assert any(t["strategy"].startswith("ORB-0DTE-HP") for t in dashboard.closed_trades(conn))
+
+
+def test_expiry_guard_books_hp_positions(tmp_path):
+    from tradingbot import run_expiry_guard as g
+    j = Journal(str(tmp_path / "j.db"))
+    j.open_orb_position("SPY", "2026-11-19T15:00:00+00:00", "20261119", 600, "C", 5, 1.0, 1, 599, 598,
+                        table="orb_hp_positions")
+    g._close_journal_rows(j, 5, 0.1)
+    assert j.open_orb_position_row("SPY", table="orb_hp_positions") is None
+
+
+def test_rules_card_defaults():
+    from tradingbot import rules
+    r = rules.load("orb_hp")
+    assert r.stop_fraction(1.0, 100) is None and r.profit_target() is None and r.ladder_stop(1, 3, 100) is None
+    assert r["maxQty"] == 2 and r["trades"] == 6
+    assert list(rules.SCHEMA)[:2] == ["orb", "orb_hp"]
+
+
+# ---------------------------------------------------------------- the bot
+
+@pytest.fixture
+def bot(monkeypatch):
+    from tradingbot import run_orb_hp_bot as b
+    monkeypatch.setattr(b.GATE, "entries_allowed", lambda: True)
+    return b
+
+
+def _bars(open_=600.0, close=601.0, minute=0):
+    idx = pd.date_range(f"2026-11-19 10:{minute:02d}", periods=1, freq="5min", tz="America/New_York")
+    return pd.DataFrame({"open": [open_], "close": [close]}, index=idx)
+
+
+ROW = pd.Series({"close": 601.0, "ema9": 600.0, "sma50": 599.0, "sma200": 598.0, "vwap": 599.5,
+                 "macd": 0.2, "signal": 0.1})
+
+
+def _new_bar(bot, monkeypatch, sig, position=None, sides="CP", **bar):
+    monkeypatch.setattr(bot.settings, "orb_hp_sides", sides)
+    monkeypatch.setattr(bot, "latest_signal", lambda bars, p: (sig, ROW))
+    state = {"symbol": "SPY", "position": position, "pending": None}
+    bot.on_new_bar(NS(log_signal=lambda *a, **k: None), state, _bars(**bar))
+    return state
+
+
+def test_signal_arms_its_side(bot, monkeypatch):
+    assert _new_bar(bot, monkeypatch, s.CALL)["pending"]["right"] == "C"
+    assert _new_bar(bot, monkeypatch, s.PUT)["pending"]["right"] == "P"
+    assert _new_bar(bot, monkeypatch, s.PUT, sides="C")["pending"] is None
+
+
+def test_red_candle_flags_a_call_and_green_a_put(bot, monkeypatch):
+    st = _new_bar(bot, monkeypatch, None, position={"id": 1, "right": "C"}, open_=601, close=600)
+    assert st["position"]["candle_exit"] is True
+    st = _new_bar(bot, monkeypatch, None, position={"id": 1, "right": "C"}, open_=600, close=601)
+    assert not st["position"].get("candle_exit")
+    st = _new_bar(bot, monkeypatch, None, position={"id": 1, "right": "P"}, open_=600, close=601)
+    assert st["position"]["candle_exit"] is True
+
+
+def test_signal_while_holding_waits_unless_the_position_is_closing(bot, monkeypatch):
+    st = _new_bar(bot, monkeypatch, s.CALL, position={"id": 1, "right": "C"}, open_=600, close=601)
+    assert st["pending"] is None
+    st = _new_bar(bot, monkeypatch, s.CALL, position={"id": 1, "right": "P"}, open_=600, close=601)
+    assert st["position"]["candle_exit"] and st["pending"]["right"] == "C"     # put sold, then the call
+
+
+def test_pending_lapses_after_one_candle(bot, monkeypatch):
+    st = _new_bar(bot, monkeypatch, s.CALL)
+    monkeypatch.setattr(bot, "latest_signal", lambda bars, p: (None, None))
+    bot.on_new_bar(NS(log_signal=lambda *a, **k: None), st, _bars(minute=5))
+    assert st["pending"] is None
+
+
+def _tick(bot, monkeypatch, now, entries=0):
+    monkeypatch.setattr(bot, "_now_et", lambda: now.replace(tzinfo=bot.ET))
+    monkeypatch.setattr(bot, "_price", lambda ib, c: 601.0)
+    entered = []
+    monkeypatch.setattr(bot, "enter", lambda ib, j, st, sp, eq: entered.append(st["pending"]["right"]) or {"id": 3})
+    state = {"symbol": "SPY", "underlying": None, "position": None, "entries_today": entries,
+             "fetched_boundary": pd.Timestamp(now.replace(tzinfo=bot.ET)).floor("5min"),
+             "pending": {"bar_ts": pd.Timestamp("2026-11-19 10:55", tz="America/New_York"), "right": "P",
+                         "sma50": 599.0, "sma200": 598.0}}
+    bot.tick(None, NS(net_liquidation=lambda: 1e6), None, state)
+    return state, entered
+
+
+def test_tick_enters_inside_the_window_only(bot, monkeypatch):
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 11, 0, 20))
+    assert entered == ["P"] and st["entries_today"] == 1 and st["position"] == {"id": 3}
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 15, 5, 20))
+    assert entered == [] and st["pending"] is None
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 11, 0, 20), entries=6)
+    assert entered == []
+
+
+def test_task_schedule_and_controls():
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    plan = json.loads((root / "scripts" / "schedule.json").read_text(encoding="utf-8"))["tasks"]
+    t = next(t for t in plan if t["name"] == "OrbHpTradingBot")
+    assert t["ny"] == "09:30" and (root / "scripts" / t["script"]).exists()
+    from tradingbot import control
+    assert control.STRATEGIES["orb_hp"]["task"] == "OrbHpTradingBot"

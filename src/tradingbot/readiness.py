@@ -354,7 +354,7 @@ def order_size() -> int:
     except Exception:
         return 10
     sizes = [10]
-    for sid in ("orb", "credit_orb", "iron_condor"):
+    for sid in ("orb", "orb_hp", "credit_orb", "iron_condor"):
         v = vals[sid]
         sizes.append(min(v["maxQty"], v["size"]["fixed"]) if v["size"]["mode"] == "fixed" else v["maxQty"])
     return int(max(sizes))

@@ -42,6 +42,8 @@ LOG_KEEP = 50
 STRATEGIES: dict[str, dict] = {
     "orb": dict(name="ORB", sub="SPY 0DTE options", task="ORBTradingBot",
                 module="tradingbot.run_orb_bot", intraday=True),
+    "orb_hp": dict(name="ORB-0DTE-HP", sub="SPY 0DTE options, 5-min EMA/SMA/VWAP/MACD", task="OrbHpTradingBot",
+                   module="tradingbot.run_orb_hp_bot", intraday=True),
     "credit_orb": dict(name="Credit ORB", sub="SPY credit spreads", task="CreditOrbTradingBot",
                        module="tradingbot.run_credit_orb_bot", intraday=True),
     "iron_condor": dict(name="Iron condor", sub="SPY, 45 days out (3:45pm)", task="IronCondorTradingBot",

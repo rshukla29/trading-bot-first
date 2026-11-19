@@ -39,7 +39,8 @@ LOG_KEEP = 200
 
 # Strategy id (control.py) -> name in strategy_pnl.py's realized-P&L table.
 PNL_NAMES = {
-    "orb": "ORB (SPY 0DTE options)", "credit_orb": "ORB credit spreads", "iron_condor": "Iron condor",
+    "orb": "ORB (SPY 0DTE options)", "orb_hp": "ORB-0DTE-HP (SPY 0DTE options)",
+    "credit_orb": "ORB credit spreads", "iron_condor": "Iron condor",
     "trend_join": "Trend Join", "stock_orb": "Stock ORB", "rsi2": "RSI(2)", "ma_crossover": "MA-crossover",
 }
 
@@ -152,9 +153,16 @@ SCHEMA: dict[str, dict] = {
         _daily(),
     ]),
 }
+# ORB-0DTE-HP: same option fields as ORB (calls and puts, several trades a day).
+SCHEMA["orb_hp"] = dict(
+    SCHEMA["orb"], name="ORB-0DTE-HP",
+    desc="SPY same-day options when 5-minute candles line up with the 9 EMA, 50/200 SMA, VWAP and MACD",
+    fields=[dict(f, hint="Calls and puts together; each entry is one trade.") if f.get("key") == "trades" else dict(f)
+            for f in SCHEMA["orb"]["fields"]])
+SCHEMA = {k: SCHEMA[k] for k in ["orb", "orb_hp", *[k for k in SCHEMA if k not in ("orb", "orb_hp")]]}
 SCHEMA["ma_crossover"] = dict(SCHEMA["rsi2"], name="MA crossover", desc="Daily trend-following on the watchlist",
                               example=[dict(key="e", label="Entry $", val=150, step=1)])
-for _f in SCHEMA["rsi2"]["fields"] + SCHEMA["orb"]["fields"]:
+for _f in SCHEMA["rsi2"]["fields"] + SCHEMA["orb"]["fields"] + SCHEMA["orb_hp"]["fields"]:
     if _f["t"] == "ladder":
         _f["hint"] = LADDER_HINT
 STRATEGIES = list(SCHEMA)
@@ -191,6 +199,15 @@ def defaults(s: Settings | None = None) -> dict[str, dict]:
             target=dict(mode="pct" if s.options_profit_target_pct else "off", pct=p(s.options_profit_target_pct) or 50.0),
             # One breakout per direction plus re-entries, calls and puts together.
             trades=2 * (1 + max(0, s.options_max_reentries)),
+            daily=dict(mode="off", usd=500.0, pct=2.0)),
+        # The rules exit on the candle colour: no stop, profit lock or target until set.
+        "orb_hp": dict(
+            size=dict(mode="pct", pct=p(s.orb_hp_risk_pct_per_trade), usd=250.0, fixed=1),
+            maxQty=s.orb_hp_max_contracts_per_trade, maxPrem=dict(mode="off", usd=3.0, pct=1.0),
+            stop=dict(mode="off", pct=30.0, usd=40.0),
+            ladder=dict(on=False, mode="pct", trig=50.0, step=25.0, lock=25.0),
+            target=dict(mode="off", pct=50.0),
+            trades=s.orb_hp_max_trades_per_day,
             daily=dict(mode="off", usd=500.0, pct=2.0)),
         "credit_orb": dict(
             size=dict(mode="usd", pct=2.0, usd=float(s.credit_orb_max_loss_dollars), fixed=1),

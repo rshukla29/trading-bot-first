@@ -76,10 +76,12 @@ def long_is_worthless(ib: IB, contract) -> bool:
 
 
 def _close_journal_rows(journal: Journal, con_id: int, fill_price: float) -> None:
-    for row in journal.open_orb_positions_by_conid(con_id):
-        pnl = (fill_price - row["entry_premium"]) * row["contracts"] * CONTRACT_MULTIPLIER
-        journal.close_orb_position(row["id"], datetime.now(timezone.utc).isoformat(), fill_price, "expiry_guard", pnl)
-        logger.warning("Journal: closed ORB position id=%s (expiry_guard), pnl=%.2f", row["id"], pnl)
+    for table, name in (("orb_positions", "ORB"), ("orb_hp_positions", "ORB-0DTE-HP")):
+        for row in journal.open_orb_positions_by_conid(con_id, table=table):
+            pnl = (fill_price - row["entry_premium"]) * row["contracts"] * CONTRACT_MULTIPLIER
+            journal.close_orb_position(row["id"], datetime.now(timezone.utc).isoformat(), fill_price, "expiry_guard",
+                                       pnl, table=table)
+            logger.warning("Journal: closed %s position id=%s (expiry_guard), pnl=%.2f", name, row["id"], pnl)
     # Short leg of an ORB credit spread bought back by the guard: record the
     # spread's result (long leg assumed worthless — it's left to expire).
     for row in journal.open_credit_orb_rows():

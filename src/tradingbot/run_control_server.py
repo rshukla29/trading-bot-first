@@ -68,7 +68,7 @@ MARKET_OPEN, MARKET_CLOSE = time(9, 30), time(16, 0)
 PANEL = Path(__file__).with_name("control_panel.html")
 SAFETY = (("Expiry guard", "ExpiryGuardBot"), ("Step stop", "StepStopTradingBot"))
 STOCK_BOTS = ("rsi2", "ma_crossover")  # closed by the step-stop bot (client 1) during market hours
-DISPLAY_TO_ID = {"ORB (SPY 0DTE options)": "orb", "ORB credit spreads": "credit_orb", "Iron condor": "iron_condor",
+DISPLAY_TO_ID = {"ORB (SPY 0DTE options)": "orb", "ORB-0DTE-HP (SPY 0DTE options)": "orb_hp", "ORB credit spreads": "credit_orb", "Iron condor": "iron_condor",
                  "Trend Join": "trend_join", "Stock ORB": "stock_orb", "RSI(2)": "rsi2", "MA-crossover": "ma_crossover"}
 STATIC_ROOTS = ("reports", "analysis")
 MAX_BODY = 32768  # the Rules tab's save holds every strategy's rules

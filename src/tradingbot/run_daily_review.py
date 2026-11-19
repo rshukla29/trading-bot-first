@@ -125,6 +125,8 @@ def strategy_pnl(day: date) -> str:
     rows = []
     for name, sql in (
         ("ORB", "SELECT COALESCE(SUM(realized_pnl),0) FROM orb_positions WHERE status='closed' AND exit_date LIKE ?"),
+        ("ORB-0DTE-HP", "SELECT COALESCE(SUM(realized_pnl),0) FROM orb_hp_positions WHERE status='closed' "
+                        "AND exit_date LIKE ?"),
         ("ORB credit spreads", "SELECT COALESCE(SUM(realized_pnl),0) FROM credit_orb_positions WHERE status='closed' "
                                "AND exit_ts LIKE ?"),
         ("Iron condor", "SELECT COALESCE(SUM(realized_pnl),0) FROM condor_positions WHERE status='closed' "
@@ -301,7 +303,7 @@ def section_rules(day: date) -> str:
 def section_health(day: date) -> str:
     out = ["## Health: errors and warnings in today's logs\n"]
     names = sorted(p.name[: -len(f"_{day.isoformat()}.log")] for p in Path("logs").glob(f"*_{day.isoformat()}.log"))
-    for expected in ("orb", "credit_orb", "stock_orb", "trend_join", "step_stop", "iron_condor", "rsi2",
+    for expected in ("orb", "orb_hp", "credit_orb", "stock_orb", "trend_join", "step_stop", "iron_condor", "rsi2",
                      "ma_crossover", "expiry_guard"):
         if expected not in names:
             names.append(expected)

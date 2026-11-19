@@ -63,6 +63,11 @@ def closed_trades(conn) -> list[dict]:
             add("ORB (SPY 0DTE options)", r["entry_date"], r["exit_date"],
                 f"{r['symbol']} {r['strike']:g}{r['right']} {r['expiry']}", r["contracts"], r["entry_premium"],
                 r["exit_premium"], r["realized_pnl"], r["exit_reason"])
+    if _table_exists(conn, "orb_hp_positions"):
+        for r in _rows(conn, "SELECT * FROM orb_hp_positions WHERE status='closed' AND exit_date IS NOT NULL"):
+            add("ORB-0DTE-HP (SPY 0DTE options)", r["entry_date"], r["exit_date"],
+                f"{r['symbol']} {r['strike']:g}{r['right']} {r['expiry']}", r["contracts"], r["entry_premium"],
+                r["exit_premium"], r["realized_pnl"], r["exit_reason"])
     if _table_exists(conn, "credit_orb_positions"):
         for r in _rows(conn, "SELECT * FROM credit_orb_positions WHERE status='closed' AND exit_ts IS NOT NULL"):
             add("ORB credit spreads", r["entry_ts"], r["exit_ts"],
@@ -121,6 +126,7 @@ def open_positions(conn) -> list[dict]:
                             qty=r["contracts"], entry=_num(r["credit_received"], 4),
                             note=f"credit {r['credit_received']:.2f} x {r['contracts']}, expires {r['expiry']}"))
     for strategy, table, ts, entry in (("ORB (SPY 0DTE options)", "orb_positions", "entry_date", "entry_premium"),
+                                       ("ORB-0DTE-HP (SPY 0DTE options)", "orb_hp_positions", "entry_date", "entry_premium"),
                                        ("ORB credit spreads", "credit_orb_positions", "entry_ts", "credit"),
                                        ("Trend Join", "trend_join_positions", "entry_ts", "entry_price"),
                                        ("Stock ORB", "stock_orb_positions", "entry_ts", "entry_price")):

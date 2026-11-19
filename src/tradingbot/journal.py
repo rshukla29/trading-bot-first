@@ -91,6 +91,29 @@ CREATE TABLE IF NOT EXISTS orb_positions (
     realized_pnl REAL
 );
 
+-- run_orb_hp_bot.py's SPY 0DTE options (ORB-0DTE-HP, 5-min candles): the same
+-- columns as orb_positions, in its own table so ORB's stats and recovery
+-- never see them. range_low / range_high hold the 50 / 200 SMA at entry.
+CREATE TABLE IF NOT EXISTS orb_hp_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    entry_date TEXT NOT NULL,
+    expiry TEXT NOT NULL,
+    strike REAL NOT NULL,
+    right TEXT NOT NULL,
+    conid INTEGER NOT NULL,
+    entry_premium REAL NOT NULL,
+    contracts INTEGER NOT NULL,
+    range_low REAL NOT NULL,
+    range_high REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    exit_date TEXT,
+    exit_premium REAL,
+    exit_reason TEXT,
+    realized_pnl REAL,
+    peak_premium REAL
+);
+
 -- run_trend_join_bot.py's intraday stock positions. Persisted for the same
 -- reason as orb_positions (restart recovery), plus it records which
 -- symbols this strategy owns — IBKR positions carry no strategy tag, and
@@ -263,6 +286,16 @@ def closed_trade_prices(side: str, quantity: float, exit_price: float, realized_
     if side in ("SLD", "SELL"):           # sold to close a long
         return exit_price - per_share, exit_price
     return exit_price, exit_price + per_share   # bought to close a short
+
+
+# Single long-option tables that share the ORB methods below (table=...).
+OPTION_TABLES = ("orb_positions", "orb_hp_positions")
+
+
+def _option_table(table: str) -> str:
+    if table not in OPTION_TABLES:
+        raise ValueError(f"not an option position table: {table}")
+    return table
 
 
 class Journal:
@@ -448,10 +481,11 @@ class Journal:
         contracts: int,
         range_low: float,
         range_high: float,
+        table: str = "orb_positions",
     ) -> int:
         with self._connect() as conn:
             cur = conn.execute(
-                """INSERT INTO orb_positions
+                f"""INSERT INTO {_option_table(table)}
                    (symbol, entry_date, expiry, strike, right, conid, entry_premium,
                     contracts, range_low, range_high, status)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')""",
@@ -459,14 +493,15 @@ class Journal:
             )
             return cur.lastrowid
 
-    def open_orb_position_row(self, symbol: str) -> sqlite3.Row | None:
+    def open_orb_position_row(self, symbol: str, table: str = "orb_positions") -> sqlite3.Row | None:
         """At most one open ORB position at a time — used both to check
         "is anything open" and, on process restart, to recover which
         position needs continued exit monitoring."""
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             return conn.execute(
-                "SELECT * FROM orb_positions WHERE status='open' AND symbol=? ORDER BY id DESC LIMIT 1", (symbol,)
+                f"SELECT * FROM {_option_table(table)} WHERE status='open' AND symbol=? ORDER BY id DESC LIMIT 1",
+                (symbol,)
             ).fetchone()
 
     def open_credit_orb(self, symbol: str, trade_date: str, direction: str, right: str, short_strike: float,
@@ -532,11 +567,11 @@ class Journal:
                  long_ask, mid),
             )
 
-    def update_orb_peak(self, position_id: int, peak_premium: float) -> None:
+    def update_orb_peak(self, position_id: int, peak_premium: float, table: str = "orb_positions") -> None:
         """Persist the highest premium seen, so a restart keeps the step-up
         stop where it was (2026-09-28: a restart lost a +162% peak)."""
         with self._connect() as conn:
-            conn.execute("UPDATE orb_positions SET peak_premium=? WHERE id=?", (peak_premium, position_id))
+            conn.execute(f"UPDATE {_option_table(table)} SET peak_premium=? WHERE id=?", (peak_premium, position_id))
 
     def set_orb_entry_iv(self, position_id: int, entry_iv: float, model_iv: float) -> None:
         with self._connect() as conn:
@@ -565,26 +600,35 @@ class Journal:
                 counts[right] = n
         return counts
 
-    def record_orb_partial_exit(self, position_id: int, remaining_contracts: int, partial_pnl: float) -> None:
+    def record_orb_partial_exit(self, position_id: int, remaining_contracts: int, partial_pnl: float,
+                                table: str = "orb_positions") -> None:
         """After a partly-filled close: persist what's left and the P&L
         already realized, so a restart doesn't try to sell the full size."""
         with self._connect() as conn:
             conn.execute(
-                "UPDATE orb_positions SET contracts=?, realized_pnl=? WHERE id=?",
+                f"UPDATE {_option_table(table)} SET contracts=?, realized_pnl=? WHERE id=?",
                 (remaining_contracts, partial_pnl, position_id),
             )
 
-    def open_orb_positions_by_conid(self, conid: int) -> list[sqlite3.Row]:
+    def open_orb_positions_by_conid(self, conid: int, table: str = "orb_positions") -> list[sqlite3.Row]:
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             return conn.execute(
-                "SELECT * FROM orb_positions WHERE status='open' AND conid=?", (conid,)
+                f"SELECT * FROM {_option_table(table)} WHERE status='open' AND conid=?", (conid,)
             ).fetchall()
 
-    def close_orb_position(self, position_id: int, exit_date: str, exit_premium: float, exit_reason: str, realized_pnl: float) -> None:
+    def option_entries_on(self, table: str, symbol: str, day: str) -> int:
+        """How many positions `table` opened for `symbol` on `day` (YYYY-MM-DD,
+        UTC entry timestamp: the US session never crosses UTC midnight)."""
+        with self._connect() as conn:
+            return conn.execute(f"SELECT COUNT(*) FROM {_option_table(table)} WHERE symbol=? AND entry_date LIKE ?",
+                                (symbol, f"{day}%")).fetchone()[0]
+
+    def close_orb_position(self, position_id: int, exit_date: str, exit_premium: float, exit_reason: str,
+                           realized_pnl: float, table: str = "orb_positions") -> None:
         with self._connect() as conn:
             conn.execute(
-                """UPDATE orb_positions
+                f"""UPDATE {_option_table(table)}
                    SET status='closed', exit_date=?, exit_premium=?, exit_reason=?, realized_pnl=?
                    WHERE id=?""",
                 (exit_date, exit_premium, exit_reason, realized_pnl, position_id),

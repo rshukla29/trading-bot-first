@@ -6,6 +6,7 @@
     {"name": "BotControlServer", "ny": "08:00", "script": "run_control_server.ps1", "at_logon": true},
     {"name": "StepStopTradingBot", "ny": "09:25", "script": "run_step_stop_scheduled.ps1"},
     {"name": "ORBTradingBot", "ny": "09:30", "script": "run_orb_scheduled.ps1"},
+    {"name": "OrbHpTradingBot", "ny": "09:30", "script": "run_orb_hp_scheduled.ps1"},
     {"name": "StockOrbTradingBot", "ny": "09:30", "script": "run_stock_orb_scheduled.ps1"},
     {"name": "TrendJoinTradingBot", "ny": "09:50", "script": "run_trend_join_scheduled.ps1"},
     {"name": "CreditOrbTradingBot", "ny": "10:20", "script": "run_credit_orb_scheduled.ps1"},

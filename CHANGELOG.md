@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+- New paper-experiment strategy **ORB-0DTE-HP**: SPY same-day calls and puts when a 5-minute candle closes on the same side of the 9 EMA, 50 SMA, 200 SMA and VWAP as a fresh MACD cross (MACD above 0 for calls, below for puts); sold after the first opposite-colour candle, flat by 3:55pm. Own Rules tab card and Start / Pause / Stop buttons. The 4-year backtest lost money (profit factor 0.60), so it's for paper testing only.
+
 ## 1.2.0 — 2026-11-18
 
 - New **Rules** tab on the dashboard: type the capital the bots trade with (or leave it blank for the whole account), and set each strategy's own trade size (% of capital, $ or a fixed number of contracts or shares), max contracts, max premium, stop loss, first and step stop, profit target, trades per day and daily loss limit, in $ or %. Each card shows what the rules mean at your capital before you save, refuses unsafe values, and every change is logged. Nothing changes until you save: the starting values are your current settings.

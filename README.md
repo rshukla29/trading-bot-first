@@ -20,6 +20,7 @@ needed.
 | 5 | Trend Join Long | S&P 500 gap-up stocks | Intraday gap-and-go | 9:50am–4:00pm — `TrendJoinTradingBot` | `run_trend_join_bot` |
 | 6 | ORB credit spreads *(paper experiment)* | SPY 0DTE put/call credit spreads | Sells premium on the far side of the range | 10:20am–4:00pm — `CreditOrbTradingBot` | `run_credit_orb_bot` |
 | 7 | Stock ORB *(paper experiment)* | S&P 500 stocks | Intraday opening-range breakout ([day-trader-skill](https://github.com/Jakeschincariol/day-trader-skill) rules), traded only when its Time Machine agrees | 9:30am–4:00pm — `StockOrbTradingBot` | `run_stock_orb_bot` |
+| 8 | ORB-0DTE-HP *(paper experiment)* | SPY 0DTE calls and puts | 5-minute candles in line with the 9 EMA, 50/200 SMA, VWAP and a fresh MACD cross; out on the first opposite-colour candle | 9:30am–4:00pm — `OrbHpTradingBot` | `run_orb_hp_bot` |
 | — | Step-stop manager (not a strategy) | MA-crossover + RSI(2) positions | Locks profit from +30% (stop +15%, then 15% steps) | 9:25am–4:00pm — `StepStopTradingBot` | `run_step_stop_bot` |
 
 Run any of them manually with `python -m tradingbot.<entrypoint>`.
@@ -37,6 +38,7 @@ warns if a task's next run ever drifts from it (see [Scheduling](#4-scheduling))
 | 8:00am → 6:00pm | `BotControlServer` | Control server on `http://127.0.0.1:8765`: rebuilds the dashboard and opens it on the **Bot controls** tab (a tab still open from yesterday reloads itself instead), serves the Start / Pause / Stop buttons, stops itself at 6pm (the browser stays open). Also starts at Windows logon inside those hours |
 | 9:25am → 4:00pm | `StepStopTradingBot` | Stop audit, then raises stock stops every ~60s |
 | 9:30am → 4:00pm | `ORBTradingBot` | SPY opening-range breakout (filtered), step-up lock; entries 9:45–12:00, flat by 3:55pm |
+| 9:30am → 4:00pm | `OrbHpTradingBot` | ORB-0DTE-HP: 5-minute trend-alignment signals on SPY; entries 9:35–3:00, flat by 3:55pm |
 | 9:30am → 4:00pm | `StockOrbTradingBot` | S&P 500 opening-range breakouts; Time Machine check before each entry (trades only if it leans toward the target); entries 9:45–3:30 (max 3), stop/target at IBKR, flat by 3:55pm |
 | 9:50am → 4:00pm | `TrendJoinTradingBot` | Gap scans 9:55–12:55, entries 10:05–3:30, flat by 3:51pm |
 | 10:20am → 4:00pm | `CreditOrbTradingBot` | 60-min range; entry 10:30–12:00; spread bought back 3:50pm |
@@ -396,6 +398,54 @@ only if it agrees → bracket order → stop / target / 3:55 flatten.**
   that difference is noise. No evidence the gate adds an edge; it is kept
   because the owner asked for it, and the live checks in the reports will
   show how it does on real fills.
+
+### 8. ORB-0DTE-HP (SPY 0DTE options, 5-minute candles, paper experiment)
+
+[run_orb_hp_bot.py](src/tradingbot/run_orb_hp_bot.py), rules in
+[options/orb_hp_strategy.py](src/tradingbot/options/orb_hp_strategy.py).
+Each completed 5-minute SPY candle is judged a few seconds after it closes.
+
+| | Buy a **call** when, on one candle | Buy a **put** when, on one candle |
+|---|---|---|
+| 9 EMA | close above | close below |
+| 50 SMA | close above | close below |
+| 200 SMA | close above | close below |
+| Session VWAP | close above | close below |
+| MACD (12, 26) vs its signal line (9 EMA of the MACD) | crosses above on this candle | crosses below on this candle |
+| MACD vs 0 | above | below |
+| **Sell** | after the first candle that closes red | after the first candle that closes green |
+
+- **Contract:** 0DTE, strike nearest SPY (`ORB_HP_OTM_PCT`), never one
+  another bot already holds. `ORB_HP_SIDES`: `CP` both (default), `C`, `P`.
+- **When:** entries 9:35–3:00pm (`ORB_HP_FIRST_ENTRY_TIME`,
+  `ORB_HP_LAST_ENTRY_TIME`), one position at a time; a signal on the candle
+  that closes a position is taken right after the sale. Sold by 3:55pm.
+- **History:** the 200 SMA needs about 2.5 sessions of 5-minute candles, so 5
+  days are fetched; the VWAP still resets every session.
+- **Rules tab** (its own card): 0.5% of capital, max 2 contracts, max 6
+  trades a day; stop loss, step stop, profit target, max premium and daily
+  loss limit off by default.
+- **Journal:** its own table `orb_hp_positions`; client ID
+  `ORB_HP_CLIENT_ID` (91).
+
+**Backtest** ([scripts/orb_hp_backtest.py](scripts/orb_hp_backtest.py);
+cached 5-minute SPY and VIX bars, `--update` appends newer ones from IBKR;
+options priced with the ORB backtest's VIX-calibrated Black-Scholes; $0.02 a
+share slippage and $0.65 a contract per side). 2022-10-03 to 2026-09-25, 999
+days, per contract:
+
+| Version | Trades | Win % | Avg | PF | Total |
+|---|---|---|---|---|---|
+| As specified (calls and puts, max 6/day) | 1,310 | 24% | −$5.46 | 0.60 | −$7,155 |
+| Calls only | 780 | 25% | −$4.42 | 0.62 | −$3,447 |
+| Puts only | 530 | 23% | −$7.00 | 0.56 | −$3,708 |
+| + 30% stop loss | 1,310 | 24% | −$5.42 | 0.60 | −$7,099 |
+| As specified, **no costs** | 1,310 | 31% | −$0.16 | 0.98 | −$213 |
+
+It lost money in every half-year. The first opposite-colour candle comes
+quickly (median hold 10 minutes), so a trade rarely moves more than its
+costs; even with no costs at all it only breaks even. Treat it as a paper
+experiment.
 
 ### How the strategies stay out of each other's way
 
