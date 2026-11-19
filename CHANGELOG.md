@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+## 1.3.1 — 2026-11-19
+
 - **Update now** works again on a copy that has been running: the bots save each day's reports as commits, and the updater used to refuse a copy with commits of its own. A copy stuck on an older version needs one manual update first (see the release notes).
 
 ## 1.3.0 — 2026-11-19
