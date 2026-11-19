@@ -364,7 +364,10 @@ def test_schedule_warning_when_a_task_drifts_an_hour():
     tasks = {"StepStopTradingBot": {"next_at": local("2026-11-16T08:25:00").isoformat()},   # an hour early
              "ORBTradingBot": {"next_at": local("2026-11-16T09:30:00").isoformat()}}
     warnings = srv.schedule_warnings(tasks, plan)
-    assert len(warnings) == 1 and warnings[0].startswith("StepStopTradingBot runs at 8:25am, should be 9:25am")
+    # Shown in this computer's own time (8:25am / 9:25am on a New York clock).
+    clock = lambda ny_iso: srv._when(local(ny_iso)).split(" ", 1)[1]
+    want = f"StepStopTradingBot runs at {clock('2026-11-16T08:25:00')}, should be {clock('2026-11-16T09:25:00')}"
+    assert len(warnings) == 1 and warnings[0].startswith(want)
 
 
 def test_schedule_file_matches_the_scripts():
