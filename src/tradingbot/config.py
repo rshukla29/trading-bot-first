@@ -217,18 +217,22 @@ class Settings(BaseSettings):
     # 5-minute SPY candles, trading SPY 0DTE options (options/orb_hp_strategy.py).
     # Call: close above the 9 EMA, 50 SMA, 200 SMA and VWAP, the MACD line
     # crosses above its 9-EMA signal line on that candle, MACD above 0. Put:
-    # the mirror image. Sells a call on the first red candle, a put on the
-    # first green one; flat by 3:55pm. Size and limits: the Rules tab ("orb_hp").
+    # the mirror image. One trade a day (the first signal 9:35-11:00am), held
+    # to 3:55pm: the backtest that chose these (scripts/orb_hp_backtest.py,
+    # 4 years) made money every year; selling on the first opposite-colour
+    # candle (ORB_HP_EXIT=candle) or taking more trades lost. Size and limits:
+    # the Rules tab ("orb_hp").
     orb_hp_client_id: int = 91
     orb_hp_symbol: str = "SPY"
     orb_hp_bar_minutes: int = 5
     orb_hp_sides: str = "CP"             # C calls only, P puts only, CP both
     orb_hp_otm_pct: float = 0.0          # 0 = the strike nearest SPY
     orb_hp_first_entry_time: str = "09:35"
-    orb_hp_last_entry_time: str = "15:00"
+    orb_hp_last_entry_time: str = "11:00"
     orb_hp_risk_pct_per_trade: float = 0.005
     orb_hp_max_contracts_per_trade: int = 2
-    orb_hp_max_trades_per_day: int = 6
+    orb_hp_max_trades_per_day: int = 1
+    orb_hp_exit: str = "eod"             # eod: hold to 3:55pm; candle: sell on the first opposite-colour candle
 
     # RSI(2) mean-reversion swing strategy (stocks, daily bars) — the
     # second, independent stock strategy: mean-reversion rather than

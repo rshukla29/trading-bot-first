@@ -157,8 +157,8 @@ SCHEMA: dict[str, dict] = {
 SCHEMA["orb_hp"] = dict(
     SCHEMA["orb"], name="ORB-0DTE-HP",
     desc="SPY same-day options when 5-minute candles line up with the 9 EMA, 50/200 SMA, VWAP and MACD",
-    fields=[dict(f, hint="Calls and puts together; each entry is one trade.") if f.get("key") == "trades" else dict(f)
-            for f in SCHEMA["orb"]["fields"]])
+    fields=[dict(f, hint="Calls and puts together: 1 means one call or one put a day, never both at once.")
+            if f.get("key") == "trades" else dict(f) for f in SCHEMA["orb"]["fields"]])
 SCHEMA = {k: SCHEMA[k] for k in ["orb", "orb_hp", *[k for k in SCHEMA if k not in ("orb", "orb_hp")]]}
 SCHEMA["ma_crossover"] = dict(SCHEMA["rsi2"], name="MA crossover", desc="Daily trend-following on the watchlist",
                               example=[dict(key="e", label="Entry $", val=150, step=1)])

@@ -121,7 +121,7 @@ def test_rules_card_defaults():
     from tradingbot import rules
     r = rules.load("orb_hp")
     assert r.stop_fraction(1.0, 100) is None and r.profit_target() is None and r.ladder_stop(1, 3, 100) is None
-    assert r["maxQty"] == 2 and r["trades"] == 6
+    assert r["maxQty"] == 2 and r["trades"] == 1
     assert list(rules.SCHEMA)[:2] == ["orb", "orb_hp"]
 
 
@@ -143,63 +143,92 @@ ROW = pd.Series({"close": 601.0, "ema9": 600.0, "sma50": 599.0, "sma200": 598.0,
                  "macd": 0.2, "signal": 0.1})
 
 
-def _new_bar(bot, monkeypatch, sig, position=None, sides="CP", **bar):
+def _state(call=None, put=None):
+    return {"symbol": "SPY", "positions": {"C": call, "P": put}, "pending": {"C": None, "P": None}}
+
+
+def _new_bar(bot, monkeypatch, sig, state=None, sides="CP", exit_mode="eod", **bar):
     monkeypatch.setattr(bot.settings, "orb_hp_sides", sides)
+    monkeypatch.setattr(bot.settings, "orb_hp_exit", exit_mode)
     monkeypatch.setattr(bot, "latest_signal", lambda bars, p: (sig, ROW))
-    state = {"symbol": "SPY", "position": position, "pending": None}
+    state = state or _state()
     bot.on_new_bar(NS(log_signal=lambda *a, **k: None), state, _bars(**bar))
     return state
 
 
+def test_live_defaults_are_one_trade_a_day_before_11_held_to_the_close():
+    from tradingbot import rules
+    from tradingbot.config import settings
+    assert settings.orb_hp_sides == "CP" and settings.orb_hp_exit == "eod"
+    assert settings.orb_hp_last_entry_time == "11:00" and rules.load("orb_hp")["trades"] == 1
+
+
 def test_signal_arms_its_side(bot, monkeypatch):
-    assert _new_bar(bot, monkeypatch, s.CALL)["pending"]["right"] == "C"
-    assert _new_bar(bot, monkeypatch, s.PUT)["pending"]["right"] == "P"
-    assert _new_bar(bot, monkeypatch, s.PUT, sides="C")["pending"] is None
+    assert _new_bar(bot, monkeypatch, s.CALL)["pending"]["C"]["right"] == "C"
+    assert _new_bar(bot, monkeypatch, s.PUT)["pending"]["P"]["right"] == "P"
+    assert _new_bar(bot, monkeypatch, s.PUT, sides="C")["pending"]["P"] is None
 
 
-def test_red_candle_flags_a_call_and_green_a_put(bot, monkeypatch):
-    st = _new_bar(bot, monkeypatch, None, position={"id": 1, "right": "C"}, open_=601, close=600)
-    assert st["position"]["candle_exit"] is True
-    st = _new_bar(bot, monkeypatch, None, position={"id": 1, "right": "C"}, open_=600, close=601)
-    assert not st["position"].get("candle_exit")
-    st = _new_bar(bot, monkeypatch, None, position={"id": 1, "right": "P"}, open_=600, close=601)
-    assert st["position"]["candle_exit"] is True
+def test_never_a_call_and_a_put_together(bot, monkeypatch):
+    st = _new_bar(bot, monkeypatch, s.PUT, state=_state(call={"id": 1, "right": "C"}))
+    assert st["pending"]["P"] is None
+    st = _new_bar(bot, monkeypatch, s.CALL, state=_state(put={"id": 1, "right": "P"}))
+    assert st["pending"]["C"] is None
 
 
-def test_signal_while_holding_waits_unless_the_position_is_closing(bot, monkeypatch):
-    st = _new_bar(bot, monkeypatch, s.CALL, position={"id": 1, "right": "C"}, open_=600, close=601)
-    assert st["pending"] is None
-    st = _new_bar(bot, monkeypatch, s.CALL, position={"id": 1, "right": "P"}, open_=600, close=601)
-    assert st["position"]["candle_exit"] and st["pending"]["right"] == "C"     # put sold, then the call
+def test_held_to_the_close_unless_candle_exit_is_chosen(bot, monkeypatch):
+    st = _new_bar(bot, monkeypatch, None, state=_state(call={"id": 1, "right": "C"}), open_=601, close=600)
+    assert not st["positions"]["C"].get("candle_exit")   # default: a red candle doesn't sell
+    st = _new_bar(bot, monkeypatch, None, state=_state(call={"id": 1, "right": "C"}, put={"id": 2, "right": "P"}),
+                  exit_mode="candle", open_=601, close=600)
+    assert st["positions"]["C"]["candle_exit"] and not st["positions"]["P"].get("candle_exit")
 
 
 def test_pending_lapses_after_one_candle(bot, monkeypatch):
     st = _new_bar(bot, monkeypatch, s.CALL)
     monkeypatch.setattr(bot, "latest_signal", lambda bars, p: (None, None))
     bot.on_new_bar(NS(log_signal=lambda *a, **k: None), st, _bars(minute=5))
-    assert st["pending"] is None
+    assert st["pending"]["C"] is None
 
 
-def _tick(bot, monkeypatch, now, entries=0):
+def _tick(bot, monkeypatch, now, entries=None, positions=None, pending=("P",)):
     monkeypatch.setattr(bot, "_now_et", lambda: now.replace(tzinfo=bot.ET))
     monkeypatch.setattr(bot, "_price", lambda ib, c: 601.0)
+    monkeypatch.setattr(bot, "check_exit", lambda *a, **k: False)
     entered = []
-    monkeypatch.setattr(bot, "enter", lambda ib, j, st, sp, eq: entered.append(st["pending"]["right"]) or {"id": 3})
-    state = {"symbol": "SPY", "underlying": None, "position": None, "entries_today": entries,
+    monkeypatch.setattr(bot, "enter", lambda ib, j, st, pend, sp, eq: entered.append(pend["right"]) or {"id": 3})
+    bar = pd.Timestamp("2026-11-19 10:55", tz="America/New_York")
+    state = {"symbol": "SPY", "underlying": None, "positions": positions or {"C": None, "P": None},
+             "entries_today": entries or {"C": 0, "P": 0},
              "fetched_boundary": pd.Timestamp(now.replace(tzinfo=bot.ET)).floor("5min"),
-             "pending": {"bar_ts": pd.Timestamp("2026-11-19 10:55", tz="America/New_York"), "right": "P",
-                         "sma50": 599.0, "sma200": 598.0}}
+             "pending": {r: ({"bar_ts": bar, "right": r, "sma50": 599.0, "sma200": 598.0} if r in pending else None)
+                         for r in ("C", "P")}}
     bot.tick(None, NS(net_liquidation=lambda: 1e6), None, state)
     return state, entered
 
 
-def test_tick_enters_inside_the_window_only(bot, monkeypatch):
-    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 11, 0, 20))
-    assert entered == ["P"] and st["entries_today"] == 1 and st["position"] == {"id": 3}
-    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 15, 5, 20))
-    assert entered == [] and st["pending"] is None
-    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 11, 0, 20), entries=6)
-    assert entered == []
+def test_tick_enters_before_11_only_and_once_a_day(bot, monkeypatch):
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 10, 40, 20))
+    assert entered == ["P"] and st["entries_today"]["P"] == 1 and st["positions"]["P"] == {"id": 3}
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 11, 5, 20))
+    assert entered == [] and st["pending"]["P"] is None          # after 11am: dropped
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 10, 40, 20), entries={"C": 1, "P": 0})
+    assert entered == []                                          # today's one trade (a call) already taken
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 10, 40, 20),
+                        positions={"C": {"id": 9, "right": "C"}, "P": None}, pending=("P",))
+    assert entered == []                                          # a call is open: no put alongside it
+    st, entered = _tick(bot, monkeypatch, datetime(2026, 11, 19, 10, 40, 20), pending=("C", "P"))
+    assert entered == ["C"] and st["pending"]["P"] is None        # both armed at once: only one is bought
+
+
+def test_journal_counts_and_recovers_each_side(tmp_path):
+    j = Journal(str(tmp_path / "j.db"))
+    for right in ("C", "P"):
+        j.open_orb_position("SPY", "2026-11-19T15:00:00+00:00", "20261119", 600, right, 1, 1.0, 1, 599, 598,
+                            table="orb_hp_positions")
+    assert j.option_entries_on("orb_hp_positions", "SPY", "2026-11-19", right="C") == 1
+    assert j.option_entries_on("orb_hp_positions", "SPY", "2026-11-19") == 2
+    assert [r["right"] for r in j.open_option_rows("orb_hp_positions", "SPY")] == ["C", "P"]
 
 
 def test_task_schedule_and_controls():

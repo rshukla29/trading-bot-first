@@ -7,13 +7,14 @@ SPY candles, trading SPY 0DTE options like the live bot.
 
 Simulation:
   - a signal on a completed candle enters at the next candle's open (the bot
-    buys a few seconds after the close); entries 9:35-15:00, one position at
-    a time, at most 6 a day (also shown without the cap);
+    buys a few seconds after the close), one position at a time; the live
+    rules take the first signal of the day before 11:00am and hold to 3:55pm
+    (the first line); the other lines are the alternatives tested;
   - the option: 0DTE, strike nearest SPY, priced with Black-Scholes at the
     VIX-calibrated volatility the ORB backtest uses (no historical option
     quotes on this account: real fills can differ);
-  - exit at the next open after the first opposite-colour candle (red for a
-    call, green for a put), or at 15:55.
+  - exit at 15:55, or ("candle") at the next open after the first
+    opposite-colour candle (red for a call, green for a put).
 Costs: slippage per share per side and $0.65 per contract per side. Per contract.
 """
 from __future__ import annotations
@@ -77,15 +78,18 @@ class Variant:
     name: str
     sides: str = "CP"
     stop: float | None = None
-    max_trades: int | None = 6
+    max_trades: int | None = 1
+    last: time = time(11, 0)
+    exit: str = "eod"                # eod: hold to 3:55pm; candle: first opposite-colour candle
 
 
 VARIANTS = [
-    Variant("As specified: calls and puts, max 6/day"),
-    Variant("Calls only", sides="C"),
-    Variant("Puts only", sides="P"),
-    Variant("No daily cap", max_trades=None),
-    Variant("+ 30% stop loss", stop=0.30),
+    Variant("LIVE: 1/day before 11am, hold to 3:55pm"),
+    Variant("  calls only", sides="C"),
+    Variant("  puts only", sides="P"),
+    Variant("1/day before 11am, sell on opposite candle", exit="candle"),
+    Variant("Up to 6/day to 3pm, sell on opposite candle", max_trades=6, last=time(15, 0), exit="candle"),
+    Variant("Up to 6/day to 3pm, hold to 3:55pm", max_trades=6, last=time(15, 0)),
 ]
 
 
@@ -123,16 +127,16 @@ def simulate(spy: pd.DataFrame, vix: pd.Series, v: Variant, slip: float, comm: f
             lvl = pos["px0"] * (1 - v.stop)
             if premium(bad, pos["k"], ts, vix_now, pos["r"]) <= lvl:
                 close_pos(bad, ts, vix_now, "stop", prem=lvl)
-        if pos is not None and candle_exit(pos["r"], o[i], c[i]):
+        if pos is not None and v.exit == "candle" and candle_exit(pos["r"], o[i], c[i]):
             pos["exit"] = True
         want = sig[i - 1]
-        if pos is None and want and want in v.sides and idx[i - 1].date() == d and FIRST <= t < LAST \
+        if pos is None and want and want in v.sides and idx[i - 1].date() == d and FIRST <= t < v.last \
                 and (v.max_trades is None or per_day.get(d, 0) < v.max_trades):
             k = round(o[i])
             px0 = premium(o[i], k, ts, vix_now, want)
             pos = dict(k=k, r=want, px0=px0, px=px0 + slip, ts=ts, day=d)
             per_day[d] = per_day.get(d, 0) + 1
-            if candle_exit(want, o[i], c[i]):      # the entry candle itself closes the wrong colour
+            if v.exit == "candle" and candle_exit(want, o[i], c[i]):   # the entry candle closes the wrong colour
                 pos["exit"] = True
     return pd.DataFrame(trades)
 
@@ -168,7 +172,7 @@ def main() -> None:
         print(f"{v.name:42} {s['n']:6d} {s['n'] / len(days):5.1f} {s['win']:6.1f} {s['avg']:7.2f} {s['pf']:5.2f} "
               f"{s['total']:9.0f} {s['dd']:9.0f}")
     t = res[VARIANTS[0].name]
-    print("\nAs specified, by half-year:")
+    print("\nLIVE rules, by half-year:")
     half = t["exit"].dt.year.astype(str) + np.where(t["exit"].dt.month <= 6, "-H1", "-H2")
     for k, g in t.groupby(half):
         s = stats(g)

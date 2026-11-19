@@ -617,12 +617,23 @@ class Journal:
                 f"SELECT * FROM {_option_table(table)} WHERE status='open' AND conid=?", (conid,)
             ).fetchall()
 
-    def option_entries_on(self, table: str, symbol: str, day: str) -> int:
+    def option_entries_on(self, table: str, symbol: str, day: str, right: str | None = None) -> int:
         """How many positions `table` opened for `symbol` on `day` (YYYY-MM-DD,
-        UTC entry timestamp: the US session never crosses UTC midnight)."""
+        UTC entry timestamp: the US session never crosses UTC midnight),
+        only calls or puts when `right` is given."""
+        sql = f"SELECT COUNT(*) FROM {_option_table(table)} WHERE symbol=? AND entry_date LIKE ?"
+        args: tuple = (symbol, f"{day}%")
+        if right:
+            sql, args = sql + " AND right=?", args + (right,)
         with self._connect() as conn:
-            return conn.execute(f"SELECT COUNT(*) FROM {_option_table(table)} WHERE symbol=? AND entry_date LIKE ?",
-                                (symbol, f"{day}%")).fetchone()[0]
+            return conn.execute(sql, args).fetchone()[0]
+
+    def open_option_rows(self, table: str, symbol: str) -> list[sqlite3.Row]:
+        """Every open position in `table` for `symbol`, oldest first."""
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            return conn.execute(f"SELECT * FROM {_option_table(table)} WHERE status='open' AND symbol=? ORDER BY id",
+                                (symbol,)).fetchall()
 
     def close_orb_position(self, position_id: int, exit_date: str, exit_premium: float, exit_reason: str,
                            realized_pnl: float, table: str = "orb_positions") -> None:
