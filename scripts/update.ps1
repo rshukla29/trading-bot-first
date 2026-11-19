@@ -72,6 +72,7 @@ $old = (git rev-parse HEAD).Trim()
 
 function Rollback($why) {
     Say "FAILED: $why - going back to $from"
+    git merge --abort 2>$null | Out-Null
     git reset --hard --quiet $old
     & $py -m pip install --quiet -e ".[dev]" 2>&1 | Out-Null
     RegisterTasks | Out-Null
@@ -79,8 +80,12 @@ function Rollback($why) {
     RestartServer; exit 1
 }
 
-git merge --ff-only --quiet $Version
-if ($LASTEXITCODE -ne 0) { Rollback "this copy has commits of its own, so it can't move straight to the release" }
+# The bots commit each day's reports and reviews to this copy, so it usually
+# has commits of its own: merge the release in, keeping them. Where a file
+# differs on both sides, the release's version wins (code is never edited
+# here: step 1 refused edited files).
+git merge --no-edit --quiet -X theirs -m "Update to $Version" $Version
+if ($LASTEXITCODE -ne 0) { Rollback "the release couldn't be merged with this copy's own commits" }
 
 # 3. Packages, a load check, the scheduled tasks.
 & $py -m pip install --quiet -e ".[dev]"
