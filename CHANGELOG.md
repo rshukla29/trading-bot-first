@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+## 1.3.0 — 2026-11-19
+
 - New paper-experiment strategy **ORB-0DTE-HP**: one SPY same-day call or put a day, bought on the first 5-minute candle before 11am that closes on the same side of the 9 EMA, 50 SMA, 200 SMA and VWAP as a fresh MACD cross (MACD above 0 for a call, below for a put), and held to 3:55pm. It has its own card on the Rules tab and its own Start / Pause / Stop buttons. In a 4-year backtest it made money every year (profit factor 1.39), but option prices there are estimated, so it starts as a paper experiment.
 
 ## 1.2.0 — 2026-11-18
