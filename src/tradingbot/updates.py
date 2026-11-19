@@ -163,6 +163,8 @@ def last_result(now: datetime | None = None) -> dict | None:
         if age > 15 * 60:  # update.ps1 never reported back
             return {"ok": False, "from": r.get("from"), "to": r.get("to"), "at": r.get("at"),
                     "message": "The last update didn't report back. See the logs folder (update_*.log)."}
+    if r.get("ok") is False and (parse(current()) or (0,)) > (parse(str(r.get("from") or "")) or (0,)):
+        return None  # failed from an older version, and this copy has been updated since: no longer news
     return r
 
 

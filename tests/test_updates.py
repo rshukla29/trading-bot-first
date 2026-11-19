@@ -221,3 +221,11 @@ def test_release_script_refuses_a_bad_version_number(monkeypatch):
     monkeypatch.setattr(release.sys, "argv", ["release.py", "1.1"])
     with pytest.raises(SystemExit, match="Usage"):
         release.main()
+
+
+def test_an_old_failure_stops_showing_once_the_copy_is_newer(monkeypatch):
+    updates.RESULT.write_text('{"ok": false, "from": "1.3.0", "to": "1.3.0", "message": "Update to 1.4.0 failed"}')
+    monkeypatch.setattr(updates, "current", lambda: "1.3.0")
+    assert updates.last_result()["ok"] is False          # still on 1.3.0: show the failure
+    monkeypatch.setattr(updates, "current", lambda: "1.4.0")
+    assert updates.last_result() is None                 # updated another way since: hide it
