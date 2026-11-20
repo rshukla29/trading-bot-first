@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Snapshot postmarket 2026-11-20</title><style>
+body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 24px; color: #1a1a1a; }
+h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 28px; }
+table { border-collapse: collapse; width: 100%; max-width: 800px; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; font-size: 13px; }
+th { background: #f4f4f4; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+.pos { color: #0a7a2f; } .neg { color: #b3261e; }
+.empty { color: #888; font-style: italic; }
+.warn { color: #b3261e; font-weight: bold; }
+</style></head><body>
+<h1>Trading bot snapshot: postmarket — 2026-11-20 (account DUR356762)</h1>
+<h2>Open orders</h2>
+<p class='empty'>(none)</p>
+<h2>Open positions &amp; unrealized P&amp;L</h2>
+<table><tr><th>Symbol</th><th>Qty</th><th>Avg Price</th><th>Mkt Price</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>
+<tr><td>SPY 20261120 719.0C</td><td>2</td><td>0.01</td><td>0.00</td><td>0.00</td><td class='neg'>-2.71</td></tr>
+<tr><td>SPY 20261120 721.0C</td><td>2</td><td>0.23</td><td>0.00</td><td>0.00</td><td class='neg'>-46.24</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='neg'><b>-48.95</b></td></tr>
+</table>
+<p class='empty'>Avg Price = average price paid per share (for options, per share of the contract — x100 per contract), the same unit as Mkt Price.</p>
+<h2>Stop-loss coverage (stocks)</h2>
+<p class='empty'>(no stock positions)</p>
+<h2>Fibonacci levels (20-day swing)</h2>
+<table><tr><th>Symbol</th><th>Last</th><th>Swing high</th><th>Swing low</th><th>38.2%</th><th>50%</th><th>61.8%</th><th>127.2% up</th><th>161.8% up</th><th>127.2% down</th><th>Where price sits</th></tr>
+<tr><td>SPY</td><td>689.81</td><td>775.64</td><td>686.75</td><td>741.68</td><td>731.19</td><td>720.71</td><td>799.82</td><td>830.57</td><td>662.57</td><td>deep retracement (97%)</td></tr>
+</table>
+<p class='empty'>Retracements are measured down from the swing high; extensions project the swing range beyond the high (up) or low (down). Computed from IBKR daily bars — IBKR's API can't read chart drawings.</p>
+<h2>Closed positions P&amp;L (today)</h2>
+<table><tr><th>Symbol</th><th>Position</th><th>Qty</th><th>Avg Bought @</th><th>Avg Sold @</th><th>Net P&amp;L</th></tr>
+<tr><td>SPY 20261120 713.0P</td><td>long</td><td>1</td><td>4.30</td><td>5.41</td><td class='pos'>110.30</td></tr>
+<tr><td>SPY 20261120 713.0P</td><td>long</td><td>1</td><td>4.30</td><td>5.41</td><td class='pos'>111.00</td></tr>
+<tr><td>SPY 20261120 719.0C</td><td>short</td><td>2</td><td>0.01</td><td>0.35</td><td class='pos'>67.04</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='pos'><b>288.35</b></td></tr>
+</table>
+<p class='empty'>Prices are per share (options: per share of the contract, x100 per contract). The closing price is IBKR's fill; the opening average is worked out from IBKR's realized P&amp;L, so it includes the opening commission. Net P&amp;L is after all commissions.</p>
+<h2>P&amp;L by strategy (today)</h2>
+<table><tr><th>Strategy</th><th>Closed trades</th><th>Wins</th><th>Win %</th><th>Realized P&amp;L</th></tr>
+<tr><td>ORB (SPY 0DTE options)</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>ORB-0DTE-HP (SPY 0DTE options)</td><td>1</td><td>1</td><td>100%</td><td class='pos'>224.00</td></tr>
+<tr><td>ORB credit spreads</td><td>1</td><td>1</td><td>100%</td><td class='pos'>48.00</td></tr>
+<tr><td>Iron condor</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>Trend Join</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>Stock ORB</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>MA-crossover</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>RSI(2)</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td><b>TOTAL</b></td><td><b>2</b></td><td><b>2</b></td><td><b>100%</b></td><td class='pos'><b>272.00</b></td></tr>
+</table>
+<p class='empty'>Closed trades only — open positions (e.g. iron condors, stocks still held) are in the positions table. Option strategies, Trend Join and Stock ORB come from each bot's journal (option P&amp;L before commissions); MA-crossover and RSI(2) from IBKR's stock fills (after commissions), matched to the bot that bought them; Manual / other is everything else (e.g. your own trades).</p>
+<h2>Stock ORB — Time Machine checks (today)</h2>
+<p class='empty'>(no Stock ORB breakouts checked)</p>
+<h2>Account P&amp;L (today)</h2>
+<table><tr><td>Realized P&amp;L</td><td class='pos'>288.35</td></tr><tr><td>Unrealized P&amp;L</td><td class='neg'>-48.95</td></tr><tr><td>Daily P&amp;L</td><td class='pos'>239.40</td></tr></table>
+<h2>Overall</h2>
+<table><tr><td>Total Balance (Net Liquidation)</td><td>1,001,499.09</td></tr><tr><td>YTD P&amp;L (vs 1,000,000 baseline)</td><td class='pos'>1,499.09 (+0.15%)</td></tr></table>
+</body></html>
