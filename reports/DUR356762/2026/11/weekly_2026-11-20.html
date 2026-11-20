@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset='utf-8'><title>Weekly report 2026-11-20</title><style>
+body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 24px; color: #1a1a1a; }
+h1 { font-size: 18px; } h2 { font-size: 15px; margin-top: 28px; }
+table { border-collapse: collapse; width: 100%; max-width: 800px; }
+th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; font-size: 13px; }
+th { background: #f4f4f4; text-align: right; }
+th:first-child, td:first-child { text-align: left; }
+.pos { color: #0a7a2f; } .neg { color: #b3261e; }
+.empty { color: #888; font-style: italic; }
+.warn { color: #b3261e; font-weight: bold; }
+</style></head><body>
+<h1>Trading bot weekly report — 2026-11-16 to 2026-11-20 (account DUR356762)</h1>
+<h2>Open positions &amp; unrealized P&amp;L</h2>
+<table><tr><th>Symbol</th><th>Qty</th><th>Avg Price</th><th>Mkt Price</th><th>Mkt Value</th><th>Unrealized P&amp;L</th></tr>
+<tr><td>SPY 20261120 719.0C</td><td>2</td><td>0.01</td><td>0.00</td><td>0.00</td><td class='neg'>-2.71</td></tr>
+<tr><td>SPY 20261120 721.0C</td><td>2</td><td>0.23</td><td>0.00</td><td>0.00</td><td class='neg'>-46.24</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='neg'><b>-48.95</b></td></tr>
+</table>
+<p class='empty'>Avg Price = average price paid per share (for options, per share of the contract — x100 per contract), the same unit as Mkt Price.</p>
+<h2>Closed positions P&amp;L (weekly)</h2>
+<table><tr><th>Symbol</th><th>Position</th><th>Qty</th><th>Avg Bought @</th><th>Avg Sold @</th><th>Net P&amp;L</th></tr>
+<tr><td>SPY 20261116 746.0P</td><td>long</td><td>5</td><td>1.72</td><td>3.09</td><td class='pos'>684.09</td></tr>
+<tr><td>SPY 20261118 736.0C</td><td>short</td><td>2</td><td>0.02</td><td>0.19</td><td class='pos'>34.09</td></tr>
+<tr><td>SPY 20261119 740.0C</td><td>short</td><td>1</td><td>0.01</td><td>0.25</td><td class='pos'>23.54</td></tr>
+<tr><td>SPY 20261120 713.0P</td><td>long</td><td>1</td><td>4.30</td><td>5.41</td><td class='pos'>110.30</td></tr>
+<tr><td>SPY 20261120 713.0P</td><td>long</td><td>1</td><td>4.30</td><td>5.41</td><td class='pos'>111.00</td></tr>
+<tr><td>SPY 20261120 719.0C</td><td>short</td><td>2</td><td>0.01</td><td>0.35</td><td class='pos'>67.04</td></tr>
+<tr><td colspan='5'><b>TOTAL</b></td><td class='pos'><b>1030.08</b></td></tr>
+</table>
+<p class='empty'>Prices are per share (options: per share of the contract, x100 per contract). The closing price is IBKR's fill; the opening average is worked out from IBKR's realized P&amp;L, so it includes the opening commission. Net P&amp;L is after all commissions.</p>
+<h2>P&amp;L by strategy (weekly, 2026-11-16 to 2026-11-20)</h2>
+<table><tr><th>Strategy</th><th>Closed trades</th><th>Wins</th><th>Win %</th><th>Realized P&amp;L</th></tr>
+<tr><td>ORB (SPY 0DTE options)</td><td>1</td><td>1</td><td>100%</td><td class='pos'>690.00</td></tr>
+<tr><td>ORB-0DTE-HP (SPY 0DTE options)</td><td>1</td><td>1</td><td>100%</td><td class='pos'>224.00</td></tr>
+<tr><td>ORB credit spreads</td><td>3</td><td>3</td><td>100%</td><td class='pos'>71.00</td></tr>
+<tr><td>Iron condor</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>Trend Join</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>Stock ORB</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>MA-crossover</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td>RSI(2)</td><td>0</td><td>0</td><td>—</td><td class='pos'>0.00</td></tr>
+<tr><td><b>TOTAL</b></td><td><b>5</b></td><td><b>5</b></td><td><b>100%</b></td><td class='pos'><b>985.00</b></td></tr>
+</table>
+<p class='empty'>Closed trades only — open positions (e.g. iron condors, stocks still held) are in the positions table. Option strategies, Trend Join and Stock ORB come from each bot's journal (option P&amp;L before commissions); MA-crossover and RSI(2) from IBKR's stock fills (after commissions), matched to the bot that bought them; Manual / other is everything else (e.g. your own trades).</p>
+<h2>Stock ORB — Time Machine checks (weekly)</h2>
+<p class='empty'>(no Stock ORB breakouts checked)</p>
+<h2>Account P&amp;L (weekly)</h2>
+<table><tr><td>Realized P&amp;L</td><td class='pos'>1030.08</td></tr><tr><td>Unrealized P&amp;L (current)</td><td class='neg'>-48.95</td></tr><tr><td>Total P&amp;L</td><td class='pos'>981.13</td></tr></table>
+<h2>Overall</h2>
+<table><tr><td>Total Balance (Net Liquidation)</td><td>1,001,499.09</td></tr><tr><td colspan='2' class='empty'>No prior balance recorded before this period yet — period % change unavailable until at least one full day has been recorded.</td></tr></table>
+</body></html>
