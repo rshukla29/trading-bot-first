@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+## 1.3.2 — 2026-11-24
+
 - Reports, daily reviews and analysis now stay on this computer and are no longer saved into the download, so a **new install starts with an empty dashboard** instead of showing older paper accounts' results. Updating removes the old reports that came with the download; reports this copy made itself are kept.
 
 - The setup check's **SPY option prices** test no longer warns "Couldn't look up an option" when IBKR still lists last week's expired date: it tests the nearest expiry from today on.
