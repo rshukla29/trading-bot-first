@@ -107,9 +107,10 @@ class Settings(BaseSettings):
     # Live ORB symbols, traded independently in one process: each has its
     # own opening range, signal and position, and positions on different
     # symbols can be open at the same time (so risk adds up: ~1% of equity
-    # per open position). QQQ is excluded — this account lacks the Nasdaq
-    # market data subscription its stock and option quotes need (10089/10091).
-    orb_symbols: str = "SPY"
+    # per open position), and each has its own trades-per-day limit. QQQ was
+    # left out until 2026-11-24: the old paper account lacked its Nasdaq
+    # market data (10089/10091); the current one has it.
+    orb_symbols: str = "SPY,QQQ"
     options_bar_minutes: int = 5
     options_opening_range_minutes: int = 15
     options_risk_pct_per_trade: float = 0.01
@@ -223,7 +224,8 @@ class Settings(BaseSettings):
     # candle (ORB_HP_EXIT=candle) or taking more trades lost. Size and limits:
     # the Rules tab ("orb_hp").
     orb_hp_client_id: int = 91
-    orb_hp_symbol: str = "SPY"
+    # Each symbol trades on its own: one trade a day per symbol (Rules tab).
+    orb_hp_symbols: str = "SPY,QQQ"
     orb_hp_bar_minutes: int = 5
     orb_hp_sides: str = "CP"             # C calls only, P puts only, CP both
     orb_hp_otm_pct: float = 0.0          # 0 = the strike nearest SPY
@@ -348,7 +350,8 @@ class Settings(BaseSettings):
     # smile), so it trades small and records real leg quotes.
     credit_orb_enabled: bool = True
     credit_orb_client_id: int = 95
-    credit_orb_symbol: str = "SPY"
+    # Each symbol trades on its own: one spread a day per symbol.
+    credit_orb_symbols: str = "SPY,QQQ"
     credit_orb_range_minutes: int = 60
     credit_orb_entry_end: str = "12:00"
     credit_orb_min_range_pct: float = 0.002
@@ -461,6 +464,14 @@ class Settings(BaseSettings):
     @property
     def orb_symbol_list(self) -> list[str]:
         return [s.strip().upper() for s in self.orb_symbols.split(",") if s.strip()]
+
+    @property
+    def orb_hp_symbol_list(self) -> list[str]:
+        return [s.strip().upper() for s in self.orb_hp_symbols.split(",") if s.strip()]
+
+    @property
+    def credit_orb_symbol_list(self) -> list[str]:
+        return [s.strip().upper() for s in self.credit_orb_symbols.split(",") if s.strip()]
 
     @property
     def credit_spread_symbol_list(self) -> list[str]:

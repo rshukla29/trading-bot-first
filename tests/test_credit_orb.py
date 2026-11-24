@@ -90,3 +90,52 @@ def test_credit_limit_ladder_steps_from_mid_to_natural():
     assert credit_limit_ladder(0.20, 0.26, 0.08, 0.12, floor=0.10) == [0.13, 0.11]   # natural below the floor
     assert credit_limit_ladder(0.20, 0.20, 0.10, 0.10, floor=0.05) == [0.10]          # tight market: one price
     assert credit_limit_ladder(0.05, 0.07, 0.03, 0.05, floor=0.05) == []              # nothing worth selling
+
+
+# ---------------------------------------------------------------- SPY and QQQ
+
+def test_one_spread_a_day_per_symbol(journal):
+    journal.open_credit_orb("SPY", "2026-11-24", "up", "P", 698, 696, 111, 222, 2, 0.3, 698.7, 701.8)
+    assert journal.credit_orb_traded_on("2026-11-24", "SPY")
+    assert not journal.credit_orb_traded_on("2026-11-24", "QQQ")
+    assert journal.credit_orb_traded_on("2026-11-24")              # any symbol
+
+
+def test_recover_only_touches_its_own_symbol(journal):
+    from tradingbot import run_credit_orb_bot as bot
+    journal.open_credit_orb("QQQ", "2026-11-24", "up", "P", 630, 628, 333, 444, 1, 0.3, 631.0, 633.0)
+    assert bot.recover(None, journal, "SPY") is None
+    assert [r["symbol"] for r in journal.open_credit_orb_rows()] == ["QQQ"]   # QQQ's pending spread left alone
+
+
+def test_credit_main_runs_each_symbol_on_its_own(monkeypatch):
+    from datetime import datetime
+    from types import SimpleNamespace as NS
+    from tradingbot import run_credit_orb_bot as bot
+
+    class Client:
+        ib = NS(sleep=lambda s: None, qualifyContracts=lambda *c: list(c))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    calls = {"n": 0}
+
+    def now():
+        calls["n"] += 1
+        return datetime(2026, 11, 24, 10 if calls["n"] <= 3 else 16, 30, tzinfo=bot.ET)
+    monkeypatch.setattr(bot.settings, "credit_orb_enabled", True)
+    monkeypatch.setattr(bot.settings, "credit_orb_symbols", "SPY,QQQ")
+    monkeypatch.setattr(bot.settings, "credit_orb_skip_weekdays", "", raising=False)
+    monkeypatch.setattr(bot, "_now_et", now)
+    monkeypatch.setattr(bot, "IBKRClient", lambda *a, **k: Client())
+    monkeypatch.setattr(bot, "Journal", lambda path: NS(credit_orb_traded_on=lambda day, sym: sym == "SPY"))
+    monkeypatch.setattr(bot, "get_real_chain", lambda ib, sym: None)
+    monkeypatch.setattr(bot, "recover", lambda ib, j, sym: None)
+    monkeypatch.setattr(bot.control, "Gate", lambda *a: NS(stopped=lambda: False))
+    seen = []
+    monkeypatch.setattr(bot, "tick", lambda ib, c, j, g, cfg, ct, st: seen.append((st["symbol"], st["traded"])))
+    bot.main()
+    assert seen == [("SPY", True), ("QQQ", False)]   # SPY traded today already; QQQ still can

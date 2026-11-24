@@ -240,3 +240,73 @@ def test_task_schedule_and_controls():
     assert t["ny"] == "09:30" and (root / "scripts" / t["script"]).exists()
     from tradingbot import control
     assert control.STRATEGIES["orb_hp"]["task"] == "OrbHpTradingBot"
+
+
+# ---------------------------------------------------------------- SPY and QQQ
+
+class _Client:
+    ib = NS(sleep=lambda s: None)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _clock(bot, monkeypatch, open_calls=2):
+    """Market hours for the first few clock reads, then after the close (one loop pass)."""
+    calls = {"n": 0}
+
+    def now():
+        calls["n"] += 1
+        t = time(10, 0) if calls["n"] <= open_calls else time(16, 30)
+        return datetime(2026, 11, 24, t.hour, t.minute, tzinfo=bot.ET)
+    monkeypatch.setattr(bot, "_now_et", now)
+
+
+def test_defaults_trade_spy_and_qqq():
+    from tradingbot.config import Settings
+    fields = Settings.model_fields   # the code's defaults (a .env can still narrow them)
+    assert [fields[k].default for k in ("orb_symbols", "orb_hp_symbols", "credit_orb_symbols")] == ["SPY,QQQ"] * 3
+    assert Settings(_env_file=None, orb_hp_symbols=" spy, qqq ,").orb_hp_symbol_list == ["SPY", "QQQ"]
+
+
+def test_main_runs_each_symbol_on_its_own(bot, monkeypatch):
+    monkeypatch.setattr(bot.settings, "orb_hp_symbols", "SPY, qqq")
+    monkeypatch.setattr(bot, "IBKRClient", lambda *a, **k: _Client())
+    monkeypatch.setattr(bot, "Journal", lambda path: None)
+    monkeypatch.setattr(bot.GATE, "stopped", lambda: False)
+    monkeypatch.setattr(bot, "new_state", lambda ib, j, sym, today: {"symbol": sym, "positions": {"C": None, "P": None}})
+    ticks = []
+    monkeypatch.setattr(bot, "tick", lambda ib, c, j, st: ticks.append(st["symbol"]))
+    _clock(bot, monkeypatch)
+    bot.main()
+    assert ticks == ["SPY", "QQQ"]
+
+
+def test_a_symbol_that_fails_to_set_up_doesnt_stop_the_other(bot, monkeypatch):
+    monkeypatch.setattr(bot.settings, "orb_hp_symbols", "SPY,QQQ")
+    monkeypatch.setattr(bot, "IBKRClient", lambda *a, **k: _Client())
+    monkeypatch.setattr(bot, "Journal", lambda path: None)
+    monkeypatch.setattr(bot.GATE, "stopped", lambda: False)
+
+    def new_state(ib, j, sym, today):
+        if sym == "QQQ":
+            raise RuntimeError("no market data")
+        return {"symbol": sym, "positions": {"C": None, "P": None}}
+    monkeypatch.setattr(bot, "new_state", new_state)
+    ticks = []
+    monkeypatch.setattr(bot, "tick", lambda ib, c, j, st: ticks.append(st["symbol"]))
+    _clock(bot, monkeypatch)
+    bot.main()
+    assert ticks == ["SPY"]
+
+
+def test_each_symbol_has_its_own_trade_count(tmp_path):
+    j = Journal(str(tmp_path / "j.db"))
+    j.open_orb_position("SPY", "2026-11-24T15:00:00+00:00", "20261124", 700, "P", 1, 1.0, 1, 699, 698,
+                        table="orb_hp_positions")
+    assert j.option_entries_on("orb_hp_positions", "SPY", "2026-11-24") == 1
+    assert j.option_entries_on("orb_hp_positions", "QQQ", "2026-11-24") == 0   # QQQ can still trade today
+    assert j.open_option_rows("orb_hp_positions", "QQQ") == []

@@ -267,10 +267,12 @@ def record_mark(ib, journal: Journal, pos: dict, underlying) -> None:
         logger.exception("Mark failed")
 
 
-def recover(ib, journal: Journal) -> dict | None:
+def recover(ib, journal: Journal, symbol: str | None = None) -> dict | None:
     from ib_async import Option
     today = _now_et().date().isoformat()
     for row in journal.open_credit_orb_rows():
+        if symbol is not None and row["symbol"] != symbol:
+            continue
         if row["status"] == "pending":
             journal.cancel_credit_orb(row["id"], "pending_at_restart")
             continue
@@ -296,7 +298,6 @@ def main() -> None:
         logger.info("CREDIT_ORB_ENABLED=false — nothing to do")
         return
     cfg = config_from_settings()
-    symbol = settings.credit_orb_symbol
     close_time = _hhmm(settings.credit_orb_close_time)
     journal = Journal(settings.db_path)
     if _now_et().weekday() in cfg.skip_weekdays:
@@ -305,68 +306,89 @@ def main() -> None:
 
     with IBKRClient(settings, client_id=settings.credit_orb_client_id) as client:
         ib = client.ib
-        underlying = Stock(symbol, "SMART", "USD")
-        ib.qualifyContracts(underlying)
-        chain = get_real_chain(ib, symbol)
-        pos = recover(ib, journal)
+        today = _now_et().date().isoformat()
+        states = []
+        for symbol in settings.credit_orb_symbol_list:
+            # Each symbol on its own: its range, breakout, spread and one trade a day.
+            try:
+                underlying = Stock(symbol, "SMART", "USD")
+                ib.qualifyContracts(underlying)
+                states.append({"symbol": symbol, "underlying": underlying, "chain": get_real_chain(ib, symbol),
+                               "pos": recover(ib, journal, symbol),
+                               "traded": journal.credit_orb_traded_on(today, symbol),
+                               "last_bar": None, "last_mark": 0.0})
+            except Exception:
+                logger.exception("%s: couldn't set up the credit ORB — skipping it today", symbol)
+        if not states:
+            logger.error("Credit ORB: no symbol could be set up — not running today")
+            return
         gate = control.Gate("credit_orb", logger)
-        if gate.stopped() and pos is None:
+        if gate.stopped() and all(s["pos"] is None for s in states):
             logger.warning("Credit ORB is stopped from the dashboard and has no open spread — not running today")
             gate.close_done()
             return
-        traded = journal.credit_orb_traded_on(_now_et().date().isoformat())
-        last_bar, last_mark = None, 0.0
         logger.info("Credit ORB loop starting (%s, range %dm, entries until %s, max loss $%.0f)",
-                    symbol, cfg.range_minutes, settings.credit_orb_entry_end,
+                    ", ".join(s["symbol"] for s in states), cfg.range_minutes, settings.credit_orb_entry_end,
                     cfg.max_loss_dollars)
 
         while _now_et().time() < MARKET_CLOSE:
-            now = _now_et()
-            try:
-                if pos is not None and gate.wants_close():
-                    if close_spread(ib, journal, pos, symbol, "manual_stop"):
-                        pos = None
-                elif pos is not None:
-                    if now.time() >= close_time:
-                        if close_spread(ib, journal, pos, symbol, "close_1550"):
-                            pos = None
-                    elif now.timestamp() - last_mark >= MARK_EVERY_SECONDS:
-                        record_mark(ib, journal, pos, underlying)
-                        last_mark = now.timestamp()
-                elif not traded and now.time() < cfg.entry_end and gate.entries_allowed():
-                    bars = completed_bars(
-                        fetch_intraday_bars(ib, symbol, cfg.bar_minutes, duration="1 D"), pd.Timestamp(now), cfg.bar_minutes,
-                    )
-                    day = bars[bars.index.date == now.date()]
-                    if not day.empty and day.index[-1] != last_bar:
-                        last_bar = day.index[-1]
-                        sig = find_breakout(day, cfg)
-                        # Act only on a fresh breakout (this bar or the one before), never a stale one.
-                        if sig is not None and sig.bar_ts >= day.index[-1] - pd.Timedelta(minutes=cfg.bar_minutes):
-                            logger.info("%s: ORB %s breakout (range %.2f-%.2f, close %.2f)",
-                                        symbol, sig.direction, sig.range_low, sig.range_high, sig.spot)
-                            equity = client.net_liquidation()
-                            r = rules.load("credit_orb")
-                            hit = rules.daily_limit_hit(r, r.capital(equity))
-                            if hit is not None:
-                                logger.warning("%s: daily loss limit ($%.0f) reached — no trade today", symbol, hit)
-                            else:
-                                pos = open_spread(ib, journal, config_from_settings(equity), sig, chain, symbol)
-                            traded = True
-                            last_mark = 0.0
-                        elif sig is None:
-                            logger.info("%s: no qualifying breakout yet (%s)", symbol, last_bar.strftime("%H:%M"))
-            except Exception:
-                logger.exception("Credit ORB tick failed — retrying next tick")
-            if pos is None and gate.stopped():
+            for st in states:
+                tick(ib, client, journal, gate, cfg, close_time, st)
+            if all(s["pos"] is None for s in states) and gate.stopped():
                 gate.close_done()
                 logger.warning("Credit ORB stopped from the dashboard and flat — exiting")
                 break
             ib.sleep(TICK_SECONDS)
 
-        if pos is not None:
-            logger.error("Credit spread still open at the close — expiry guard / manual check needed")
+        for st in states:
+            if st["pos"] is not None:
+                logger.error("%s: credit spread still open at the close — expiry guard / manual check needed",
+                             st["symbol"])
         logger.info("Credit ORB loop finished for today")
+
+
+def tick(ib, client, journal: Journal, gate, cfg, close_time, st: dict) -> None:
+    """One pass for one symbol: manage its open spread, or look for its breakout."""
+    symbol, underlying, chain = st["symbol"], st["underlying"], st["chain"]
+    pos, traded, last_bar, last_mark = st["pos"], st["traded"], st["last_bar"], st["last_mark"]
+    now = _now_et()
+    try:
+        if pos is not None and gate.wants_close():
+            if close_spread(ib, journal, pos, symbol, "manual_stop"):
+                pos = None
+        elif pos is not None:
+            if now.time() >= close_time:
+                if close_spread(ib, journal, pos, symbol, "close_1550"):
+                    pos = None
+            elif now.timestamp() - last_mark >= MARK_EVERY_SECONDS:
+                record_mark(ib, journal, pos, underlying)
+                last_mark = now.timestamp()
+        elif not traded and now.time() < cfg.entry_end and gate.entries_allowed():
+            bars = completed_bars(
+                fetch_intraday_bars(ib, symbol, cfg.bar_minutes, duration="1 D"), pd.Timestamp(now), cfg.bar_minutes,
+            )
+            day = bars[bars.index.date == now.date()]
+            if not day.empty and day.index[-1] != last_bar:
+                last_bar = day.index[-1]
+                sig = find_breakout(day, cfg)
+                # Act only on a fresh breakout (this bar or the one before), never a stale one.
+                if sig is not None and sig.bar_ts >= day.index[-1] - pd.Timedelta(minutes=cfg.bar_minutes):
+                    logger.info("%s: ORB %s breakout (range %.2f-%.2f, close %.2f)",
+                                symbol, sig.direction, sig.range_low, sig.range_high, sig.spot)
+                    equity = client.net_liquidation()
+                    r = rules.load("credit_orb")
+                    hit = rules.daily_limit_hit(r, r.capital(equity))
+                    if hit is not None:
+                        logger.warning("%s: daily loss limit ($%.0f) reached — no trade today", symbol, hit)
+                    else:
+                        pos = open_spread(ib, journal, config_from_settings(equity), sig, chain, symbol)
+                    traded = True
+                    last_mark = 0.0
+                elif sig is None:
+                    logger.info("%s: no qualifying breakout yet (%s)", symbol, last_bar.strftime("%H:%M"))
+    except Exception:
+        logger.exception("%s: credit ORB tick failed — retrying next tick", symbol)
+    st.update(pos=pos, traded=traded, last_bar=last_bar, last_mark=last_mark)
 
 
 if __name__ == "__main__":

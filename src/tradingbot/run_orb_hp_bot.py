@@ -112,13 +112,15 @@ def rules_allow_entry(state: dict, right: str, equity: float) -> bool:
     r = rules.load(SID)
     if sum(state["entries_today"].values()) >= r["trades"]:
         if not state.get("trades_logged"):
-            logger.info("Max trades per day (%d) reached — no more ORB-0DTE-HP entries today", r["trades"])
+            logger.info("%s: max trades per day (%d) reached — no more ORB-0DTE-HP entries today",
+                        state["symbol"], r["trades"])
             state["trades_logged"] = True
         return False
     hit = rules.daily_limit_hit(r, r.capital(equity))
     if hit is not None:
         if not state.get("daily_logged"):
-            logger.warning("Daily loss limit ($%.0f) reached — no more ORB-0DTE-HP entries today", hit)
+            logger.warning("%s: daily loss limit ($%.0f) reached — no more ORB-0DTE-HP entries today",
+                           state["symbol"], hit)
             state["daily_logged"] = True
         return False
     return True
@@ -165,7 +167,7 @@ def enter(ib, journal: Journal, state: dict, pend: dict, spot: float, equity: fl
                                     contract.strike, right, contract.conId, fill, contracts,
                                     pend["sma50"], pend["sma200"], table=TABLE)
     journal.log_order(symbol, "OPEN_ORB_HP", contracts, "OPT", broker="IBKR", status="filled")
-    logger.info("OPENED ORB-0DTE-HP %s x%d at %.2f (SPY %.2f)", contract.localSymbol, contracts, fill, spot)
+    logger.info("OPENED ORB-0DTE-HP %s x%d at %.2f (%s %.2f)", contract.localSymbol, contracts, fill, symbol, spot)
     return {"id": pid, "contract": contract, "right": right, "entry_premium": fill, "contracts": contracts,
             "partial_pnl": 0.0, "peak_premium": fill}
 
@@ -231,8 +233,8 @@ def on_new_bar(journal: Journal, state: dict, bars: pd.DataFrame) -> None:
     last = bars.iloc[-1]
     for right, pend in list(state["pending"].items()):
         if pend is not None and bar_ts > pend["bar_ts"]:
-            logger.info("ORB-0DTE-HP %s signal from %s lapsed (not entered within one candle)",
-                        NAMES[right], pend["bar_ts"].strftime("%H:%M"))
+            logger.info("%s: ORB-0DTE-HP %s signal from %s lapsed (not entered within one candle)",
+                        state["symbol"], NAMES[right], pend["bar_ts"].strftime("%H:%M"))
             state["pending"][right] = None
     if settings.orb_hp_exit == "candle":
         for pos in state["positions"].values():
@@ -245,7 +247,8 @@ def on_new_bar(journal: Journal, state: dict, bars: pd.DataFrame) -> None:
               f"MACD {row['macd']:.3f} crossed {'above' if sig == CALL else 'below'} signal {row['signal']:.3f}")
     action = "BUY_CALL" if sig == CALL else "BUY_PUT"
     journal.log_signal(state["symbol"], action, float(row["close"]), reason, source=SOURCE)
-    logger.info("ORB-0DTE-HP %s signal on the %s candle: %s", action, bar_ts.strftime("%H:%M"), reason)
+    logger.info("%s: ORB-0DTE-HP %s signal on the %s candle: %s", state["symbol"], action,
+                bar_ts.strftime("%H:%M"), reason)
     if sig in sides() and all(p is None or p.get("candle_exit") for p in state["positions"].values()):
         state["pending"][sig] = {"bar_ts": bar_ts, "right": sig, "sma50": float(row["sma50"]),
                                  "sma200": float(row["sma200"])}
@@ -291,20 +294,33 @@ def flat(state: dict) -> bool:
     return all(p is None for p in state["positions"].values())
 
 
+def new_state(ib, journal: Journal, symbol: str, today: str) -> dict:
+    """One symbol's own candles, signal, position and trade count."""
+    underlying = Stock(symbol, "SMART", "USD")
+    ib.qualifyContracts(underlying)
+    return {
+        "symbol": symbol, "underlying": underlying, "chain": get_real_chain(ib, symbol),
+        "positions": recover_open_positions(ib, journal, symbol), "pending": {CALL: None, PUT: None},
+        "entries_today": {r: journal.option_entries_on(TABLE, symbol, today, right=r) for r in (CALL, PUT)},
+    }
+
+
 def main() -> None:
-    symbol = settings.orb_hp_symbol
+    symbols = settings.orb_hp_symbol_list
     journal = Journal(settings.db_path)
     with IBKRClient(settings, client_id=settings.orb_hp_client_id) as client:
         ib = client.ib
-        underlying = Stock(symbol, "SMART", "USD")
-        ib.qualifyContracts(underlying)
         today = datetime.now(timezone.utc).date().isoformat()
-        state = {
-            "symbol": symbol, "underlying": underlying, "chain": get_real_chain(ib, symbol),
-            "positions": recover_open_positions(ib, journal, symbol), "pending": {CALL: None, PUT: None},
-            "entries_today": {r: journal.option_entries_on(TABLE, symbol, today, right=r) for r in (CALL, PUT)},
-        }
-        if GATE.stopped() and flat(state):
+        states = []
+        for symbol in symbols:
+            try:
+                states.append(new_state(ib, journal, symbol, today))
+            except Exception:
+                logger.exception("%s: couldn't set up ORB-0DTE-HP — skipping it today", symbol)
+        if not states:
+            logger.error("ORB-0DTE-HP: no symbol could be set up — not running today")
+            return
+        if GATE.stopped() and all(flat(s) for s in states):
             logger.warning("ORB-0DTE-HP is stopped from the dashboard and has no open position — not running today")
             GATE.close_done()
             return
@@ -314,26 +330,30 @@ def main() -> None:
             logger.info("Started before market open, waiting %.0fs for 9:30am ET", wait_s)
             ib.sleep(max(0.0, wait_s))
 
-        logger.info("ORB-0DTE-HP live loop starting for %s (%d-min candles, sides %s, exit %s)", symbol,
-                    settings.orb_hp_bar_minutes, sides(), settings.orb_hp_exit)
+        logger.info("ORB-0DTE-HP live loop starting for %s (%d-min candles, sides %s, exit %s)",
+                    ", ".join(s["symbol"] for s in states), settings.orb_hp_bar_minutes, sides(),
+                    settings.orb_hp_exit)
         while _now_et().time() < MARKET_CLOSE:
-            try:
-                tick(ib, client, journal, state)
-            except Exception:
-                logger.exception("ORB-0DTE-HP tick failed — will retry next tick")
-            if GATE.stopped() and flat(state):
+            for state in states:
+                try:
+                    tick(ib, client, journal, state)
+                except Exception:
+                    logger.exception("%s: ORB-0DTE-HP tick failed — will retry next tick", state["symbol"])
+            if GATE.stopped() and all(flat(s) for s in states):
                 GATE.close_done()
                 logger.warning("ORB-0DTE-HP stopped from the dashboard and flat — exiting")
                 break
             ib.sleep(TICK_SECONDS)
 
-        for right, pos in state["positions"].items():
-            if pos is not None:
-                logger.warning("ORB-0DTE-HP %s still open at market close, final safety-net sell", NAMES[right])
-                try:
-                    check_exit(ib, journal, state, pos, force_reason="eod_flatten")
-                except Exception:
-                    logger.exception("ORB-0DTE-HP final sell failed")
+        for state in states:
+            for right, pos in state["positions"].items():
+                if pos is not None:
+                    logger.warning("%s: ORB-0DTE-HP %s still open at market close, final safety-net sell",
+                                   state["symbol"], NAMES[right])
+                    try:
+                        check_exit(ib, journal, state, pos, force_reason="eod_flatten")
+                    except Exception:
+                        logger.exception("%s: ORB-0DTE-HP final sell failed", state["symbol"])
         logger.info("ORB-0DTE-HP live loop finished for today")
 
 

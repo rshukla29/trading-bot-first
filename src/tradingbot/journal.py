@@ -538,11 +538,13 @@ class Journal:
             conn.execute("UPDATE credit_orb_positions SET status='cancelled', exit_reason=? WHERE id=?",
                          (reason, position_id))
 
-    def credit_orb_traded_on(self, trade_date: str) -> bool:
+    def credit_orb_traded_on(self, trade_date: str, symbol: str | None = None) -> bool:
+        """A spread was tried that day (for one symbol, or any)."""
+        sql, args = "SELECT 1 FROM credit_orb_positions WHERE trade_date=?", [trade_date]
+        if symbol is not None:
+            sql, args = sql + " AND symbol=?", args + [symbol]
         with self._connect() as conn:
-            return conn.execute(
-                "SELECT 1 FROM credit_orb_positions WHERE trade_date=? LIMIT 1", (trade_date,)
-            ).fetchone() is not None
+            return conn.execute(sql + " LIMIT 1", args).fetchone() is not None
 
     def update_credit_orb_contracts(self, position_id: int, contracts: int) -> None:
         with self._connect() as conn:

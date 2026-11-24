@@ -193,15 +193,15 @@ notional per position (`MAX_POSITION_VALUE`), broker-side **GTC** stop
 (−10% MA-crossover, −15% RSI(2); cancelled automatically when the bot
 sells), max 5 positions each.
 
-### 3. Opening Range Breakout (SPY 0DTE options)
+### 3. Opening Range Breakout (SPY and QQQ 0DTE options)
 
 Code: [options/orb_strategy.py](src/tradingbot/options/orb_strategy.py),
 [run_orb_bot.py](src/tradingbot/run_orb_bot.py)
 
-- **Symbols:** `ORB_SYMBOLS` = SPY (the bot supports several, each traded
-  independently). IWM was dropped 2026-09-29: no exit variant made it
-  profitable over 4 years (PF 0.94-0.99). QQQ needs a Nasdaq market data
-  subscription this account doesn't have.
+- **Symbols:** `ORB_SYMBOLS` = SPY,QQQ, each traded independently with its
+  own trades-per-day limit (the daily loss limit covers both). QQQ was added
+  2026-11-24, once the account had its Nasdaq market data. IWM was dropped
+  2026-09-29: no exit variant made it profitable over 4 years (PF 0.94-0.99).
 - **Opening range:** high/low of the first 15 minutes.
 - **Entry (since 2026-10-02):** a call when **two consecutive completed
   5-min bars close above the range** (a put: below), and only if:
@@ -311,7 +311,7 @@ Code: [strategy/trend_join.py](src/tradingbot/strategy/trend_join.py),
 - No backtest — the article's own backtest doesn't transfer to live
   execution; paper-trade it for at least 2 weeks before judging it.
 
-### 6. ORB credit spreads (SPY 0DTE, paper experiment since 2026-10-02)
+### 6. ORB credit spreads (SPY and QQQ 0DTE, paper experiment since 2026-10-02)
 
 Code: [options/credit_orb.py](src/tradingbot/options/credit_orb.py) (rules,
 shared with the backtest), [run_credit_orb_bot.py](src/tradingbot/run_credit_orb_bot.py).
@@ -319,6 +319,8 @@ Source: Option Alpha and Quantish published SPX 0DTE ORB research
 (~87–89% win rate, PF 1.3–1.44) — see
 [analysis/2026-10-01_orb_loss_analysis](analysis/2026-10-01_orb_loss_analysis/).
 
+- **Symbols:** `CREDIT_ORB_SYMBOLS` = SPY,QQQ (QQQ since 2026-11-24). Each has
+  its own range, breakout and one spread a day; the daily loss limit covers both.
 - **Opening range:** the first 60 minutes (9:30–10:30); must be at least
   0.2% of the open.
 - **Entry:** the first completed 5-min close outside the range between
@@ -399,11 +401,13 @@ only if it agrees → bracket order → stop / target / 3:55 flatten.**
   because the owner asked for it, and the live checks in the reports will
   show how it does on real fills.
 
-### 8. ORB-0DTE-HP (SPY 0DTE options, 5-minute candles, paper experiment)
+### 8. ORB-0DTE-HP (SPY and QQQ 0DTE options, 5-minute candles, paper experiment)
 
 [run_orb_hp_bot.py](src/tradingbot/run_orb_hp_bot.py), rules in
 [options/orb_hp_strategy.py](src/tradingbot/options/orb_hp_strategy.py).
-Each completed 5-minute SPY candle is judged a few seconds after it closes.
+Each completed 5-minute candle is judged a few seconds after it closes, for
+SPY and QQQ separately (`ORB_HP_SYMBOLS`, QQQ since 2026-11-24): each symbol has
+its own one trade a day, and the daily loss limit covers both.
 
 | | Buy a **call** when, on one candle | Buy a **put** when, on one candle |
 |---|---|---|
