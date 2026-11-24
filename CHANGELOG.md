@@ -10,6 +10,8 @@ that needs people to do something (e.g. new settings in .env).
 
 ## Unreleased
 
+## 1.3.3 — 2026-11-24
+
 - **QQQ added** to ORB, ORB-0DTE-HP and the ORB credit spreads, next to SPY. Each symbol trades on its own with its own trades-per-day limit (e.g. ORB-0DTE-HP: one SPY trade and one QQQ trade a day); the daily loss limit covers both. A copy whose settings file lists `ORB_SYMBOLS=SPY` keeps ORB on SPY only until that line is changed to `SPY,QQQ`.
 
 ## 1.3.2 — 2026-11-24
