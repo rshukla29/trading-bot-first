@@ -37,9 +37,7 @@ if ($LASTEXITCODE -eq 0 -and $review) {
     "Claude review failed (exit $LASTEXITCODE)" | Out-File -Append -FilePath $logFile
 }
 
-# Commit locally (no push), like the daily snapshots.
-git add "analysis/daily/$y/$m/$d" *>> $logFile
-git commit -m "Daily review: $date" *>> $logFile
+# The review stays on this computer (analysis/ isn't in git).
 
 # Refresh the dashboard so it shows today's review (reports/dashboard.html).
 & ".\.venv\Scripts\python.exe" -m tradingbot.run_dashboard *>> $logFile

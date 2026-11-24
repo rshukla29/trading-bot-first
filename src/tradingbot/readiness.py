@@ -273,7 +273,10 @@ def ibkr_checks(out: list[dict] | None = None, timeout: float = 10.0, wait_minut
         opt = None
         try:
             chain = next(c for c in ib.reqSecDefOptParams("SPY", "", "STK", spy.conId) if c.exchange == "SMART")
-            exp = sorted(chain.expirations)[0]
+            # IBKR can still list an expiry that has passed (e.g. last Friday's on a
+            # Monday), which has no contract left: use the first one from today on.
+            today = datetime.now(ET).strftime("%Y%m%d")
+            exp = min(e for e in chain.expirations if e >= today)
             strikes = sorted(chain.strikes)
             low = [s for s in strikes if s <= strikes[len(strikes) // 2] * 0.8] or strikes
             opt = Option("SPY", exp, low[-1], "P", "SMART")

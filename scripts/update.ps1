@@ -86,6 +86,13 @@ function Rollback($why) {
 # here: step 1 refused edited files).
 git merge --no-edit --quiet -X theirs -m "Update to $Version" $Version
 if ($LASTEXITCODE -ne 0) { Rollback "the release couldn't be merged with this copy's own commits" }
+# Reports and reviews stay on this PC only (no longer in git): stop tracking
+# any this copy committed itself. The files are kept.
+if (git ls-files reports analysis) {
+    git rm -r --cached --quiet --ignore-unmatch reports analysis
+    if ($LASTEXITCODE -eq 0) { git commit --quiet -m "Keep this PC's reports out of git" }
+    if ($LASTEXITCODE -ne 0) { Rollback "couldn't stop tracking this PC's reports" }
+}
 
 # 3. Packages, a load check, the scheduled tasks.
 & $py -m pip install --quiet -e ".[dev]"

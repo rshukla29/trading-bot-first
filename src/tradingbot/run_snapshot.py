@@ -23,7 +23,6 @@ from __future__ import annotations
 import calendar
 import logging
 import sqlite3
-import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -559,21 +558,6 @@ def write_report_file(report: str, filename_stem: str, day: date, per_day: bool 
     return path
 
 
-def commit_report(path: Path, description: str) -> None:
-    """Commit the report locally (no push) so the account history
-    accumulates in version control without needing manual intervention."""
-    try:
-        subprocess.run(["git", "add", str(path)], check=True, capture_output=True, text=True)
-        subprocess.run(
-            ["git", "commit", "-m", f"Snapshot: {description}"],
-            check=True, capture_output=True, text=True,
-        )
-        logger.info("Committed %s", path)
-    except subprocess.CalledProcessError as e:
-        # Most common cause: nothing changed (re-run same day), not a real failure.
-        logger.warning("git commit skipped/failed for %s: %s", path, e.stderr.strip())
-
-
 def _week_start(today: date) -> date:
     return today - timedelta(days=today.weekday())  # Monday
 
@@ -615,8 +599,7 @@ def main() -> None:
 
         report = build_report(client, label, closed_trades_today, stock_owners(journal), intended_short_conids(journal))
         path = write_report_file(report, f"snapshot_{today.isoformat()}_{label}", today)
-        print(f"Saved to {path}")
-        commit_report(path, f"{label} {today.isoformat()}")
+        print(f"Saved to {path}")  # stays on this computer (reports/ isn't in git)
 
         if label == "postmarket":
             # Recorded every postmarket day regardless of period boundaries
@@ -628,13 +611,11 @@ def main() -> None:
                 weekly_report = build_period_report(client, journal, "weekly", _week_start(today))
                 weekly_path = write_report_file(weekly_report, f"weekly_{today.isoformat()}", today, per_day=False)
                 print(f"Saved to {weekly_path}")
-                commit_report(weekly_path, f"weekly {today.isoformat()}")
 
             if _is_last_trading_day_of_month(today):
                 monthly_report = build_period_report(client, journal, "monthly", _month_start(today))
                 monthly_path = write_report_file(monthly_report, f"monthly_{today.isoformat()}", today, per_day=False)
                 print(f"Saved to {monthly_path}")
-                commit_report(monthly_path, f"monthly {today.isoformat()}")
 
             build_dashboard()
 

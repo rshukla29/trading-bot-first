@@ -484,8 +484,10 @@ paper experiment.
 
 ## Reports
 
-`run_snapshot` writes HTML to `REPORTS_DIR` and commits it locally (no
-push), in a year/month/day tree. Each paper account has its own folder
+`run_snapshot` writes HTML to `REPORTS_DIR`, in a year/month/day tree. Reports,
+daily reviews and `analysis/` stay on the computer that made them: they're not in
+git, so a new install starts with an empty dashboard and never shows another
+account's results. Each paper account has its own folder
 (see [Switching to a new paper account](#switching-to-a-new-paper-account));
 the current one is `reports/DUR356762/`, and the old account's reports stay
 in `reports/2026/...`:
@@ -785,7 +787,7 @@ Tests: [tests/test_readiness.py](tests/test_readiness.py).
    analysis, and replies with a review — summary, per-strategy table,
    problems found, recommendations labelled **Fix now / Consider / Watch**,
    and what to watch tomorrow. The script saves it as
-   `review_<date>.md` and commits both files locally (no push).
+   `review_<date>.md` next to the facts (kept on this computer, not in git).
 
 Nothing is changed automatically; recommendations are for you to approve.
 The prompt is [scripts/daily_review_prompt.md](scripts/daily_review_prompt.md).
